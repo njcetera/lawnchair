@@ -716,6 +716,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         mScreenOrder.clear();
         mWorkspaceScreens.clear();
 
+        // AresLauncher Strategy D: this only clears CellLayout pages, which no longer hold
+        // CONTAINER_DESKTOP items (see addInScreen above). Without this, every full rebind
+        // (e.g. triggered by onNewIntent, see ModelCallbacks.startBinding()) re-adds the same
+        // items to mAresHomeList's adapter without ever clearing it first, producing duplicate
+        // rows.
+        if (mAresHomeList != null) {
+            mAresHomeList.getAresAdapter().clear();
+        }
+
         // Ensure there is always at least one page during bind lifecycle.
         bindAndInitFirstWorkspaceScreen();
 
@@ -1030,6 +1039,20 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 return;
             }
             getOrCreateAresHomeList().getAresAdapter().addItem(child);
+            // WorkspaceLayoutManager.addInScreen normally wires these on every child it
+            // places into a CellLayout; replicate the parts that aren't CellLayout-specific
+            // since our redirect skips that method entirely for CONTAINER_DESKTOP.
+            child.setHapticFeedbackEnabled(false);
+            if (child instanceof BubbleTextView btv) {
+                // Deliberately not ItemLongClickListener.INSTANCE_WORKSPACE: that listener's
+                // job is starting a CellLayout grid-drag, which doesn't apply to list items.
+                // BubbleTextView.startLongPressAction() is the actual generic, CellLayout-free
+                // mechanism that shows the popup menu -- see component-verification-1.md/-3.md.
+                child.setOnLongClickListener(v -> {
+                    btv.startLongPressAction();
+                    return true;
+                });
+            }
             return;
         }
         WorkspaceLayoutManager.super.addInScreen(child, container, screenId, x, y, spanX, spanY);
