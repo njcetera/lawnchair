@@ -128,6 +128,7 @@ import com.android.launcher3.util.OverlayEdgeEffect;
 import com.android.launcher3.util.RunnableList;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.util.WallpaperOffsetInterpolator;
+import com.android.launcher3.views.BaseDragLayer;
 import com.android.launcher3.widget.LauncherAppWidgetHostView;
 import com.android.launcher3.widget.NavigableAppWidgetHostView;
 import com.android.launcher3.widget.PendingAddShortcutInfo;
@@ -145,6 +146,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
 import static app.lawnchair.util.LawnchairUtilsKt.toBitmap;
@@ -205,6 +207,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
     @Thunk
     final IntArray mScreenOrder = new IntArray();
+
+    /**
+     * AresLauncher Strategy D: CONTAINER_DESKTOP items are redirected here instead of
+     * into a CellLayout grid cell. Lazily created on first use. See
+     * design/vertical-home-strategies.md and design/component-verification-1.md.
+     */
+    private AresHomeListView mAresHomeList;
 
     @Thunk
     boolean mDeferRemoveExtraEmptyScreen = false;
@@ -1001,6 +1010,39 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     @Override
     public Hotseat getHotseat() {
         return mLauncher.getHotseat();
+    }
+
+    /**
+     * AresLauncher Strategy D redirect point. CONTAINER_DESKTOP items (real home-screen
+     * apps/shortcuts/folders/widgets) are appended to {@link #mAresHomeList} instead of
+     * being placed into a CellLayout grid cell -- CellLayout's grid math
+     * (findNearestArea/createAreaForResize/mOccupied) is deliberately not used for these
+     * items per Strategy D (design/vertical-home-strategies.md). All other containers
+     * (hotseat, etc.) keep the original grid-based behavior unchanged.
+     */
+    @Override
+    public void addInScreen(View child, int container, int screenId, int x, int y,
+            int spanX, int spanY) {
+        if (container == CONTAINER_DESKTOP) {
+            ItemInfo info = (ItemInfo) child.getTag();
+            if (info == null) {
+                Log.e(TAG, "Attempted to add null item to Ares home list");
+                return;
+            }
+            getOrCreateAresHomeList().getAresAdapter().addItem(child);
+            return;
+        }
+        WorkspaceLayoutManager.super.addInScreen(child, container, screenId, x, y, spanX, spanY);
+    }
+
+    private AresHomeListView getOrCreateAresHomeList() {
+        if (mAresHomeList == null) {
+            mAresHomeList = new AresHomeListView(getContext());
+            BaseDragLayer.LayoutParams lp = new BaseDragLayer.LayoutParams(
+                    BaseDragLayer.LayoutParams.MATCH_PARENT, BaseDragLayer.LayoutParams.MATCH_PARENT);
+            mLauncher.getDragLayer().addView(mAresHomeList, lp);
+        }
+        return mAresHomeList;
     }
 
     @Override
