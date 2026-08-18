@@ -128,7 +128,9 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
         mAppNameComparator = new AppInfoComparator(context);
         mWorkProviderManager = workProfileManager;
         mPrivateProviderManager = privateProfileManager;
-        mNumAppsPerRowAllApps = mActivityContext.getDeviceProfile().numShownAllAppsColumns;
+        // AresLauncher: app-list pane is a single vertical column (one app per row).
+        // See design/implementation-scope.md §8.
+        mNumAppsPerRowAllApps = 1;
         if (mAllAppsStore != null) {
             mAllAppsStore.addUpdateListener(this);
         }

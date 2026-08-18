@@ -1193,8 +1193,10 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     @Override
     public void onDeviceProfileChanged(DeviceProfile dp) {
         for (AdapterHolder holder : mAH) {
-            holder.mAdapter.setAppsPerRow(dp.numShownAllAppsColumns);
-            holder.mAppsList.setNumAppsPerRowAllApps(dp.numShownAllAppsColumns);
+            // AresLauncher: keep the app-list pane single-column across device-profile changes
+            // (rotation/fold) too. See design/implementation-scope.md §8.
+            holder.mAdapter.setAppsPerRow(1);
+            holder.mAppsList.setNumAppsPerRowAllApps(1);
             if (holder.mRecyclerView != null) {
                 // Remove all views and clear the pool, while keeping the data same. After this
                 // call, all the viewHolders will be recreated.

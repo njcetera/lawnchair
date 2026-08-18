@@ -86,7 +86,9 @@ public class AllAppsGridAdapter<T extends Context & ActivityContext> extends
         super(activityContext, inflater, apps, adapterProvider);
         mGridLayoutMgr = new AppsGridLayoutManager(mActivityContext);
         mGridLayoutMgr.setSpanSizeLookup(new GridSpanSizer());
-        setAppsPerRow(activityContext.getDeviceProfile().numShownAllAppsColumns);
+        // AresLauncher: app-list pane is a single vertical column (one app per row), not
+        // Launcher3's stock multi-column grid. See design/implementation-scope.md §8.
+        setAppsPerRow(1);
     }
 
     /**
