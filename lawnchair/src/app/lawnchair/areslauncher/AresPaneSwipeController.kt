@@ -76,6 +76,14 @@ class AresPaneSwipeController(launcher: Launcher) :
         if (workspace != null && workspace.panelCount > 1) {
             return false
         }
+        // §4: a reorder drag owns the gesture until it settles. This controller claims horizontal
+        // drags anywhere on home, and TouchControllers run before any child view sees the event, so
+        // without this a sideways wobble while dragging a row would pull the app-list pane in
+        // mid-reorder. ItemTouchHelper's own requestDisallowInterceptTouchEvent doesn't cover it:
+        // that suppresses ancestor onInterceptTouchEvent, not BaseDragLayer's controller dispatch.
+        if (workspace != null && workspace.isAresReorderInProgress()) {
+            return false
+        }
         // Both directions work from anywhere on the pane. Opening was originally scoped to a
         // trailing-edge band, but that made the gesture feel fussy -- the user asked for any
         // horizontal drag on the home screen to pull the app list in, matching how closing already

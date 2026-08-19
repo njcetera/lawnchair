@@ -41,9 +41,27 @@ class AresHomeAdapter(private val launcher: Launcher) :
         setHasStableIds(true)
     }
 
+    /**
+     * Inserts an item at its `rank` position rather than appending.
+     *
+     * The model does not hand items over in rank order: icons and widgets arrive in **separate
+     * bind batches**, so appending renders every widget after every icon regardless of where the
+     * user put it. Observed directly — a widget saved at rank 2 came back rendered last after a
+     * reboot, while the icons around it were correctly ordered.
+     *
+     * Insertion is stable for equal ranks, which matters on a fresh profile where every row is
+     * still `rank = 0`: those keep model delivery order until the user reorders something.
+     */
     fun addItem(info: ItemInfo) {
-        items.add(info)
-        notifyItemInserted(items.size - 1)
+        var index = items.size
+        for (i in items.indices) {
+            if (items[i].rank > info.rank) {
+                index = i
+                break
+            }
+        }
+        items.add(index, info)
+        notifyItemInserted(index)
     }
 
     fun clear() {
@@ -52,6 +70,22 @@ class AresHomeAdapter(private val launcher: Launcher) :
         items.clear()
         notifyItemRangeRemoved(0, size)
     }
+
+    /**
+     * Reorders a row during a drag. Visual only -- [snapshot] plus
+     * [AresHomeReorder.persistOrder] handle the model write once the drag settles, so a drag that
+     * crosses several rows produces one write pass rather than one per intermediate step.
+     */
+    fun moveItem(from: Int, to: Int): Boolean {
+        if (from == to) return false
+        if (from !in items.indices || to !in items.indices) return false
+        items.add(to, items.removeAt(from))
+        notifyItemMoved(from, to)
+        return true
+    }
+
+    /** Current visual order, for persisting `rank`. */
+    fun snapshot(): List<ItemInfo> = items.toList()
 
     override fun getItemCount(): Int = items.size
 

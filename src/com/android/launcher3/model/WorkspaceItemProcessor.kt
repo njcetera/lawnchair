@@ -543,6 +543,13 @@ class WorkspaceItemProcessor(
         val component = ComponentName.unflattenFromString(c.appWidgetProvider)!!
         val appWidgetInfo = LauncherAppWidgetInfo(c.appWidgetId, component)
         c.applyCommonProperties(appWidgetInfo)
+        // AresLauncher §4: read RANK back for widgets, as shortcuts, apps and collections already
+        // do above. Stock omits it because a grid positions widgets by cellX/cellY and rank is
+        // meaningless for them -- but AresLauncher's vertical home list is ordered by rank, so
+        // without this a widget always loads as rank 0 and jumps to the top of the list on restart,
+        // regardless of where it was dragged. (Observed: a widget saved at rank 2 came back rank 0.)
+        // Inert for stock paths, which never read a widget's rank.
+        appWidgetInfo.rank = c.rank
         appWidgetInfo.spanX = c.spanX
         appWidgetInfo.spanY = c.spanY
         appWidgetInfo.options = c.options

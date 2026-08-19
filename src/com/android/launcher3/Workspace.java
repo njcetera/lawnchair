@@ -1079,6 +1079,17 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * AresLauncher §4: true while a home-list row is being dragged to a new position.
+     *
+     * <p>Read by {@link app.lawnchair.areslauncher.AresPaneSwipeController} so a sideways wobble
+     * during a reorder can't pull the app-list pane in. Kept as a null-safe query rather than
+     * exposing the list itself, so nothing outside Workspace can reach in and mutate it.
+     */
+    public boolean isAresReorderInProgress() {
+        return mAresHomeList != null && mAresHomeList.isReorderInProgress();
+    }
+
+    /**
      * Returns the home list, attaching it to the first page's ShortcutAndWidgetContainer if it
      * isn't already parented there.
      *

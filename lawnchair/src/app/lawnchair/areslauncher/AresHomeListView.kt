@@ -3,6 +3,7 @@ package app.lawnchair.areslauncher
 import android.content.Context
 import android.view.MotionEvent
 import android.view.ViewGroup
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
@@ -33,7 +34,28 @@ class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(cont
         layoutManager = LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false)
         adapter = aresAdapter
         clipToPadding = false
+        ItemTouchHelper(AresHomeReorder.Callback(launcher, this)).attachToRecyclerView(this)
     }
+
+    /**
+     * True while a row is being dragged to a new position (§4).
+     *
+     * [AresPaneSwipeController] claims horizontal drags *anywhere* on the home screen, and
+     * `TouchController`s run in `BaseDragLayer.findControllerToHandleTouch` before any child view
+     * sees the event -- so without this a sideways wobble during a reorder would yank the app-list
+     * pane in mid-drag. `requestDisallowInterceptTouchEvent` (which ItemTouchHelper already issues)
+     * only suppresses *ancestor* `onInterceptTouchEvent`, so it is not sufficient on its own here;
+     * the controller is asked directly instead. See design/implementation-scope.md §9.
+     */
+    private var reorderInProgress = false
+
+    fun setReorderInProgress(inProgress: Boolean) {
+        reorderInProgress = inProgress
+        // Belt and braces alongside the controller check: also stop ancestors intercepting.
+        parent?.requestDisallowInterceptTouchEvent(inProgress)
+    }
+
+    fun isReorderInProgress(): Boolean = reorderInProgress
 
     /**
      * True when the current gesture began on empty space rather than on a row.
