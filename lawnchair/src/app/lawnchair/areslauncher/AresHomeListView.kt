@@ -1,7 +1,6 @@
 package app.lawnchair.areslauncher
 
 import android.animation.ObjectAnimator
-import android.animation.ValueAnimator
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -227,6 +226,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         if (!editMode) return false
         editMode = false
         setReorderInProgress(false)
+        // An open folder's × badges belong to this mode too. They normally go with the folder --
+        // it closes before edit mode can be left -- but HOME closes floating views and exits the
+        // mode in one pass, so the two orders must both end clean.
+        AresFolderEdit.detach()
         // Set before the visual walk, for the same reason as enterEditMode (§6).
         aresAdapter.setEditMode(false)
         // Cancel every animator up front rather than relying on the per-child walk: children that
@@ -265,13 +268,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * intentional. The oscillation is the iOS/Windows Phone cue, and crucially **its absence is the
      * signal that you are back to normal**, so exiting has visible feedback too.
      *
-     * ## Why the phase is offset per item
-     *
-     * Every tile rotating in lockstep reads as one animated sheet rather than a set of loose
-     * objects. Seeding each animator's play time from its adapter position breaks that up. The
-     * offset is derived from *position*, not a random value, so a row landing back on screen after
-     * a scroll resumes at the phase it would have had — otherwise recycling would visibly re-sync
-     * tiles as they scrolled into view.
+     * The amplitude, period and per-item phase offset live in [AresEditWiggle], shared with the
+     * apps inside an open folder — the two surfaces are the same mode and have to look like it.
      *
      * ## Rotation, on the container
      *
@@ -284,36 +282,15 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * scale, which still distinguishes the mode without motion.
      */
     private fun syncWiggle(child: View) {
-        val running = wiggles.remove(child)
-        running?.cancel()
-
-        if (!editMode) {
-            child.rotation = 0f
-            return
-        }
-        if (!ValueAnimator.areAnimatorsEnabled()) {
-            child.rotation = 0f
-            return
-        }
-
-        val position = getChildAdapterPosition(child)
-        val animator = ObjectAnimator.ofFloat(child, View.ROTATION, -WIGGLE_DEGREES, WIGGLE_DEGREES)
-        animator.duration = WIGGLE_PERIOD_MS
-        animator.repeatMode = ObjectAnimator.REVERSE
-        animator.repeatCount = ObjectAnimator.INFINITE
-        animator.start()
-        // Seed the phase *after* start(): currentPlayTime only takes effect on a running animator.
-        if (position != NO_POSITION) {
-            animator.currentPlayTime = (position * WIGGLE_PHASE_STEP_MS) % WIGGLE_PERIOD_MS
-        }
-        wiggles[child] = animator
+        AresEditWiggle.stop(child, wiggles.remove(child))
+        if (!editMode) return
+        AresEditWiggle.start(child, getChildAdapterPosition(child))?.let { wiggles[child] = it }
     }
 
     /** Stops every wiggle and clears the rotation, so nothing is left tilted. */
     private fun clearWiggles() {
         for ((child, animator) in wiggles) {
-            animator.cancel()
-            child.rotation = 0f
+            AresEditWiggle.stop(child, animator)
         }
         wiggles.clear()
     }
@@ -385,9 +362,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         item.isClickable = clickable || item is FolderIcon
     }
 
-    /** True when [child] (a holder container) hosts a folder icon. */
-    private fun isFolderRow(child: View?): Boolean =
-        (child as? ViewGroup)?.getChildAt(0) is FolderIcon
+    /** The folder icon [child] (a holder container) hosts, or null when it hosts anything else. */
+    private fun folderIconOf(child: View?): FolderIcon? =
+        (child as? ViewGroup)?.getChildAt(0) as? FolderIcon
 
     /**
      * Routes touches while editing.
@@ -411,7 +388,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private val editModeTouchListener = object : OnItemTouchListener {
         private var downOnChild: View? = null
         private var downOnChevron = false
-        private var downOnFolder = false
+        private var downOnFolder: FolderIcon? = null
         private var downX = 0f
         private var downY = 0f
         private var movedPastSlop = false
@@ -439,7 +416,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // Recorded at DOWN like the chevron, and for the same reason: by UP the child
                     // lookup may no longer be reliable. A folder tap must reach the FolderIcon's
                     // own click listener rather than being swallowed with the rest of the tiles.
-                    downOnFolder = isFolderRow(downOnChild)
+                    downOnFolder = folderIconOf(downOnChild)
                     downX = e.x
                     downY = e.y
                     movedPastSlop = false
@@ -483,7 +460,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     val onFolder = downOnFolder
                     downOnChild = null
                     downOnChevron = false
-                    downOnFolder = false
+                    downOnFolder = null
                     // Release the claim taken at DOWN. Left set, the *next* gesture would start with
                     // ancestors still suppressed -- so a horizontal swipe meant for the app-list
                     // pane would be silently eaten by a grid that is no longer editing.
@@ -495,8 +472,12 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                         // On empty space: leave the mode. On an item: swallow it, so the tile stays
                         // inert. Either way the child gets ACTION_CANCEL and does not click.
                         if (!onItem) exitEditMode()
-                        // A folder is the exception -- let its click through so it opens.
-                        if (onFolder) return false
+                        // A folder is the exception -- let its click through so it opens, and arm
+                        // the in-folder × affordances for the folder that click is about to open.
+                        if (onFolder != null) {
+                            AresFolderEdit.attach(launcher, onFolder)
+                            return false
+                        }
                         return true
                     }
                 }
@@ -688,25 +669,5 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private companion object {
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
-
-        /**
-         * Half-amplitude of the edit-mode wiggle.
-         *
-         * Small on purpose: enough to read as alive across a screen of tiles, not so much that
-         * labels become hard to read or a 4-wide widget's corners sweep into its neighbours.
-         */
-        const val WIGGLE_DEGREES = 1.4f
-
-        /** One half-cycle. The full period is twice this, since the animator reverses. */
-        const val WIGGLE_PERIOD_MS = 180L
-
-        /**
-         * Phase offset applied per adapter position.
-         *
-         * Deliberately not a divisor of [WIGGLE_PERIOD_MS]: a value that divides evenly makes
-         * every Nth tile share a phase, which reintroduces the visible banding this is meant to
-         * avoid.
-         */
-        const val WIGGLE_PHASE_STEP_MS = 47L
     }
 }
