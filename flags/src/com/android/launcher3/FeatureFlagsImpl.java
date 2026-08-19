@@ -580,10 +580,25 @@ public final class FeatureFlagsImpl implements FeatureFlags {
 
 
     public boolean letterFastScroller() {
-        // AresLauncher: enables the A-Z letter rail in all-apps (Niagara-style scrubbing) instead
-        // of the single draggable thumb. Upstream ships this implemented but flag-gated off.
-        // See design/niagara-app-list.md section 1.
-        return true;
+        // AresLauncher: DISABLED again after on-device investigation (Phase 3).
+        //
+        // Enabling this (Phase 2, 8f55bbb19b) trades the classic draggable thumb for the A-Z
+        // letter rail -- but the rail does not render. Instrumentation on-device showed the
+        // container laying out correctly (141x1949, 28 children, alpha applied) while EVERY
+        // LetterListTextView measured 0x0, with lp=0x0. The weighted CHAIN_SPREAD over
+        // MATCH_CONSTRAINT dimensions in AllAppsRecyclerView.constraintTextViewsVertically()
+        // never resolves. Four fixes were tried and all still produced 0x0: correcting the
+        // PARENT_ID anchors (upstream anchors to constraintLayout.getId(), which resolves as a
+        // sibling), clearing the "v,1:1" dimensionRatio that applyTo() drops, constraining both
+        // axes to MATCH_CONSTRAINT, and finally setting explicit pixel row heights.
+        //
+        // So the rail is NOT merely "resting at alpha 0 and needing a restyle" as
+        // design/niagara-app-list.md section 1 concluded -- it is structurally unfinished and
+        // needs dedicated layout work, not polish. Leaving the flag on is strictly worse than
+        // stock: it suppresses the working thumb AND shows no rail, leaving the drawer with no
+        // visible scroll affordance at all. Turning it back off restores the thumb until the
+        // rail gets a proper implementation pass.
+        return false;
     }
 
     @Override
