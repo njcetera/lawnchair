@@ -5,6 +5,7 @@ import com.android.launcher3.allapps.BaseAllAppsAdapter.AdapterItem
 import com.android.launcher3.model.data.AppInfo
 import com.android.launcher3.search.SearchAlgorithm
 import com.android.launcher3.search.SearchCallback
+import java.text.Normalizer
 import java.util.Locale
 
 /**
@@ -58,11 +59,22 @@ class AresAppSearchAlgorithm(private val appsStore: AllAppsStore<*>) : SearchAlg
         const val RANK_WORD_PREFIX = 1
         const val RANK_SUBSTRING = 2
 
+        /** Combining marks left behind by NFD decomposition — the accents themselves. */
+        val COMBINING_MARKS = Regex("\\p{Mn}+")
+
         /**
-         * Lower-cases and strips diacritics so "cafe" matches "Café". [java.text.Normalizer] would
-         * be the thorough route, but app titles are short and this runs on every keystroke.
+         * Lower-cases and strips diacritics so "cafe" matches "Café".
+         *
+         * This runs on every keystroke for every installed app, so ASCII-only strings — the
+         * overwhelming majority of app titles and essentially every query typed on a QWERTY
+         * keyboard — take a fast path that skips [java.text.Normalizer] entirely. Only strings
+         * that actually contain non-ASCII get decomposed to NFD and stripped of combining marks.
          */
-        fun String.normalizeForSearch(): String = trim().lowercase(Locale.getDefault())
+        fun String.normalizeForSearch(): String {
+            val lowered = trim().lowercase(Locale.getDefault())
+            if (lowered.all { it.code < 0x80 }) return lowered
+            return Normalizer.normalize(lowered, Normalizer.Form.NFD).replace(COMBINING_MARKS, "")
+        }
     }
 }
 
