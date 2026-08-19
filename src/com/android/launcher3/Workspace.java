@@ -147,6 +147,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
+import app.lawnchair.areslauncher.AresHomeDrop;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -2503,9 +2504,17 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         Runnable onCompleteRunnable = null;
         boolean forceWidgetResize = PreferenceCacheExtensionsKt.firstCached(mPreferenceManager2.getForceWidgetResize());
         if (d.dragSource != this || mDragInfo == null) {
-            final int[] touchXY = new int[]{(int) mDragViewVisualCenter[0],
-                    (int) mDragViewVisualCenter[1]};
-            onDropExternal(touchXY, dropTargetLayout, d);
+            // AresLauncher §15: onDropExternal is grid-native and cannot serve the home list -- it
+            // animates the drag view onto a child it just added to a CellLayout, and Strategy D
+            // never adds one, so the animation NPEs on the missing parent (an app dragged out of
+            // the app list crashed the launcher). AresHomeDrop takes the desktop case; the hotseat
+            // is still a real CellLayout and falls through untouched.
+            if (!AresHomeDrop.handleExternalDrop(
+                    mLauncher, mLauncher.isHotseatLayout(dropTargetLayout), d)) {
+                final int[] touchXY = new int[]{(int) mDragViewVisualCenter[0],
+                        (int) mDragViewVisualCenter[1]};
+                onDropExternal(touchXY, dropTargetLayout, d);
+            }
         } else {
             final View cell = mDragInfo.cell;
             boolean droppedOnOriginalCellDuringTransition = false;
