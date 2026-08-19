@@ -308,7 +308,12 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun createTouchControllers(): Array<TouchController> {
         val verticalSwipeController = VerticalSwipeTouchController(this, gestureController)
-        return arrayOf<TouchController>(verticalSwipeController) + super.createTouchControllers()
+        // AresLauncher §9: horizontal pane navigation (home <-> app list). Ordered ahead of the
+        // vertical controllers so pane navigation wins any ambiguity; in practice they cannot
+        // compete, since each only claims a drag once its own axis dominates.
+        val paneSwipeController = app.lawnchair.areslauncher.AresPaneSwipeController(this)
+        return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) +
+            super.createTouchControllers()
     }
 
     override fun handleHomeTap() {
