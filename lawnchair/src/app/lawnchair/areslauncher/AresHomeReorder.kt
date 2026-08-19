@@ -10,12 +10,30 @@ import com.android.launcher3.WorkspaceLayoutManager
 import com.android.launcher3.model.data.ItemInfo
 
 /**
- * AresLauncher §4 — drag-to-reorder for the vertical home list.
+ * AresLauncher §4 — drag-to-reorder for the masonry home grid.
  *
- * Deliberately an [ItemTouchHelper] rather than any of `CellLayout`'s drag machinery: reordering a
- * flat list needs none of `findNearestArea()`/`mOccupied`/`performReorder()`'s 2D occupancy math,
- * which is the core scope reduction Strategy D was chosen for
- * (design/vertical-home-strategies.md §4).
+ * ## Why [ItemTouchHelper] rather than a custom drag controller
+ *
+ * The obvious objection is that `ItemTouchHelper` is a *list* abstraction and this is a 2D grid.
+ * But under the Windows Phone model the grid **is** an ordered list — position is derived by
+ * [AresPacker] from `rank`, never stored — so a drop target is a *rank insertion point*, which is
+ * exactly what `onMove(from, to)` expresses. Nothing has to be mapped into cell coordinates.
+ *
+ * What it brings for free is the expensive half: edge auto-scroll during a drag (needed here,
+ * because the grid scrolls and a drag must be able to reach off-screen positions), drag elevation
+ * and the settle animation. A custom controller would mean reimplementing all of that to arrive at
+ * the same place.
+ *
+ * Two of its defaults are wrong for this model and are overridden below: long-press-to-drag (edit
+ * mode owns that now) and the drop-target heuristic (see [Callback.chooseDropTarget]).
+ *
+ * ## Live reflow falls out of the model
+ *
+ * [Callback.onMove] reorders the adapter, which notifies a move, which invalidates the packing
+ * ([AresMasonryLayoutManager.onItemsMoved] nulls its cached layout). The next layout pass re-runs
+ * the packer over the new order, so every other item repacks around the dragged one **continuously
+ * while the finger moves** — the signature WP behaviour — with no ghost placeholder and no separate
+ * animation code. It is the same pure function called more often.
  */
 object AresHomeReorder {
 
@@ -47,9 +65,8 @@ object AresHomeReorder {
      * writes the item's *current* fields via `ItemInfo.onAddToDatabase`, which includes RANK, so
      * mutating `rank` alone and re-writing leaves container/screen/cellX/cellY untouched.
      *
-     * Our rendering never reads cellX/cellY/screenId — `Workspace.addInScreen` redirects every
-     * `CONTAINER_DESKTOP` item into this list regardless of them — so they remain pure bookkeeping
-     * that exists only to keep the loader happy.
+     * Our rendering never reads cellX/cellY/screenId — [AresPacker] derives every position from
+     * order alone — so they remain pure bookkeeping that exists only to keep the loader happy.
      *
      * ## Why writes are logged
      *
@@ -69,7 +86,7 @@ object AresHomeReorder {
         items.forEachIndexed { index, info ->
             if (info.rank == index) return@forEachIndexed
             if (info.container != Favorites.CONTAINER_DESKTOP) {
-                // Only desktop rows belong to this list's ordering; anything else here would be a
+                // Only desktop rows belong to this grid's ordering; anything else here would be a
                 // bug elsewhere, and rewriting it would corrupt it.
                 Log.w(TAG, "skipping non-desktop item id=${info.id} container=${info.container}")
                 return@forEachIndexed
@@ -92,34 +109,80 @@ object AresHomeReorder {
     }
 
     /**
-     * [ItemTouchHelper.Callback] for the home list.
+     * [ItemTouchHelper.Callback] for the masonry home grid.
      *
-     * Vertical drag only, no swipe-to-dismiss — removing an item is the long-press menu's job, and
-     * a swipe gesture here would collide with [AresPaneSwipeController], which claims horizontal
-     * drags anywhere on the home screen.
+     * Movement is four-way because a grid reorders in two axes. Swipe-to-dismiss stays off:
+     * removing an item is the long-press menu's job, and a horizontal swipe here would collide with
+     * [AresPaneSwipeController], which claims horizontal drags anywhere on the home screen.
      */
     class Callback(
         private val launcher: Launcher,
         private val list: AresHomeListView,
     ) : ItemTouchHelper.Callback() {
 
-        override fun isLongPressDragEnabled(): Boolean = true
+        /**
+         * False: edit mode starts drags, not long-press.
+         *
+         * The spec is Windows Phone's persistent edit mode — long-press puts the *whole surface*
+         * into an editable state, after which any item can be dragged with a plain touch-and-move.
+         * `ItemTouchHelper`'s built-in long-press-to-drag is the Android one-shot model instead, so
+         * it is disabled and [AresHomeListView] calls `startDrag` itself.
+         */
+        override fun isLongPressDragEnabled(): Boolean = false
 
         override fun isItemViewSwipeEnabled(): Boolean = false
 
         override fun getMovementFlags(
             recyclerView: RecyclerView,
             viewHolder: RecyclerView.ViewHolder,
-        ): Int = makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+        ): Int = makeMovementFlags(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN or
+                ItemTouchHelper.START or ItemTouchHelper.END,
+            0,
+        )
+
+        /**
+         * Picks the drop target by **which item contains the dragged view's centre**, rather than
+         * by overlap area.
+         *
+         * The stock heuristic scores candidates on how much of the dragged view overlaps each one.
+         * That is sound when every item is the same size, and misleading here: a 2x2 widget being
+         * dragged over 1x1 icons overlaps several of them at once, and the largest overlap is not
+         * necessarily the one under the finger. Centre containment matches what the user is aiming
+         * at and stays stable as footprints differ.
+         *
+         * Falls back to the stock choice when the centre is over empty space, so a drag into a gap
+         * still resolves to something sensible rather than doing nothing.
+         */
+        override fun chooseDropTarget(
+            selected: RecyclerView.ViewHolder,
+            dropTargets: MutableList<RecyclerView.ViewHolder>,
+            curX: Int,
+            curY: Int,
+        ): RecyclerView.ViewHolder? {
+            val centreX = curX + selected.itemView.width / 2
+            val centreY = curY + selected.itemView.height / 2
+            dropTargets.forEach { target ->
+                val v = target.itemView
+                if (centreX >= v.left && centreX < v.right &&
+                    centreY >= v.top && centreY < v.bottom
+                ) {
+                    return target
+                }
+            }
+            return super.chooseDropTarget(selected, dropTargets, curX, curY)
+        }
 
         override fun onMove(
             recyclerView: RecyclerView,
             viewHolder: RecyclerView.ViewHolder,
             target: RecyclerView.ViewHolder,
-        ): Boolean = list.aresAdapter.moveItem(
-            viewHolder.bindingAdapterPosition,
-            target.bindingAdapterPosition,
-        )
+        ): Boolean {
+            val from = viewHolder.bindingAdapterPosition
+            val to = target.bindingAdapterPosition
+            if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
+            return list.aresAdapter.moveItem(from, to)
+        }
 
         override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
@@ -129,11 +192,8 @@ object AresHomeReorder {
 
             list.setReorderInProgress(true)
 
-            // A long-press on a row also fires BubbleTextView.startLongPressAction(), which opens
-            // PopupContainerWithArrow -- that behaviour is required and deliberately kept. Once the
-            // finger actually moves and this becomes a reorder, the popup is stale, so close it.
-            // This mirrors stock Launcher3, where long-press shows the popup and dragging from it
-            // moves the icon.
+            // A popup may still be open from the long-press that entered edit mode. Once the finger
+            // moves and this becomes a reorder, it is stale.
             AbstractFloatingView.closeAllOpenViews(launcher)
         }
 
