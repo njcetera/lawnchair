@@ -38,6 +38,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private val items = mutableListOf<ItemInfo>()
 
     /**
+     * Invoked on item long-press to put the surface into edit mode (§4).
+     *
+     * A callback rather than a direct reference so the adapter stays unaware of its host view.
+     */
+    var editModeHost: (() -> Unit)? = null
+
+    /**
      * Width of the list we are attached to, for reporting real row size to widget providers.
      * Zero until attached; [reportRowSizeToProvider] falls back to the device profile then.
      */
@@ -191,6 +198,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
             // shows the popup menu -- see component-verification-1.md/-3.md.
             itemView.setOnLongClickListener {
                 itemView.startLongPressAction()
+                // ...and enter edit mode (§4). Both happen deliberately: the popup is the only way
+                // to remove an item or reach its shortcuts, while edit mode is what makes the
+                // surface draggable. Dismissing the popup leaves edit mode active.
+                editModeHost?.invoke()
                 true
             }
             applyGridStyle(itemView)

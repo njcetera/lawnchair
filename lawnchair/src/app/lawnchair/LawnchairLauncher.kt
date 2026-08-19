@@ -296,6 +296,12 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onStateBack() {
+        // AresLauncher §4: back leaves the home grid's edit mode before anything else. This is the
+        // #5 fallback handler in Launcher.getOnBackAnimationCallback(), so an open popup or an
+        // in-flight drag has already had its turn -- by the time we get here, edit mode really is
+        // the thing the user means to dismiss.
+        if (workspace?.aresHomeList?.exitEditMode() == true) return
+
         val searchInput = mAppsView?.searchUiManager?.editText
         val isSearching = mAppsView?.isSearching == true || searchInput?.hasFocus() == true
         if (isSearching) {

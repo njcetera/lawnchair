@@ -2,7 +2,10 @@ package app.lawnchair.areslauncher
 
 import android.content.Context
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
@@ -39,15 +42,189 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
     private val masonry = AresMasonryLayoutManager { position -> aresAdapter.spanOf(position) }
 
+    private val itemTouchHelper = ItemTouchHelper(AresHomeReorder.Callback(launcher, this))
+
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
     init {
         layoutManager = masonry
         adapter = aresAdapter
         clipToPadding = false
         applyGridMetrics()
-        // Drag-to-reorder is deliberately absent for now. The ItemTouchHelper wiring here was built
-        // for a one-per-line list, where a drop target is just a row index; under masonry the drop
-        // target is a rank insertion point resolved against the packed layout. Reinstating it is
-        // its own increment -- see design/scrolling-grid-home.md §7.2.
+        itemTouchHelper.attachToRecyclerView(this)
+        aresAdapter.editModeHost = { enterEditMode() }
+    }
+
+    // ---------------------------------------------------------------- edit mode
+
+    /**
+     * Windows Phone Start-screen edit mode: a **persistent** state the whole surface enters, rather
+     * than Android's one-shot long-press-then-drag.
+     *
+     * Entered by long-pressing an item ([AresHomeAdapter] calls [enterEditMode]); left via the back
+     * button ([com.android.launcher3.Launcher.onStateBack]) or a tap on empty space. While it is
+     * active every item can be dragged with a plain touch-and-move, so several can be rearranged in
+     * one session — which is the whole point of it being a mode. See requirements-alignment.md §4.
+     */
+    private var editMode = false
+
+    /**
+     * True when the in-flight gesture is the long-press that entered edit mode.
+     *
+     * That gesture's UP must not be read as a tap, or the mode would end the instant it began.
+     */
+    private var enteredEditModeDuringGesture = false
+
+    fun isEditMode(): Boolean = editMode
+
+    /**
+     * Enters edit mode.
+     *
+     * Called from the item long-press handler, which *also* shows `PopupContainerWithArrow`. Both
+     * deliberately happen: the popup is the only route to remove an item or reach its shortcuts, so
+     * suppressing it would lose that with no replacement (per-item affordances are a later
+     * increment). Dismissing the popup leaves the surface in edit mode, ready to drag.
+     */
+    fun enterEditMode() {
+        if (editMode) return
+        editMode = true
+        enteredEditModeDuringGesture = true
+        applyEditModeVisual()
+    }
+
+    /** Leaves edit mode, cancelling any in-flight drag. Safe to call when not in edit mode. */
+    fun exitEditMode(): Boolean {
+        if (!editMode) return false
+        editMode = false
+        setReorderInProgress(false)
+        applyEditModeVisual()
+        return true
+    }
+
+    /**
+     * Scales items down slightly while editing.
+     *
+     * Some signal is required or the mode is invisible and the user cannot tell why taps stopped
+     * launching things. A uniform scale on the holder is the Windows Phone cue, costs nothing, and
+     * leaves the item's own bounds free for the resize chevron a later increment will add.
+     */
+    private fun applyEditModeVisual() {
+        val scale = if (editMode) EDIT_MODE_SCALE else 1f
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            child.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
+            setItemClickable(child, !editMode)
+        }
+    }
+
+    override fun onChildAttachedToWindow(child: View) {
+        super.onChildAttachedToWindow(child)
+        // Rows bound while already editing (recycled in on scroll) must match the current mode.
+        val scale = if (editMode) EDIT_MODE_SCALE else 1f
+        child.scaleX = scale
+        child.scaleY = scale
+        setItemClickable(child, !editMode)
+    }
+
+    /**
+     * Enables or disables the tile's click handling.
+     *
+     * Suppressing the launch by consuming the touch stream was tried first and does not work:
+     * the click still fired even with the terminal `ACTION_UP` consumed by an
+     * `OnItemTouchListener` (verified on device — the branch was taken and Gmail launched anyway).
+     * Clearing `isClickable` on the item view itself is unambiguous and cannot be defeated by
+     * touch-routing subtleties.
+     *
+     * The click listener installed by `ItemInflater` is left in place, so nothing needs restoring
+     * beyond the flag.
+     */
+    private fun setItemClickable(child: View, clickable: Boolean) {
+        val item = (child as? ViewGroup)?.getChildAt(0) ?: return
+        item.isClickable = clickable
+    }
+
+    /**
+     * Routes touches while editing.
+     *
+     * - **Drag**: past the touch slop on an item, hands the gesture to [ItemTouchHelper] via
+     *   `startDrag`. Edit mode replaces its built-in long-press trigger, which is the Android
+     *   one-shot model rather than a persistent mode.
+     * - **Tap on an item**: consumed at `ACTION_UP` so the child's click never fires — WP behaviour,
+     *   where you leave edit mode before launching anything.
+     * - **Tap on empty space**: exits edit mode.
+     * - **Drag on empty space**: left alone, so the grid still scrolls.
+     *
+     * Note it never intercepts at `ACTION_DOWN`. `RecyclerView` routes the *whole* remaining gesture
+     * to the first listener that intercepts, so stealing the DOWN starved `ItemTouchHelper` of the
+     * move stream and the drag could never track the finger. Consuming only the terminal UP
+     * suppresses the click (the child receives `ACTION_CANCEL`) while leaving the drag path intact.
+     */
+    private val editModeTouchListener = object : OnItemTouchListener {
+        private var downOnChild: View? = null
+        private var downX = 0f
+        private var downY = 0f
+        private var movedPastSlop = false
+        private var dragStarted = false
+
+        override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Recorded unconditionally, *not* only while editing: edit mode is entered by a
+                    // long-press, i.e. part-way through a gesture whose DOWN arrived while it was
+                    // still off. Gating this on editMode left the fields unset for that gesture, so
+                    // its UP looked like a tap on empty space and instantly exited the mode again.
+                    downOnChild = findChildViewUnder(e.x, e.y)
+                    downX = e.x
+                    downY = e.y
+                    movedPastSlop = false
+                    dragStarted = false
+                    enteredEditModeDuringGesture = false
+                    return false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!movedPastSlop && exceededSlop(e)) movedPastSlop = true
+                    if (editMode && !dragStarted && movedPastSlop) {
+                        val holder = downOnChild?.let { getChildViewHolder(it) }
+                        if (holder != null) {
+                            dragStarted = true
+                            itemTouchHelper.startDrag(holder)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    // A stationary touch. The gesture that *entered* edit mode is excluded, or the
+                    // mode would end the instant the long-press finger lifted.
+                    val tap = !movedPastSlop && !dragStarted && !enteredEditModeDuringGesture
+                    val onItem = downOnChild != null
+                    downOnChild = null
+                    if (editMode && tap) {
+                        // On empty space: leave the mode. On an item: swallow it, so the tile stays
+                        // inert. Either way the child gets ACTION_CANCEL and does not click.
+                        if (!onItem) exitEditMode()
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    downOnChild = null
+                    dragStarted = false
+                }
+            }
+            return false
+        }
+
+        // Only reached for the terminal event this listener consumed above; nothing to do with it.
+        override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) = Unit
+
+        override fun onRequestDisallowInterceptTouchEvent(disallow: Boolean) = Unit
+
+        private fun exceededSlop(e: MotionEvent): Boolean =
+            kotlin.math.hypot(e.x - downX, e.y - downY) > touchSlop
+    }
+
+    // Declared after the listener because Kotlin runs initialisers in declaration order, and the
+    // listener has to exist before it can be attached.
+    init {
+        addOnItemTouchListener(editModeTouchListener)
     }
 
     /**
@@ -194,5 +371,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
             return bottom.coerceAtLeast(0)
         }
         return 0
+    }
+
+    private companion object {
+        /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
+        const val EDIT_MODE_SCALE = 0.92f
     }
 }
