@@ -202,6 +202,23 @@ class AresMasonryLayoutManager(
         layout = null
     }
 
+    /**
+     * Drops the cached packing so the next layout pass re-runs [AresPacker].
+     *
+     * For changes that alter an item's **footprint without altering the list** — a widget resize is
+     * the only one — where the adapter's `notifyItemChanged` is the wrong tool. Widget holders are
+     * `setIsRecyclable(false)`, so a rebind cannot reuse the existing holder: RecyclerView builds a
+     * second one and the first is left attached, which was observed directly as **four host views
+     * for two widgets**, one of them still drawn at the pre-resize size.
+     *
+     * Invalidating the packing and asking for a layout instead keeps the existing host view and
+     * simply hands it a new box, which is both correct and much cheaper than re-creating a widget.
+     */
+    fun invalidatePacking() {
+        layout = null
+        requestLayout()
+    }
+
     /** Total grid rows in the current packing; 0 before the first layout. Exposed for diagnostics. */
     fun rowCount(): Int = layout?.rows ?: 0
 

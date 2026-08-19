@@ -5,11 +5,13 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
+import com.android.launcher3.model.data.ItemInfo
 
 /**
  * Continuously-scrolling **masonry grid** of home-screen items, replacing CellLayout's paged grid
@@ -53,6 +55,55 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
+        aresAdapter.gridColumns = { masonry.columns }
+        aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
+    }
+
+    /**
+     * Advances a widget to its next allowed footprint (§6).
+     *
+     * The whole operation is: change the spans, repack, persist. Position is derived from order and
+     * footprint, never stored, so there is no coordinate to recompute and no occupancy to validate
+     * -- a resize cannot fail for want of space, items simply reflow around the new size. That is
+     * why stock's `createAreaForResize` has no counterpart here.
+     *
+     * The repack is triggered by [AresMasonryLayoutManager.invalidatePacking], which drops the
+     * cached packing so the next layout pass re-runs [AresPacker] over the new footprints.
+     *
+     * Deliberately **not** `notifyItemChanged`: widget holders are `setIsRecyclable(false)`, so a
+     * rebind cannot reuse the existing holder — RecyclerView builds a second one and leaves the
+     * first attached. Observed directly as **four host views for two widgets**, one still drawn at
+     * its pre-resize size. Invalidating the packing keeps the existing host view and simply hands
+     * it a new box, which is both correct and far cheaper than re-creating a widget.
+     *
+     * Because nothing rebinds, the widget has to be re-registered for a size report explicitly, or
+     * the provider keeps rendering RemoteViews measured for its old box.
+     *
+     * The model is committed **before** anything visual happens. [AresWidgetResize.persistSize]
+     * mutates the item only if the new footprint can be placed legally, so a failure leaves the
+     * item untouched and this simply returns — the view and the database cannot drift apart, and
+     * there is no revert path to get wrong.
+     */
+    private fun cycleWidgetSize(info: ItemInfo) {
+        val allowed = AresWidgetResize.allowedSizes(launcher, info, masonry.columns)
+        if (allowed.isEmpty()) return
+
+        val current = AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
+        val next = AresWidgetResize.nextSize(current, allowed)
+        if (next.w == current.w && next.h == current.h) return
+
+        if (!AresWidgetResize.persistSize(launcher, info, next)) return
+
+        val position = aresAdapter.indexOf(info)
+        if (position >= 0) {
+            (findViewHolderForAdapterPosition(position) as? AresHomeAdapter.ViewHolder)
+                ?.let { aresAdapter.reportSizeAfterResize(info, it.container) }
+        }
+        masonry.invalidatePacking()
+
+        announceForAccessibility(
+            context.getString(com.android.launcher3.R.string.widget_resized, next.w, next.h),
+        )
     }
 
     // ---------------------------------------------------------------- edit mode
@@ -89,6 +140,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         if (editMode) return
         editMode = true
         enteredEditModeDuringGesture = true
+        // Set BEFORE applyEditModeVisual: that walk calls back into the adapter to add chevrons,
+        // and would otherwise read the previous mode and add none (§6).
+        aresAdapter.setEditMode(true)
         applyEditModeVisual()
     }
 
@@ -97,6 +151,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         if (!editMode) return false
         editMode = false
         setReorderInProgress(false)
+        // Set before the visual walk, for the same reason as enterEditMode (§6).
+        aresAdapter.setEditMode(false)
         applyEditModeVisual()
         return true
     }
@@ -114,7 +170,25 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
             val child = getChildAt(i)
             child.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
             setItemClickable(child, !editMode)
+            syncChevron(child)
         }
+    }
+
+    /**
+     * Brings one attached row's resize chevron in line with the current mode.
+     *
+     * Adds and removes the view directly instead of rebinding, because widget holders are
+     * non-recyclable: `notifyItemChanged` on one builds a *second* holder and leaves the first
+     * attached, which leaked a widget host view per toggle.
+     *
+     * Note the chevron rides on the holder container, which is also what the edit-mode scale
+     * animates — so it transforms with the item rather than sitting still over it.
+     */
+    private fun syncChevron(child: View) {
+        val container = child as? FrameLayout ?: return
+        val position = getChildAdapterPosition(child)
+        if (position == NO_POSITION) return
+        aresAdapter.syncChevron(container, position)
     }
 
     override fun onChildAttachedToWindow(child: View) {
@@ -161,6 +235,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private val editModeTouchListener = object : OnItemTouchListener {
         private var downOnChild: View? = null
+        private var downOnChevron = false
         private var downX = 0f
         private var downY = 0f
         private var movedPastSlop = false
@@ -174,6 +249,12 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // still off. Gating this on editMode left the fields unset for that gesture, so
                     // its UP looked like a tap on empty space and instantly exited the mode again.
                     downOnChild = findChildViewUnder(e.x, e.y)
+                    // The resize chevron is a real clickable child, so this listener must not
+                    // swallow its terminal UP the way it does for the rest of a tile. Recorded at
+                    // DOWN because by UP the coordinates may have drifted within the slop.
+                    downOnChevron = downOnChild?.let { child ->
+                        AresWidgetResize.isPointOnChevron(child, e.x - child.left, e.y - child.top)
+                    } ?: false
                     downX = e.x
                     downY = e.y
                     movedPastSlop = false
@@ -183,7 +264,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (!movedPastSlop && exceededSlop(e)) movedPastSlop = true
-                    if (editMode && !dragStarted && movedPastSlop) {
+                    // A gesture that began on the chevron is a resize tap, not a drag handle --
+                    // otherwise the smallest wobble while tapping would pick the widget up.
+                    if (editMode && !dragStarted && movedPastSlop && !downOnChevron) {
                         val holder = downOnChild?.let { getChildViewHolder(it) }
                         if (holder != null) {
                             dragStarted = true
@@ -196,7 +279,12 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // mode would end the instant the long-press finger lifted.
                     val tap = !movedPastSlop && !dragStarted && !enteredEditModeDuringGesture
                     val onItem = downOnChild != null
+                    val onChevron = downOnChevron
                     downOnChild = null
+                    downOnChevron = false
+                    // Let the chevron's own OnClickListener fire: consuming here would deliver
+                    // ACTION_CANCEL to it and the resize would never happen.
+                    if (onChevron) return false
                     if (editMode && tap) {
                         // On empty space: leave the mode. On an item: swallow it, so the tile stays
                         // inert. Either way the child gets ACTION_CANCEL and does not click.

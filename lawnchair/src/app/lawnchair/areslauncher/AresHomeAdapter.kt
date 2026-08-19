@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -43,6 +44,89 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * A callback rather than a direct reference so the adapter stays unaware of its host view.
      */
     var editModeHost: (() -> Unit)? = null
+
+    /**
+     * Invoked when a widget's resize chevron is tapped, with the item to advance (§6).
+     *
+     * The host owns the resize because it has to repack, persist and re-report the widget's box --
+     * none of which is the adapter's business. Same reasoning as [editModeHost].
+     */
+    var resizeHost: ((ItemInfo) -> Unit)? = null
+
+    /**
+     * Whether the surface is currently in edit mode.
+     *
+     * Only consulted to decide whether a widget row shows its resize chevron. The host keeps this
+     * in step via [setEditMode]; the adapter deliberately does not observe edit state itself.
+     */
+    private var editMode = false
+
+    /**
+     * Records edit mode so newly-bound rows get the right affordance.
+     *
+     * Deliberately does **not** notify: widget holders are `setIsRecyclable(false)`, so a rebind
+     * cannot reuse the existing holder — RecyclerView builds a second one and leaves the first
+     * attached. Toggling edit mode that way leaked a widget host view per widget per toggle
+     * (observed: four host views for two widgets, one still drawn at its pre-resize size).
+     *
+     * The host adds and removes chevrons on already-attached rows itself via [syncChevron], which
+     * it does while walking children for the edit-mode scale anyway.
+     */
+    fun setEditMode(enabled: Boolean) {
+        editMode = enabled
+    }
+
+    /**
+     * Adds or removes an attached row's resize chevron to match the current mode.
+     *
+     * Operates on the live view rather than rebinding, for the reason in [setEditMode].
+     */
+    fun syncChevron(container: FrameLayout, position: Int) {
+        syncChevronFor(container, items.getOrNull(position))
+    }
+
+    /**
+     * The single place a chevron is added or removed.
+     *
+     * Both entry points funnel through here — the host's edit-mode walk and [onBindViewHolder] —
+     * so the "already has one" case is handled once. That matters because widget holders are
+     * `setIsRecyclable(false)`: a holder can be bound again while still carrying the chevron from
+     * last time, and a blind `addView` would stack a second one on top of it.
+     */
+    private fun syncChevronFor(container: FrameLayout, info: ItemInfo?) {
+        val existing = container.findViewWithTag<View>(AresWidgetResize.CHEVRON_TAG)
+        val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
+        if (target != null && existing == null) {
+            container.addView(AresWidgetResize.createChevron(container) { resizeHost?.invoke(target) })
+        } else if (target == null && existing != null) {
+            container.removeView(existing)
+        }
+    }
+
+    private fun isResizable(info: ItemInfo): Boolean {
+        val columns = gridColumns?.invoke() ?: return false
+        return AresWidgetResize.allowedSizes(launcher, info, columns).isNotEmpty()
+    }
+
+    /**
+     * Re-registers a widget for a size report after its footprint changed.
+     *
+     * A resize keeps the existing host view (see [AresMasonryLayoutManager.invalidatePacking]), so
+     * nothing rebinds and nothing would otherwise tell the provider its box changed — it would keep
+     * rendering RemoteViews measured for the old one.
+     */
+    fun reportSizeAfterResize(info: ItemInfo, container: FrameLayout) {
+        val hostView = container.getChildAt(0) as? AppWidgetHostView ?: return
+        pendingWidgetSizeReports[hostView] = info
+    }
+
+    private fun isWidget(info: ItemInfo): Boolean = when (info.itemType) {
+        Favorites.ITEM_TYPE_APPWIDGET, Favorites.ITEM_TYPE_CUSTOM_APPWIDGET -> true
+        else -> false
+    }
+
+    /** Position of [info] in the current order, or -1. Used by the host to repack after a resize. */
+    fun indexOf(info: ItemInfo): Int = items.indexOfFirst { it.id == info.id }
 
     /**
      * Width of the list we are attached to, for reporting real row size to widget providers.
@@ -228,8 +312,43 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is AppWidgetHostView) {
             pendingWidgetSizeReports[itemView] = info
+            maybeAddResizeChevron(holder, info)
         }
     }
+
+    /**
+     * Adds the resize chevron to a widget row, when editing and the widget can actually resize.
+     *
+     * A widget whose provider declares no resizable axis, or only one possible footprint, gets no
+     * chevron: an affordance that visibly does nothing is worse than none.
+     *
+     * ## Why it is a sibling of the widget view, not a child of it
+     *
+     * The chevron goes into the holder's **container**, above the widget view, not inside it. Two
+     * reasons, and the second matters for the wiggle animation that is coming next:
+     *
+     *  - An `AppWidgetHostView` hosts the provider's RemoteViews. Adding our own child to it would
+     *    be **removed the next time the provider pushes an update**, so the chevron would silently
+     *    vanish on any widget that refreshes itself.
+     *  - It still moves with the item regardless, because **every edit-mode visual is applied to
+     *    the container**, not to the item view — see `AresHomeListView.applyEditModeVisual`, which
+     *    scales `getChildAt(i)` (the container) and so already scales this chevron with it. A
+     *    wiggle applied at the same level will oscillate the chevron along with the icon, which is
+     *    the iOS behaviour, without putting our view somewhere the framework will delete it.
+     *
+     * So: keep animating the container. Do not move this into the item view to make it wiggle.
+     */
+    private fun maybeAddResizeChevron(holder: ViewHolder, info: ItemInfo) {
+        syncChevronFor(holder.container, info)
+    }
+
+    /**
+     * Supplies the grid's column count, for clamping the sizes a widget may be offered.
+     *
+     * A callback rather than a stored int because folding changes the device profile, and an
+     * offered size wider than the grid would make the cycle appear to skip a step.
+     */
+    var gridColumns: (() -> Int)? = null
 
     /**
      * Widgets whose provider still needs to be told its box, keyed by host view.

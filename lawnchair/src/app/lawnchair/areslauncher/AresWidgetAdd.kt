@@ -82,10 +82,21 @@ object AresWidgetAdd {
     /**
      * Finds a free region for [spanX] x [spanY], writing the cell into [outCell].
      *
+     * [excludeId] omits one item from the occupancy map. A **resize** re-places an item that is
+     * already in the list, so without this it would collide with its own current footprint and be
+     * told the grid is full. Defaulted, so the add path — where nothing is being replaced — is
+     * unaffected.
+     *
      * @return the screen id to place on, or [NO_SCREEN] if the grid is full.
      */
     @JvmStatic
-    fun findFreeCell(launcher: Launcher, spanX: Int, spanY: Int, outCell: IntArray): Int {
+    fun findFreeCell(
+        launcher: Launcher,
+        spanX: Int,
+        spanY: Int,
+        outCell: IntArray,
+        excludeId: Int = ItemInfo.NO_ID,
+    ): Int {
         val idp = launcher.deviceProfile.inv
         val countX = idp.numColumns
         val countY = idp.numRows
@@ -95,7 +106,14 @@ object AresWidgetAdd {
         }
 
         val items = launcher.workspace?.aresHomeItems.orEmpty()
-        val byScreen = items.filter { it.container == Favorites.CONTAINER_DESKTOP }
+        // The `excludeId != NO_ID` guard matters: an item that is mid-add still carries NO_ID, so a
+        // bare `id != excludeId` would quietly drop it from the occupancy map and hand out a cell
+        // that is about to be taken.
+        val byScreen = items
+            .filter {
+                it.container == Favorites.CONTAINER_DESKTOP &&
+                    (excludeId == ItemInfo.NO_ID || it.id != excludeId)
+            }
             .groupBy { it.screenId }
 
         // Existing screens first, lowest id first, so additions stay compact. FIRST_SCREEN_ID is
