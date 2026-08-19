@@ -21,6 +21,16 @@
     <dimen name="ares_app_row_padding_horizontal">24dp</dimen>
     <dimen name="ares_app_row_drawable_padding">16dp</dimen>
 
+    <!-- Letter section headers (A / B / C) in the app list. Deliberately LIGHTER than an app row:
+         smaller text, shorter height, de-emphasised colour. The letter is a signpost, not content,
+         so it should recede next to the 17sp app labels it groups. Leading inset matches the row
+         padding so letters and icons share one left edge. -->
+    <dimen name="ares_section_header_height">40dp</dimen>
+    <dimen name="ares_section_header_text_size">13sp</dimen>
+    <!-- Extra breathing room above a header so each letter group reads as a distinct block.
+         None below: the header should sit close to the apps it introduces. -->
+    <dimen name="ares_section_header_padding_top">16dp</dimen>
+
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->
     <dimen name="ares_search_collapsed_size">56dp</dimen>

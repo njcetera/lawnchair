@@ -58,6 +58,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import app.lawnchair.areslauncher.AresAllApps;
+import app.lawnchair.areslauncher.AresSectionHeaderItem;
 
 /**
  * The alphabetically sorted list of applications.
@@ -347,8 +348,13 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
             for (AdapterItem item : mAdapterItems) {
                 item.rowIndex = 0;
                 if (BaseAllAppsAdapter.isDividerViewType(item.viewType)
+                        || item.viewType == BaseAllAppsAdapter.VIEW_TYPE_ARES_SECTION_HEADER
                         || BaseAllAppsAdapter.isPrivateSpaceHeaderView(item.viewType)
                         || BaseAllAppsAdapter.isPrivateSpaceSysAppsDividerView(item.viewType)) {
+                    // AresLauncher: a letter header ends the previous section, so the next app
+                    // starts a fresh row -- same treatment dividers already get. Inert in the
+                    // current single-column mode (numAppsInSection % 1 is always 0), but keeps
+                    // section-relative row indexing correct if the pane is ever multi-column.
                     numAppsInSection = 0;
                 } else if (BaseAllAppsAdapter.isIconViewType(item.viewType)) {
                     if (numAppsInSection % mNumAppsPerRowAllApps == 0) {
@@ -494,8 +500,29 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
                     allMatch(mPrivateProviderManager.getItemInfoMatcher());
         }
         Log.d(TAG, "Adding apps with sections. HasPrivateApps: " + hasPrivateApps);
+        // AresLauncher: render an in-list letter header at each section boundary. Gated so the
+        // Taskbar and secondary-display all-apps hosts -- which share this class -- keep stock
+        // behaviour, where the A-Z model drives only the fast scroller and is never rendered.
+        // See design/niagara-app-list.md §2.
+        boolean aresSectionHeaders = AresAllApps.isAresAppListPane(mActivityContext);
         for (int i = 0; i < appList.size(); i++) {
             AppInfo info = appList.get(i);
+            String sectionName = info.sectionName;
+            // Create a new section if the section names do not match
+            boolean startsNewSection = !sectionName.equals(lastSectionName);
+
+            // Where this section begins: the header when we render one, otherwise the first app.
+            // Captured BEFORE anything is added, because FastScrollSectionInfo.position is an
+            // ADAPTER position consumed by scrollToPositionAtProgress -- recording it after the
+            // header insertion would leave scrubbing off-target by one row per preceding header,
+            // drifting further the deeper into the alphabet you scrub.
+            int sectionStartPosition = position;
+
+            if (startsNewSection && aresSectionHeaders) {
+                mAdapterItems.add(new AresSectionHeaderItem(sectionName));
+                position++;
+            }
+
             // Apply decorator to private apps.
             if (hasPrivateApps) {
                 mAdapterItems.add(AdapterItem.asAppWithDecorationInfo(info,
@@ -505,16 +532,15 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
                 mAdapterItems.add(AdapterItem.asApp(info));
             }
 
-            String sectionName = info.sectionName;
-            // Create a new section if the section names do not match
-            if (!sectionName.equals(lastSectionName)) {
+            if (startsNewSection) {
                 Log.d(TAG, "addAppsWithSections: adding sectionName: " + sectionName
                     + " with appInfoTitle: " + info.title);
                 lastSectionName = sectionName;
                 boolean usePrivateAppScrollerBadge = !Flags.letterFastScroller() && hasPrivateApps;
                 FastScrollSectionInfo sectionInfo = new FastScrollSectionInfo(
                         usePrivateAppScrollerBadge ?
-                                mPrivateProfileAppScrollerBadge : sectionName, position);
+                                mPrivateProfileAppScrollerBadge : sectionName,
+                        sectionStartPosition);
                 mFastScrollerSections.add(sectionInfo);
             }
             position++;

@@ -43,6 +43,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.android.launcher3.BubbleTextView;
 
 import app.lawnchair.areslauncher.AresAllApps;
+import app.lawnchair.areslauncher.AresSectionHeaderItem;
 import com.android.launcher3.R;
 import com.android.launcher3.allapps.search.SearchAdapterProvider;
 import com.android.launcher3.folder.FolderIcon;
@@ -76,6 +77,17 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
 
     // LC-Feature: Folder support in All Apps, can be any ID
     public static final int VIEW_TYPE_FOLDER = 1 << 10;
+
+    /**
+     * AresLauncher: letter section header (A / B / C) in the app-list pane. Stock Launcher3 has no
+     * alphabetical-header type -- its A-Z model exists only to drive the fast scroller and is never
+     * rendered in-list (design/niagara-app-list.md §2).
+     *
+     * Items of this type are only ever produced by {@link AlphabeticalAppsList#addAppsWithSections}
+     * behind {@code AresAllApps.isAresAppListPane()}, so the Taskbar and secondary-display all-apps
+     * hosts -- which share this adapter -- never see one and are unaffected.
+     */
+    public static final int VIEW_TYPE_ARES_SECTION_HEADER = 1 << 11;
 
     // Common view type masks
     public static final int VIEW_TYPE_MASK_DIVIDER = VIEW_TYPE_ALL_APPS_DIVIDER;
@@ -276,6 +288,11 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
             case VIEW_TYPE_PRIVATE_SPACE_HEADER:
                 return new ViewHolder(mLayoutInflater.inflate(
                         R.layout.private_space_header, parent, false));
+            case VIEW_TYPE_ARES_SECTION_HEADER:
+                // AresLauncher: Ares-owned layout, never reached by stock hosts -- this view type
+                // is only produced behind AresAllApps.isAresAppListPane().
+                return new ViewHolder(mLayoutInflater.inflate(
+                        R.layout.ares_all_apps_section_header, parent, false));
             case VIEW_TYPE_BOTTOM_VIEW_TO_SCROLL_TO:
                 return new ViewHolder(new View(mActivityContext));
             case VIEW_TYPE_FOLDER:
@@ -368,6 +385,16 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
                         mApps.getPrivateProfileManager().getCurrentState() == STATE_DISABLED ? null
                                 : new SectionDecorationInfo(mActivityContext, ROUND_NOTHING);
                 break;
+            case VIEW_TYPE_ARES_SECTION_HEADER: {
+                // AresLauncher: render the letter. Guarded rather than cast blindly -- this view
+                // type is only ever produced with an AresSectionHeaderItem, but a mismatch here
+                // would be a ClassCastException on the bind path rather than a blank row.
+                AdapterItem headerItem = mApps.getAdapterItems().get(position);
+                if (headerItem instanceof AresSectionHeaderItem sectionHeader) {
+                    ((TextView) holder.itemView).setText(sectionHeader.sectionName);
+                }
+                break;
+            }
             case VIEW_TYPE_BOTTOM_VIEW_TO_SCROLL_TO:
             case VIEW_TYPE_ALL_APPS_DIVIDER:
             case VIEW_TYPE_WORK_DISABLED_CARD:
