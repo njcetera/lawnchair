@@ -139,6 +139,7 @@ import com.android.systemui.plugins.shared.LauncherOverlayManager.LauncherOverla
 import com.google.android.msdl.data.model.MSDLToken;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
@@ -1087,6 +1088,30 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      */
     public boolean isAresReorderInProgress() {
         return mAresHomeList != null && mAresHomeList.isReorderInProgress();
+    }
+
+    /**
+     * AresLauncher: true once the home list exists, i.e. this Workspace owns desktop items.
+     *
+     * <p>Used by {@link app.lawnchair.areslauncher.AresWidgetAdd} to scope the widget-add path,
+     * so the Taskbar's widget sheet (hosted by a non-Launcher context) keeps stock behaviour.
+     */
+    public boolean hasAresHomeList() {
+        return mAresHomeList != null;
+    }
+
+    /**
+     * AresLauncher: the desktop items currently in the home list, in visual order.
+     *
+     * <p>A snapshot copy, not the live backing list — callers only read it (to compute the next
+     * {@code rank} and to derive grid occupancy for a new item), and handing out the mutable list
+     * would let them corrupt the adapter's state. Empty before the first bind.
+     */
+    @NonNull
+    public List<ItemInfo> getAresHomeItems() {
+        return mAresHomeList == null
+                ? Collections.emptyList()
+                : mAresHomeList.getAresAdapter().snapshot();
     }
 
     /**

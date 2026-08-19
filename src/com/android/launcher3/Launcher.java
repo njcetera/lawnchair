@@ -255,6 +255,7 @@ import com.android.launcher3.util.WallpaperThemeManager;
 import com.android.launcher3.views.FloatingIconView;
 import com.android.launcher3.views.FloatingSurfaceView;
 import com.android.launcher3.views.OptionsPopupView;
+import app.lawnchair.areslauncher.AresWidgetAdd;
 import app.lawnchair.views.EditModePageStrip;
 import com.android.launcher3.views.ScrimView;
 import com.android.launcher3.widget.LauncherAppWidgetHostView;
@@ -1512,13 +1513,23 @@ public class Launcher extends StatefulActivity<LauncherState>
             // Show resize frame on the newly inflated LauncherAppWidgetHostView.
             LauncherAppWidgetHostView reInflatedHostView =
                     getWorkspace().getWidgetForAppWidgetId(appWidgetId);
-            showWidgetResizeFrame(
-                    reInflatedHostView,
-                    (LauncherAppWidgetInfo) reInflatedHostView.getTag(),
-                    presenterPos);
+            // AresLauncher §7: two reasons to skip this on the home list. getWidgetForAppWidgetId()
+            // searches CellLayout children, and our widgets are RecyclerView rows, so it returns
+            // null here and the getTag() below would NPE. And even given a view, the resize frame
+            // casts its LayoutParams to CellLayoutLayoutParams and throws (see the other call site
+            // and design/component-verification-1.md §3). The size update below still matters --
+            // an AppWidgetHostView has no intrinsic height (§5) -- so only the frame is skipped.
+            if (reInflatedHostView != null && !AresWidgetAdd.isAresHome(this)) {
+                showWidgetResizeFrame(
+                        reInflatedHostView,
+                        (LauncherAppWidgetInfo) reInflatedHostView.getTag(),
+                        presenterPos);
+            }
             // We always update widget size after re-inflating PendingAppWidgetHostView
-            WidgetSizes.updateWidgetSizeRanges(
-                    reInflatedHostView, this, itemInfo.spanX, itemInfo.spanY);
+            if (reInflatedHostView != null) {
+                WidgetSizes.updateWidgetSizeRanges(
+                        reInflatedHostView, this, itemInfo.spanX, itemInfo.spanY);
+            }
             return;
         }
         if (updateWidgetSize) {
@@ -1530,6 +1541,14 @@ public class Launcher extends StatefulActivity<LauncherState>
             launcherInfo.sourceContainer =
                     ((PendingRequestArgs) itemInfo).getWidgetSourceContainer();
         }
+        // AresLauncher §7: the home list is ordered by rank, not by cell position, so a new widget
+        // needs one before it is written. Without this it defaults to 0 and lands at the *top* of
+        // the list rather than the end. Set before addItemToDatabase so the row is correct on its
+        // first write, rather than needing a follow-up update.
+        if (AresWidgetAdd.isAresHome(this)) {
+            launcherInfo.rank = AresWidgetAdd.nextRank(this);
+        }
+
         getModelWriter().addItemToDatabase(launcherInfo,
                 itemInfo.container, presenterPos.screenId, presenterPos.cellX, presenterPos.cellY);
 
@@ -1541,8 +1560,17 @@ public class Launcher extends StatefulActivity<LauncherState>
 
         // Show the widget resize frame.
         if (hostView instanceof LauncherAppWidgetHostView) {
-            final LauncherAppWidgetHostView launcherHostView = (LauncherAppWidgetHostView) hostView;
-            showWidgetResizeFrame(launcherHostView, launcherInfo, presenterPos);
+            // AresLauncher §7: not on the home list. AppWidgetResizeFrame.setupForWidget() casts
+            // the widget's LayoutParams to CellLayoutLayoutParams unconditionally, and our widget
+            // rows are RecyclerView children with FrameLayout.LayoutParams -- so this throws
+            // ClassCastException before the frame is even added to the DragLayer. Proven by spike,
+            // see design/component-verification-1.md §3. A list-native resize frame is §6, which is
+            // deliberately deferred; until then adding a widget must simply not offer resize.
+            if (!AresWidgetAdd.isAresHome(this)) {
+                final LauncherAppWidgetHostView launcherHostView =
+                        (LauncherAppWidgetHostView) hostView;
+                showWidgetResizeFrame(launcherHostView, launcherInfo, presenterPos);
+            }
         }
     }
 

@@ -57,6 +57,7 @@ import com.android.launcher3.widget.picker.model.WidgetPickerDataProvider.Widget
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import app.lawnchair.areslauncher.AresWidgetAdd;
 import app.lawnchair.theme.color.tokens.ColorTokens;
 
 /**
@@ -213,6 +214,25 @@ public abstract class BaseWidgetSheet extends AbstractSlideInView<BaseActivity>
             // Going to NORMAL state will also dismiss the All Apps view if it is showing.
             Launcher launcher = Launcher.getLauncher(mActivityContext);
             launcher.getStateManager().goToState(NORMAL, forSuccessCallback(() -> {
+                // AresLauncher §7: the stock path allocates a cell via
+                // LauncherAccessibilityDelegate.findSpaceOnWorkspace(), which asks the CellLayout
+                // *view* for a free span. Under Strategy D no item view is ever added to a
+                // CellLayout -- Workspace.addInScreen redirects every CONTAINER_DESKTOP item into
+                // the home list -- so every CellLayout is permanently empty, that call always
+                // reports the first cell free, and every widget added would be written to the same
+                // cell. LoaderCursor.checkItemPlacement then *deletes* the colliding items on the
+                // next load, which is how §4 wiped the entire home screen. AresWidgetAdd allocates
+                // from the model instead. Gated so the Taskbar's sheet keeps stock behaviour.
+                if (AresWidgetAdd.isAresHome(launcher)) {
+                    boolean placed = AresWidgetAdd.addToHomeList(launcher, info);
+                    if (placed) {
+                        mActivityContext.getStatsLogManager()
+                                .logger()
+                                .withItemInfo(info)
+                                .log(LAUNCHER_WIDGET_ADD_BUTTON_TAP);
+                    }
+                    return;
+                }
                 launcher.getAccessibilityDelegate().addToWorkspace(info,
                         /*accessibility=*/ false,
                         /*finishCallback=*/ (success) -> {

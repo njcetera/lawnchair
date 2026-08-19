@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.appwidget.AppWidgetHostView
+import android.os.Bundle
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -15,7 +16,6 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
-import com.android.launcher3.widget.util.WidgetSizes
 
 /**
  * Adapter for AresLauncher's vertical home list (Strategy D: see
@@ -35,6 +35,21 @@ class AresHomeAdapter(private val launcher: Launcher) :
     RecyclerView.Adapter<AresHomeAdapter.ViewHolder>() {
 
     private val items = mutableListOf<ItemInfo>()
+
+    /**
+     * Width of the list we are attached to, for reporting real row size to widget providers.
+     * Zero until attached; [reportRowSizeToProvider] falls back to the device profile then.
+     */
+    private var recyclerViewWidth: Int = 0
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        recyclerViewWidth = recyclerView.width
+        // The list is typically unmeasured at attach time, so pick the width up on first layout.
+        recyclerView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            recyclerViewWidth = v.width
+        }
+    }
 
     init {
         // ItemInfo.id is the model's stable primary key, so holders survive rebinds correctly.
@@ -155,17 +170,44 @@ class AresHomeAdapter(private val launcher: Launcher) :
         )
 
         if (itemView is AppWidgetHostView) {
-            // Tell the provider how big its widget is. Without this the host view lays out at the
-            // right size but its RemoteViews content collapses to zero (observed: content measured
-            // 520,232-520,232 inside a correctly-sized 1040x464 host), because the provider was
-            // never handed size options and so never supplied a layout for these bounds.
-            //
-            // Stock Launcher3 makes this same call after placing a widget (Launcher.java ~1520).
-            // Span-based rather than pixel-based because that is the sanctioned API and it also
-            // populates the S+ multi-size list; our row height is derived from spanY and our width
-            // is the full list width, so the spans we pass describe the row honestly enough.
-            WidgetSizes.updateWidgetSizeRanges(itemView, launcher, info.spanX, info.spanY)
+            reportRowSizeToProvider(itemView, rowHeight)
         }
+    }
+
+    /**
+     * Tells the provider the size of the row it actually occupies.
+     *
+     * Without any size report the host view lays out correctly but its RemoteViews content
+     * collapses to zero (observed: content measured `520,232-520,232` inside a correctly-sized
+     * 1040x464 host), because the provider was never handed size options and so never supplied a
+     * layout for these bounds.
+     *
+     * The size is reported in **real dp**, not grid spans. `WidgetSizes.updateWidgetSizeRanges` --
+     * which stock uses, and which this originally called -- derives dimensions from `spanX`/`spanY`
+     * against the grid. That is right for a grid, and wrong here: our rows are always the full list
+     * width regardless of `spanX`. A 2x1 widget was told it had two cells (~520px) while sitting in
+     * a 1040px row, so it rendered its content as a small pill floating in the middle of the row
+     * (observed with the Chrome Dino widget). Reporting the true row box makes the provider lay out
+     * for the space it has been given.
+     *
+     * Width is the list's own width; during the very first bind the list may not be measured yet,
+     * in which case the launcher's available width is a good stand-in, since the list is full-bleed.
+     */
+    private fun reportRowSizeToProvider(hostView: AppWidgetHostView, rowHeight: Int) {
+        val density = launcher.resources.displayMetrics.density
+        val widthPx = when {
+            recyclerViewWidth > 0 -> recyclerViewWidth
+            else -> launcher.deviceProfile.deviceProperties.availableWidthPx
+        }
+        val widthDp = (widthPx / density).toInt()
+        val heightDp = (rowHeight / density).toInt()
+        if (widthDp <= 0 || heightDp <= 0) return
+
+        // A fresh Bundle, never Bundle.EMPTY: updateAppWidgetSize writes the computed size keys
+        // into the bundle it is handed, and Bundle.EMPTY is immutable -- passing it throws
+        // UnsupportedOperationException("ArrayMap is immutable") from inside the framework.
+        // Exact box: the row does not resize with content, so min and max are the same.
+        hostView.updateAppWidgetSize(Bundle(), widthDp, heightDp, widthDp, heightDp)
     }
 
     /**
