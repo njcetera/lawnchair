@@ -19,6 +19,7 @@ package com.android.launcher3;
 import static androidx.dynamicanimation.animation.DynamicAnimation.MIN_VISIBLE_CHANGE_SCALE;
 
 import static com.android.app.animation.Interpolators.ACCELERATE_2;
+import static com.android.app.animation.Interpolators.DECELERATE_1_7;
 import static com.android.app.animation.Interpolators.LINEAR;
 import static com.android.app.animation.Interpolators.ZOOM_OUT;
 import static com.android.launcher3.LauncherAnimUtils.HOTSEAT_SCALE_PROPERTY_FACTORY;
@@ -29,6 +30,7 @@ import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_Y;
 import static com.android.launcher3.LauncherAnimUtils.WORKSPACE_SCALE_PROPERTY_FACTORY;
 import static com.android.launcher3.LauncherState.FLAG_HAS_SYS_UI_SCRIM;
 import static com.android.launcher3.LauncherState.FLAG_HOTSEAT_INACCESSIBLE;
+import static com.android.launcher3.LauncherState.ALL_APPS;
 import static com.android.launcher3.LauncherState.HINT_STATE;
 import static com.android.launcher3.LauncherState.HOTSEAT_ICONS;
 import static com.android.launcher3.LauncherState.NORMAL;
@@ -168,8 +170,22 @@ public class WorkspaceStateTransitionAnimation {
         hotseat.setDescendantFocusability(state.hasFlag(FLAG_HOTSEAT_INACCESSIBLE)
                 ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_BEFORE_DESCENDANTS);
 
+        // AresLauncher §9: on the single-canvas pan, the workspace and the app-list pane are two
+        // regions of ONE surface, so they must travel in lockstep. AllAppsTransitionController
+        // (:419) picks LINEAR while the drag is user-controlled and DECELERATE_1_7 for the settle;
+        // the workspace has to resolve to the SAME curve or the two depart together, arrive
+        // together, and visibly drift apart in between -- which the user saw as "weird overlap
+        // between the primary home screen and the app screen while swiping".
+        //
+        // The principle, not just the value: for a drag-driven pan the progress IS the finger
+        // position, so every surface on the canvas must map from it linearly. Easing belongs on
+        // the settle after release, never on the tracked portion. Stock ZOOM_OUT is retained for
+        // every other state, so overview/spring-loaded/hint transitions are untouched.
+        Interpolator translationDefault = state == ALL_APPS
+                ? (config.isUserControlled() ? LINEAR : DECELERATE_1_7)
+                : ZOOM_OUT;
         Interpolator translationInterpolator =
-                config.getInterpolator(ANIM_WORKSPACE_TRANSLATE, ZOOM_OUT);
+                config.getInterpolator(ANIM_WORKSPACE_TRANSLATE, translationDefault);
         propertySetter.setFloat(mWorkspace, VIEW_TRANSLATE_X,
                 scaleAndTranslation.translationX, translationInterpolator);
         propertySetter.setFloat(mWorkspace, VIEW_TRANSLATE_Y,
