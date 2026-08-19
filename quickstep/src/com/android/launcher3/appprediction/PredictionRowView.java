@@ -31,6 +31,7 @@ import android.widget.LinearLayout;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import app.lawnchair.areslauncher.AresAllApps;
 import app.lawnchair.preferences2.PreferenceManager2;
 import com.android.launcher3.BubbleTextView;
 import com.android.launcher3.DeviceProfile;
@@ -229,8 +230,13 @@ public class PredictionRowView<T extends Context & ActivityContext>
             }
             LayoutInflater inflater = mActivityContext.getAppsView().getLayoutInflater();
             while (getChildCount() < mNumPredictedAppsPerRow) {
-                BubbleTextView icon = (BubbleTextView) inflater.inflate(
-                        R.layout.all_apps_prediction_row_icon, this, false);
+                // AresLauncher: our surfaces use a lighter prediction icon (36dp/17sp) so the row
+                // does not visually outweigh the list rows beneath it. Gated so the Taskbar's
+                // all-apps sheet, which shares this class, keeps the stock full-size icon.
+                int iconLayout = AresAllApps.isAresAppListPane(mActivityContext)
+                        ? R.layout.ares_all_apps_prediction_row_icon
+                        : R.layout.all_apps_prediction_row_icon;
+                BubbleTextView icon = (BubbleTextView) inflater.inflate(iconLayout, this, false);
                 icon.setOnClickListener(mActivityContext.getItemOnClickListener());
                 icon.setOnLongClickListener(mActivityContext.getAllAppsItemLongClickListener());
                 icon.setLongPressTimeoutFactor(1f);

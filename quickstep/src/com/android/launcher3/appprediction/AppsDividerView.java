@@ -39,6 +39,9 @@ import com.android.launcher3.Utilities;
 import com.android.launcher3.allapps.FloatingHeaderRow;
 import com.android.launcher3.allapps.FloatingHeaderView;
 import com.android.launcher3.util.Themes;
+import com.android.launcher3.views.ActivityContext;
+
+import app.lawnchair.areslauncher.AresAllApps;
 
 /**
  * A view which shows a horizontal divider
@@ -130,7 +133,13 @@ public class AppsDividerView extends View implements FloatingHeaderRow {
 
     private void updateDividerType() {
         final DividerType dividerType;
-        if (!mTabsHidden) {
+        if (AresAllApps.isAresAppListPane(ActivityContext.lookupContext(getContext()))) {
+            // AresLauncher: no "All apps" label and no divider line on our app-list surfaces. The
+            // pane is a sparse, chrome-free list on the wallpaper; a centred section label is stock
+            // sheet furniture. Folded and unfolded share this class, so this lands on both.
+            // The Taskbar's all-apps sheet is not a Launcher context, so it keeps the stock divider.
+            dividerType = DividerType.NONE;
+        } else if (!mTabsHidden) {
             dividerType = DividerType.NONE;
         } else {
             // Check how many sections above me.

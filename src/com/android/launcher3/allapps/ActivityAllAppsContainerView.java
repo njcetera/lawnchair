@@ -116,6 +116,7 @@ import java.util.stream.Stream;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
 import static com.topjohnwu.superuser.internal.Utils.context;
 import app.lawnchair.allapps.LawnchairAlphabeticalAppsList;
+import app.lawnchair.areslauncher.AresAllApps;
 import app.lawnchair.font.FontManager;
 import app.lawnchair.preferences.PreferenceManager;
 import app.lawnchair.preferences2.PreferenceManager2;
@@ -1228,8 +1229,16 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     protected void updateBackgroundVisibility(DeviceProfile deviceProfile) {
-        mBottomSheetBackground.setVisibility(
-                deviceProfile.shouldShowAllAppsOnSheet() ? View.VISIBLE : View.GONE);
+        // AresLauncher: the app list sits directly on the wallpaper on both surfaces (folded sheet
+        // and unfolded panel), so the opaque bottom-sheet panel is never drawn. What remains is the
+        // ALL_APPS scrim -- a dark translucent wash -- which is the intended look. See the
+        // CONVERGENCE TARGET block in design/implementation-scope.md §8.
+        //
+        // Gated on AresAllApps so the Taskbar's all-apps sheet, which shares this class, keeps its
+        // stock opaque panel; it is a genuine sheet sliding over other content and needs one.
+        boolean showSheet = deviceProfile.shouldShowAllAppsOnSheet()
+                && !AresAllApps.isAresAppListPane(mActivityContext);
+        mBottomSheetBackground.setVisibility(showSheet ? View.VISIBLE : View.GONE);
         // Note: The opaque sheet background and header protection are added in drawOnScrim.
         // For the taskbar entrypoint, the scrim is drawn by its abstract slide in view container,
         // so its header protection is derived from this scrim instead.

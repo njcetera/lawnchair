@@ -13,6 +13,12 @@
          overridden below, otherwise the label floats centred in the leftover width instead of
          sitting next to the icon.
      Both diagnosed in design/gesture-transition-reassessment.md §4.
+
+     textColor is set to workspaceTextColor rather than inheriting the style's textColorSecondary.
+     BaseIconUnBounded assumes all-apps sits on an opaque sheet, so its default is a dark-on-light
+     colour. Since the CONVERGENCE TARGET restyle the pane draws directly on the wallpaper with no
+     sheet, that default rendered dark-on-dark and was barely legible. workspaceTextColor is the
+     attribute the home list already resolves against the wallpaper, so both surfaces now agree.
 -->
 <com.android.launcher3.BubbleTextView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:launcher="http://schemas.android.com/apk/res-auto"
@@ -26,6 +32,7 @@
     android:maxLines="1"
     android:paddingStart="@dimen/ares_app_row_padding_horizontal"
     android:paddingEnd="@dimen/ares_app_row_padding_horizontal"
+    android:textColor="?attr/workspaceTextColor"
     android:textSize="@dimen/ares_app_row_text_size"
     launcher:iconDisplay="all_apps"
     launcher:iconSizeOverride="@dimen/ares_app_row_icon_size"

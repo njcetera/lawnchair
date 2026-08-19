@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher: prediction-row icon for the app-list pane.
+
+     Deliberately a separate file from all_apps_prediction_row_icon.xml, which is shared with the
+     Taskbar's all-apps sheet through PredictionRowView; editing that in place would restyle the
+     Taskbar too. Same reasoning as ares_all_apps_icon.xml (see design/change-practices.md).
+
+     Only the icon and label metrics differ from stock. The prediction row stays a 4-across grid of
+     stacked icon-above-label cells; "consistent with the list rows" means matching their visual
+     WEIGHT (a 36dp icon and a 17sp label), not adopting their horizontal arrangement. Stock draws
+     these at the full all-apps icon size, which reads as noticeably heavier than the rows beneath.
+
+     centerVertically IS valid here, unlike in ares_all_apps_icon.xml: its onMeasure() path sums
+     icon + padding + text height, which holds for this stacked layout and only breaks in the
+     horizontal one.
+-->
+<com.android.launcher3.BubbleTextView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:launcher="http://schemas.android.com/apk/res-auto"
+    style="@style/BaseIcon.AllApps"
+    android:id="@+id/icon"
+    android:textColor="?attr/workspaceTextColor"
+    android:textSize="@dimen/ares_app_row_text_size"
+    launcher:centerVertically="true"
+    launcher:iconDisplay="prediction_row"
+    launcher:iconSizeOverride="@dimen/ares_app_row_icon_size" />
