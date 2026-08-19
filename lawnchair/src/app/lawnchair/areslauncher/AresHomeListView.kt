@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -32,6 +33,38 @@ class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(cont
         layoutManager = LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false)
         adapter = aresAdapter
         clipToPadding = false
+    }
+
+    /**
+     * True when the current gesture began on empty space rather than on a row.
+     *
+     * Long-pressing empty home space is how Launcher3 opens the wallpaper/widgets/settings popup
+     * (WorkspaceTouchListener, an OnTouchListener on Workspace). A View's OnTouchListener only runs
+     * if no descendant consumed the event, and this list spans the whole page below the smartspace
+     * -- so once it started consuming touches, that popup became unreachable, taking launcher
+     * settings and the §7 widget picker with it.
+     *
+     * Same family as the original DragLayer-overlay defect (our view eating touches Workspace
+     * needs), but the list is hosted correctly now, so this is about routing *within* the page
+     * rather than re-hosting: decline the gesture when it isn't on a row, and let it bubble up to
+     * Workspace. Touches on rows are unaffected, so row taps and row long-press still work.
+     *
+     * Empty space only exists when the content doesn't fill the viewport -- in which case there is
+     * nothing to scroll -- so declining it costs no scrolling behaviour.
+     */
+    private var gestureStartedOnEmptySpace = false
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            gestureStartedOnEmptySpace = findChildViewUnder(e.x, e.y) == null
+        }
+        if (gestureStartedOnEmptySpace) return false
+        return super.onInterceptTouchEvent(e)
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (gestureStartedOnEmptySpace) return false
+        return super.onTouchEvent(e)
     }
 
     /**
