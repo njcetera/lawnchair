@@ -1,5 +1,6 @@
 package app.lawnchair.areslauncher
 
+import android.appwidget.AppWidgetHostView
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -14,6 +15,7 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.widget.util.WidgetSizes
 
 /**
  * Adapter for AresLauncher's vertical home list (Strategy D: see
@@ -111,13 +113,51 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val rowHeight = if (itemView is BubbleTextView) {
             holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height)
         } else {
-            // Widgets size themselves; don't force a row height on them.
-            FrameLayout.LayoutParams.WRAP_CONTENT
+            widgetRowHeight(info)
         }
         holder.container.addView(
             itemView,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, rowHeight),
         )
+
+        if (itemView is AppWidgetHostView) {
+            // Tell the provider how big its widget is. Without this the host view lays out at the
+            // right size but its RemoteViews content collapses to zero (observed: content measured
+            // 520,232-520,232 inside a correctly-sized 1040x464 host), because the provider was
+            // never handed size options and so never supplied a layout for these bounds.
+            //
+            // Stock Launcher3 makes this same call after placing a widget (Launcher.java ~1520).
+            // Span-based rather than pixel-based because that is the sanctioned API and it also
+            // populates the S+ multi-size list; our row height is derived from spanY and our width
+            // is the full list width, so the spans we pass describe the row honestly enough.
+            WidgetSizes.updateWidgetSizeRanges(itemView, launcher, info.spanX, info.spanY)
+        }
+    }
+
+    /**
+     * Explicit pixel height for a widget row.
+     *
+     * Widgets must be given a concrete height. An [android.appwidget.AppWidgetHostView] has no
+     * intrinsic content height of its own -- its children come from RemoteViews applied
+     * asynchronously -- so `WRAP_CONTENT` measures to **zero** and the widget renders as an
+     * invisible full-width strip. (Observed directly: the host view sat in the tree at
+     * `0,0-1040,0`.) Stock Launcher3 never hits this because `CellLayout` always hands widgets
+     * exact pixel bounds derived from their grid span.
+     *
+     * Policy for v1: reuse the height the grid would have produced, `spanY * cellHeightPx`. That
+     * keeps widgets at the proportions their providers were designed against, and keeps us
+     * consistent with how the same widget renders in any other launcher, without inventing a
+     * bespoke sizing rule. §6 (resize) will replace this with a persisted per-widget height; this
+     * is deliberately the simplest thing that is correct until then.
+     *
+     * Floored at one app-row height so a malformed or zero-span item can never collapse to an
+     * invisible row again.
+     */
+    private fun widgetRowHeight(info: ItemInfo): Int {
+        val res = launcher.resources
+        val floor = res.getDimensionPixelSize(R.dimen.ares_app_row_height)
+        val spanY = info.spanY.coerceAtLeast(1)
+        return (spanY * launcher.deviceProfile.cellHeightPx).coerceAtLeast(floor)
     }
 
     /**
