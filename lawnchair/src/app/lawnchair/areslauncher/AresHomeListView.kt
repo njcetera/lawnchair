@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
+import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import com.android.launcher3.widget.LauncherAppWidgetHostView
@@ -373,11 +374,20 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      *
      * The click listener installed by `ItemInflater` is left in place, so nothing needs restoring
      * beyond the flag.
+     *
+     * **Folders stay clickable in edit mode** (§18). The "tap is inert while editing" rule exists
+     * so that a tap never *launches* anything; opening a folder launches nothing, it descends into
+     * a container while the mode stays active. `onClickFolderIcon` only calls `animateOpen()`, so
+     * nothing here reaches a launch path.
      */
     private fun setItemClickable(child: View, clickable: Boolean) {
         val item = (child as? ViewGroup)?.getChildAt(0) ?: return
-        item.isClickable = clickable
+        item.isClickable = clickable || item is FolderIcon
     }
+
+    /** True when [child] (a holder container) hosts a folder icon. */
+    private fun isFolderRow(child: View?): Boolean =
+        (child as? ViewGroup)?.getChildAt(0) is FolderIcon
 
     /**
      * Routes touches while editing.
@@ -387,6 +397,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      *   one-shot model rather than a persistent mode.
      * - **Tap on an item**: consumed at `ACTION_UP` so the child's click never fires — WP behaviour,
      *   where you leave edit mode before launching anything.
+     * - **Tap on a folder**: *not* consumed, so the folder opens (§18). Folders are the documented
+     *   exception to the inert-tap rule: opening one is navigation *within* edit mode, not a
+     *   launch, and it is the only way to reach the apps inside so they can be removed.
      * - **Tap on empty space**: exits edit mode.
      * - **Drag on empty space**: left alone, so the grid still scrolls.
      *
@@ -398,6 +411,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private val editModeTouchListener = object : OnItemTouchListener {
         private var downOnChild: View? = null
         private var downOnChevron = false
+        private var downOnFolder = false
         private var downX = 0f
         private var downY = 0f
         private var movedPastSlop = false
@@ -422,6 +436,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                         AresWidgetResize.isPointOnChevron(child, localX, localY) ||
                             AresRemoveBadge.isPointOnBadge(child, localX, localY)
                     } ?: false
+                    // Recorded at DOWN like the chevron, and for the same reason: by UP the child
+                    // lookup may no longer be reliable. A folder tap must reach the FolderIcon's
+                    // own click listener rather than being swallowed with the rest of the tiles.
+                    downOnFolder = isFolderRow(downOnChild)
                     downX = e.x
                     downY = e.y
                     movedPastSlop = false
@@ -462,8 +480,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     val tap = !movedPastSlop && !dragStarted && !enteredEditModeDuringGesture
                     val onItem = downOnChild != null
                     val onChevron = downOnChevron
+                    val onFolder = downOnFolder
                     downOnChild = null
                     downOnChevron = false
+                    downOnFolder = false
                     // Release the claim taken at DOWN. Left set, the *next* gesture would start with
                     // ancestors still suppressed -- so a horizontal swipe meant for the app-list
                     // pane would be silently eaten by a grid that is no longer editing.
@@ -475,6 +495,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                         // On empty space: leave the mode. On an item: swallow it, so the tile stays
                         // inert. Either way the child gets ACTION_CANCEL and does not click.
                         if (!onItem) exitEditMode()
+                        // A folder is the exception -- let its click through so it opens.
+                        if (onFolder) return false
                         return true
                     }
                 }

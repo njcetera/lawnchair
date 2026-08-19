@@ -16,6 +16,7 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.folder.FolderIcon
+import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import java.util.function.Predicate
@@ -140,15 +141,26 @@ class AresHomeAdapter(private val launcher: Launcher) :
     /**
      * The single place a remove badge is added or removed.
      *
-     * Unlike the chevron this applies to **every** item type — apps, folders and widgets alike —
-     * because anything on the home screen can be taken off it. Otherwise it mirrors the chevron
-     * exactly, including the reason it funnels through one function: widget holders are
-     * `setIsRecyclable(false)`, so a holder can be bound again while still carrying last time's
-     * badge, and a blind `addView` would stack a second one on top.
+     * Applies to apps, shortcuts, app pairs and widgets — anything that is a *leaf* on the home
+     * screen can be taken off it. Otherwise it mirrors the chevron exactly, including the reason it
+     * funnels through one function: widget holders are `setIsRecyclable(false)`, so a holder can be
+     * bound again while still carrying last time's badge, and a blind `addView` would stack a
+     * second one on top.
+     *
+     * ## Folders are the one exception, deliberately (§18)
+     *
+     * A folder is a **container you descend into**, not an item you delete, so it carries no ×.
+     * Tapping it in edit mode opens it; the apps inside carry their own × and emptying it is how
+     * the folder itself goes away — stock deletes a folder once its contents drop below two, so a
+     * separate "delete the folder" affordance would both duplicate that and be ambiguous against
+     * "open it".
+     *
+     * The test is `FolderInfo`, not `CollectionInfo`: an **app pair** is also a `CollectionInfo`
+     * but is not something you open and edit, so it keeps its × like any other leaf.
      */
     private fun syncRemoveBadgeFor(container: FrameLayout, info: ItemInfo?) {
         val existing = container.findViewWithTag<View>(AresRemoveBadge.BADGE_TAG)
-        val target = info?.takeIf { editMode }
+        val target = info?.takeIf { editMode && it !is FolderInfo }
         if (target != null && existing == null) {
             container.addView(AresRemoveBadge.createBadge(container) { removeHost?.invoke(target) })
         } else if (target == null && existing != null) {
