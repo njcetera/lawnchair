@@ -96,12 +96,35 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
-     * The single place a chevron is added or removed.
+     * The single place a row's edit-mode affordances are brought in line with the current mode.
      *
-     * Both entry points funnel through here — the host's edit-mode walk and [onBindViewHolder] —
-     * so the "already has one" case is handled once. That matters because widget holders are
-     * `setIsRecyclable(false)`: a holder can be bound again while still carrying the chevron from
-     * last time, and a blind `addView` would stack a second one on top of it.
+     * Every entry point funnels through here — the host's edit-mode walk, its child-attach hook and
+     * [onBindViewHolder] — so the "already has one" case is handled once. That matters because
+     * widget holders are `setIsRecyclable(false)`: a holder can be bound again, or re-attached
+     * without a bind at all, while still carrying the chevron from last time, and a blind `addView`
+     * would stack a second one on top of it.
+     *
+     * A **null [info] means the row is entitled to nothing** and is how the host clears a row that
+     * has left the adapter. Those rows are still attached children, and skipping them is what left
+     * an × and a chevron on screen after edit mode had ended.
+     *
+     * A widget whose provider declares no resizable axis, or only one possible footprint, gets no
+     * chevron: an affordance that visibly does nothing is worse than none. The × has no such
+     * condition — anything on the home screen can be taken off it.
+     *
+     * ## Why the affordances are siblings of the item view, not children of it
+     *
+     * They go into the holder's **container**, above the item view, not inside it. Two reasons, and
+     * the second is what makes the wiggle work:
+     *
+     *  - An `AppWidgetHostView` hosts the provider's RemoteViews. Adding our own child to it would
+     *    be **removed the next time the provider pushes an update**, so the chevron would silently
+     *    vanish on any widget that refreshes itself.
+     *  - They still move with the item regardless, because **every edit-mode visual is applied to
+     *    the container**, not to the item view — see `AresHomeListView.applyEditModeVisual`, which
+     *    scales and rotates `getChildAt(i)` (the container) and so carries these along with it.
+     *
+     * So: keep animating the container. Do not move these into the item view to make them wiggle.
      */
     private fun syncChevronFor(container: FrameLayout, info: ItemInfo?) {
         val existing = container.findViewWithTag<View>(AresWidgetResize.CHEVRON_TAG)
@@ -391,33 +414,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is AppWidgetHostView) {
             pendingWidgetSizeReports[itemView] = info
-            maybeAddResizeChevron(holder, info)
         }
-    }
 
-    /**
-     * Adds the resize chevron to a widget row, when editing and the widget can actually resize.
-     *
-     * A widget whose provider declares no resizable axis, or only one possible footprint, gets no
-     * chevron: an affordance that visibly does nothing is worse than none.
-     *
-     * ## Why it is a sibling of the widget view, not a child of it
-     *
-     * The chevron goes into the holder's **container**, above the widget view, not inside it. Two
-     * reasons, and the second matters for the wiggle animation that is coming next:
-     *
-     *  - An `AppWidgetHostView` hosts the provider's RemoteViews. Adding our own child to it would
-     *    be **removed the next time the provider pushes an update**, so the chevron would silently
-     *    vanish on any widget that refreshes itself.
-     *  - It still moves with the item regardless, because **every edit-mode visual is applied to
-     *    the container**, not to the item view — see `AresHomeListView.applyEditModeVisual`, which
-     *    scales `getChildAt(i)` (the container) and so already scales this chevron with it. A
-     *    wiggle applied at the same level will oscillate the chevron along with the icon, which is
-     *    the iOS behaviour, without putting our view somewhere the framework will delete it.
-     *
-     * So: keep animating the container. Do not move this into the item view to make it wiggle.
-     */
-    private fun maybeAddResizeChevron(holder: ViewHolder, info: ItemInfo) {
+        // Outside the widget branch on purpose. The × applies to every item type -- anything on the
+        // home screen can be taken off it -- and while this was gated on AppWidgetHostView, an icon
+        // or folder bound during edit mode (scrolled in, or delivered by a late bind) came up with
+        // no badge at all and could not be removed without leaving and re-entering the mode.
+        // syncChevronFor decides what this particular item is entitled to.
         syncChevronFor(holder.container, info)
     }
 

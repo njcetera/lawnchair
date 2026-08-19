@@ -329,9 +329,13 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private fun syncChevron(child: View) {
         val container = child as? FrameLayout ?: return
-        val position = getChildAdapterPosition(child)
-        if (position == NO_POSITION) return
-        aresAdapter.syncChevron(container, position)
+        // Deliberately no early return on NO_POSITION. A row that has left the adapter -- removed,
+        // or mid-animation on its way out -- is still an attached child carrying our × and chevron,
+        // and skipping it is precisely how those were left behind after edit mode ended: the user
+        // reported "the x won't leave and the resize button on one won't leave but neither are
+        // actually editable", with the state dump confirming mState:Normal. getOrNull(-1) resolves
+        // to a null item, which the adapter already reads as "this row carries nothing".
+        aresAdapter.syncChevron(container, getChildAdapterPosition(child))
     }
 
     override fun onChildAttachedToWindow(child: View) {
@@ -342,6 +346,12 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         child.scaleY = scale
         setItemClickable(child, !editMode)
         syncWiggle(child)
+        // Affordances too, and not only for rows that were just bound: widget holders are
+        // `setIsRecyclable(false)`, so one that scrolls off and back on re-attaches *without*
+        // onBindViewHolder running. Such a row kept whatever badge it had when it left, which
+        // outlived the mode in both directions -- a stale × after exiting, and no × at all on a row
+        // that scrolled in after editing began.
+        syncChevron(child)
     }
 
     override fun onChildDetachedFromWindow(child: View) {
