@@ -16,6 +16,7 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
+import java.util.function.Predicate
 
 /**
  * Adapter for AresLauncher's vertical home list (Strategy D: see
@@ -84,6 +85,36 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (size == 0) return
         items.clear()
         notifyItemRangeRemoved(0, size)
+    }
+
+    /**
+     * Removes every row whose [ItemInfo] matches, mirroring what
+     * [com.android.launcher3.Workspace.removeItemsByMatcher] does for CellLayout-hosted items.
+     *
+     * Strategy D means our rows are not CellLayout children, so that method's walk over
+     * `getShortcutsAndWidgets()` never sees them. Without this, *nothing* is ever removed from the
+     * list once bound. Two consequences were observed:
+     *
+     *  - **Duplicate rows.** `ModelCallbacks.bindItemsUpdated` updates an item by
+     *    remove-then-rebind: it calls `removeItemsByMatcher(...)` and then `bindItems(...)`, which
+     *    lands back in `addInScreen`. With the removal half missing, the rebind appended a second
+     *    copy. Observed on a cold boot: Gmail (id 14) delivered once by the initial
+     *    `bindCompleteModelAsync` pass, then again ~13s later via `bindUpdatedWorkspaceItems`,
+     *    giving 7 rendered rows against 6 database rows.
+     *  - **Stale rows after uninstall/removal**, which flow through the same matcher.
+     *
+     * Iterates in reverse so indices stay valid while removing, matching the stock method.
+     */
+    fun removeItems(matcher: Predicate<ItemInfo>): Boolean {
+        var removed = false
+        for (i in items.indices.reversed()) {
+            if (matcher.test(items[i])) {
+                items.removeAt(i)
+                notifyItemRemoved(i)
+                removed = true
+            }
+        }
+        return removed
     }
 
     /**

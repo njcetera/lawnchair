@@ -4009,6 +4009,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * @param persistChanges if true, any dependent changes will be persisted to the DB
      */
     public void removeItemsByMatcher(final Predicate<ItemInfo> matcher, boolean persistChanges) {
+        // AresLauncher Strategy D: CONTAINER_DESKTOP items live in the Ares home list, not in any
+        // CellLayout, so the walk below never sees them. Removing them here keeps this method's
+        // contract intact for our rows too. Without it nothing is ever removed from the list:
+        // ModelCallbacks.bindItemsUpdated updates an item by remove-then-rebind, so the rebind
+        // appended a duplicate row (observed: Gmail bound once at cold boot, then again via
+        // bindUpdatedWorkspaceItems, 7 rendered rows vs 6 in the database), and uninstalled apps
+        // left stale rows behind.
+        if (mAresHomeList != null) {
+            mAresHomeList.getAresAdapter().removeItems(matcher);
+        }
         for (CellLayout layout : getWorkspaceAndHotseatCellLayouts()) {
             ShortcutAndWidgetContainer container = layout.getShortcutsAndWidgets();
             // Iterate in reverse order as we are removing items
