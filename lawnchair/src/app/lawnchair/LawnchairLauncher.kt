@@ -312,8 +312,20 @@ class LawnchairLauncher : QuickstepLauncher() {
         // vertical controllers so pane navigation wins any ambiguity; in practice they cannot
         // compete, since each only claims a drag once its own axis dominates.
         val paneSwipeController = app.lawnchair.areslauncher.AresPaneSwipeController(this)
-        return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) +
-            super.createTouchControllers()
+
+        // The home grid scrolls vertically, but TouchControllers are offered every gesture before
+        // any child view sees it -- so without this the grid would receive no vertical drags at all
+        // (measured: ACTION_DOWN arrived, zero scroll calls followed). Each stock controller is
+        // wrapped so it stands aside for gestures starting on the grid; edge gestures, which begin
+        // outside it, are untouched. Our own pane controller is not wrapped: it claims only
+        // horizontal drags, which the grid does not want. See AresHomeScrollGuard.
+        val gridProvider = { workspace?.aresHomeList }
+        val stock = super.createTouchControllers().map { controller ->
+            app.lawnchair.areslauncher.AresHomeScrollGuard(this, controller, gridProvider)
+                as TouchController
+        }.toTypedArray()
+
+        return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) + stock
     }
 
     override fun handleHomeTap() {

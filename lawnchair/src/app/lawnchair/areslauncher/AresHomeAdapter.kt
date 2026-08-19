@@ -142,11 +142,29 @@ class AresHomeAdapter(private val launcher: Launcher) :
         else -> TYPE_ICON
     }
 
+    /**
+     * Footprint of an item in grid cells, for [AresMasonryLayoutManager].
+     *
+     * Icons, shortcuts and folders are always 1x1. Widgets carry the spans the model persisted --
+     * the same values stock would have used to place them in a CellLayout -- so a widget occupies
+     * the proportions its provider was designed against.
+     */
+    fun spanOf(position: Int): AresPacker.Span {
+        val info = items.getOrNull(position) ?: return AresPacker.Span(1, 1)
+        return when (info.itemType) {
+            Favorites.ITEM_TYPE_APPWIDGET, Favorites.ITEM_TYPE_CUSTOM_APPWIDGET ->
+                AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
+            else -> AresPacker.Span(1, 1)
+        }
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val container = FrameLayout(parent.context)
+        // The layout manager measures each holder to its exact cell footprint, so the container
+        // fills whatever it is given rather than sizing itself.
         container.layoutParams = RecyclerView.LayoutParams(
             RecyclerView.LayoutParams.MATCH_PARENT,
-            RecyclerView.LayoutParams.WRAP_CONTENT,
+            RecyclerView.LayoutParams.MATCH_PARENT,
         )
         val holder = ViewHolder(container)
         if (viewType == TYPE_WIDGET) {
@@ -175,63 +193,73 @@ class AresHomeAdapter(private val launcher: Launcher) :
                 itemView.startLongPressAction()
                 true
             }
-            applyRowStyle(itemView)
+            applyGridStyle(itemView)
         }
         itemView.isHapticFeedbackEnabled = false
 
-        if (itemView is FolderIcon) {
-            holder.container.addView(
-                buildFolderRow(itemView, holder.container),
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height),
-                ),
-            )
-            return
-        }
-
-        val rowHeight = if (itemView is BubbleTextView) {
-            holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height)
-        } else {
-            widgetRowHeight(info)
-        }
+        // Every item fills its cell; the layout manager has already sized the holder to the item's
+        // footprint. Folders keep their stock arrangement (preview above label) like any other
+        // icon -- the bespoke icon-left folder row belonged to the one-per-line list.
         holder.container.addView(
             itemView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, rowHeight),
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
         )
 
         if (itemView is AppWidgetHostView) {
-            reportRowSizeToProvider(itemView, rowHeight)
+            pendingWidgetSizeReports[itemView] = info
         }
     }
 
     /**
-     * Tells the provider the size of the row it actually occupies.
+     * Widgets whose provider still needs to be told its box, keyed by host view.
+     *
+     * The size can only be reported once the view has real bounds, and under a grid those come from
+     * the layout manager rather than from a height this adapter chose. [reportPendingWidgetSizes]
+     * drains this after layout.
+     */
+    private val pendingWidgetSizeReports = mutableMapOf<AppWidgetHostView, ItemInfo>()
+
+    /**
+     * Reports each newly-bound widget's real on-screen box to its provider.
+     *
+     * Called after layout, because the box is the cell footprint the layout manager assigned, which
+     * is not known at bind time. Without a size report the host view lays out correctly but its
+     * RemoteViews content collapses to zero -- the provider was never handed size options, so it
+     * never supplied a layout for these bounds.
+     */
+    fun reportPendingWidgetSizes() {
+        if (pendingWidgetSizeReports.isEmpty()) return
+        val iterator = pendingWidgetSizeReports.entries.iterator()
+        while (iterator.hasNext()) {
+            val (hostView, _) = iterator.next()
+            if (hostView.width <= 0 || hostView.height <= 0) continue
+            reportBoxSizeToProvider(hostView)
+            iterator.remove()
+        }
+    }
+
+    /**
+     * Tells the provider the size of the box it actually occupies.
      *
      * Without any size report the host view lays out correctly but its RemoteViews content
      * collapses to zero (observed: content measured `520,232-520,232` inside a correctly-sized
      * 1040x464 host), because the provider was never handed size options and so never supplied a
      * layout for these bounds.
      *
-     * The size is reported in **real dp**, not grid spans. `WidgetSizes.updateWidgetSizeRanges` --
-     * which stock uses, and which this originally called -- derives dimensions from `spanX`/`spanY`
-     * against the grid. That is right for a grid, and wrong here: our rows are always the full list
-     * width regardless of `spanX`. A 2x1 widget was told it had two cells (~520px) while sitting in
-     * a 1040px row, so it rendered its content as a small pill floating in the middle of the row
-     * (observed with the Chrome Dino widget). Reporting the true row box makes the provider lay out
-     * for the space it has been given.
-     *
-     * Width is the list's own width; during the very first bind the list may not be measured yet,
-     * in which case the launcher's available width is a good stand-in, since the list is full-bleed.
+     * The size is read from the host view's **measured bounds** rather than recomputed from spans.
+     * Under masonry the layout manager owns placement, so its assigned box is the authority; deriving
+     * a size independently risks the two disagreeing. An earlier row-based revision had exactly that
+     * bug in the other direction -- it used `WidgetSizes.updateWidgetSizeRanges`, whose span-derived
+     * width said "two cells" while the row was full-bleed, so a 2x1 widget rendered as a small pill
+     * floating mid-row.
      */
-    private fun reportRowSizeToProvider(hostView: AppWidgetHostView, rowHeight: Int) {
+    private fun reportBoxSizeToProvider(hostView: AppWidgetHostView) {
         val density = launcher.resources.displayMetrics.density
-        val widthPx = when {
-            recyclerViewWidth > 0 -> recyclerViewWidth
-            else -> launcher.deviceProfile.deviceProperties.availableWidthPx
-        }
-        val widthDp = (widthPx / density).toInt()
-        val heightDp = (rowHeight / density).toInt()
+        val widthDp = (hostView.width / density).toInt()
+        val heightDp = (hostView.height / density).toInt()
         if (widthDp <= 0 || heightDp <= 0) return
 
         // A fresh Bundle, never Bundle.EMPTY: updateAppWidgetSize writes the computed size keys
@@ -242,128 +270,24 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
-     * Explicit pixel height for a widget row.
+     * Home-grid icon styling: **stock arrangement, label under the icon**.
      *
-     * Widgets must be given a concrete height. An [android.appwidget.AppWidgetHostView] has no
-     * intrinsic content height of its own -- its children come from RemoteViews applied
-     * asynchronously -- so `WRAP_CONTENT` measures to **zero** and the widget renders as an
-     * invisible full-width strip. (Observed directly: the host view sat in the tree at
-     * `0,0-1040,0`.) Stock Launcher3 never hits this because `CellLayout` always hands widgets
-     * exact pixel bounds derived from their grid span.
+     * The grid deliberately keeps `BubbleTextView`'s default vertical layout -- icon above, label
+     * beneath, centred -- because that is what the spec asks for ("the text for icons should be
+     * under the icon like usual", requirements-alignment.md §4).
      *
-     * Policy for v1: reuse the height the grid would have produced, `spanY * cellHeightPx`. That
-     * keeps widgets at the proportions their providers were designed against, and keeps us
-     * consistent with how the same widget renders in any other launcher, without inventing a
-     * bespoke sizing rule. §6 (resize) will replace this with a persisted per-widget height; this
-     * is deliberately the simplest thing that is correct until then.
+     * The icon-left/label-right treatment this used to apply belonged to the one-per-line list and
+     * now lives **only on the app-list pane**, via `ares_all_apps_icon.xml`. Do not reintroduce
+     * `setLayoutHorizontal(true)` here: in a square grid cell it would push the label into the
+     * leftover width and clip it.
      *
-     * Floored at one app-row height so a malformed or zero-span item can never collapse to an
-     * invisible row again.
+     * Nothing is overridden, so items inherit the workspace icon size and text appearance the rest
+     * of Launcher3 uses. That is the point -- a home grid should look like a home grid.
      */
-    private fun widgetRowHeight(info: ItemInfo): Int {
-        val res = launcher.resources
-        val floor = res.getDimensionPixelSize(R.dimen.ares_app_row_height)
-        val spanY = info.spanY.coerceAtLeast(1)
-        return (spanY * launcher.deviceProfile.cellHeightPx).coerceAtLeast(floor)
-    }
-
-    /**
-     * Wraps a [FolderIcon] into a row matching [applyRowStyle]'s app rows: preview on the left,
-     * label dominant and adjacent, both vertically centred.
-     *
-     * A folder can't reuse [applyRowStyle] because [FolderIcon] is a `FrameLayout` that *draws* its
-     * preview in `onDraw` rather than carrying it as a compound drawable, and its own label is a
-     * `match_parent` child offset downwards by `iconSizePx + iconDrawablePaddingPx`. So the stock
-     * arrangement is inherently icon-above-label.
-     *
-     * This uses only public API -- no vendored edits. The preview's position is controlled
-     * indirectly, via the two inputs `PreviewItemManager` feeds to `PreviewBackground.setup()`:
-     *  - X: `basePreviewOffsetX = (measuredWidth - previewSize) / 2`, so constraining the
-     *    FolderIcon to a narrow leading box centres the preview inside that box instead of across
-     *    the whole row. Box width is chosen so the preview's left edge lands on the same leading
-     *    inset an app row's icon uses.
-     *  - Y: `basePreviewOffsetY = paddingTop + folderIconOffsetYPx`, so paddingTop centres it.
-     *
-     * The built-in label is hidden via the public `setTextVisible(false)` and replaced with a
-     * sibling `TextView`, which is what lets the label sit *beside* the preview rather than under
-     * it. Colour and text are taken from the real label so themed/dark handling stays consistent.
-     *
-     * Because the FolderIcon now occupies only the leading box, the row forwards clicks to it.
-     */
-    private fun buildFolderRow(folderIcon: FolderIcon, parent: ViewGroup): ViewGroup {
-        val res = parent.resources
-        val grid = launcher.deviceProfile
-        val rowHeight = res.getDimensionPixelSize(R.dimen.ares_app_row_height)
-        val padH = res.getDimensionPixelSize(R.dimen.ares_app_row_padding_horizontal)
-        val previewSize = grid.folderIconSizePx
-        val stockLabel = folderIcon.folderName
-
-        folderIcon.setTextVisible(false)
-        // Vertically centre the drawn preview inside the row. setup() adds folderIconOffsetYPx on
-        // top of paddingTop, so subtract it back out.
-        folderIcon.setPadding(
-            0,
-            ((rowHeight - previewSize) / 2 - grid.folderIconOffsetYPx).coerceAtLeast(0),
-            0,
-            0,
-        )
-
-        val label = TextView(parent.context).apply {
-            text = stockLabel.text
-            setTextColor(stockLabel.textColors)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, res.getDimension(R.dimen.ares_app_row_text_size))
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        }
-
-        return LinearLayout(parent.context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(folderIcon, LinearLayout.LayoutParams(padH * 2 + previewSize, rowHeight))
-            addView(
-                label,
-                LinearLayout.LayoutParams(0, rowHeight, 1f).apply { marginEnd = padH },
-            )
-            setOnClickListener { folderIcon.performClick() }
-            setOnLongClickListener { folderIcon.performLongClick() }
-        }
-    }
-
-    /**
-     * Applies the Niagara-style row appearance to a home-list icon: icon on the left, label
-     * dominant and adjacent, both vertically centred in a generous row.
-     *
-     * Done programmatically rather than in XML because workspace items are inflated by
-     * [com.android.launcher3.util.ItemInflater], which hardcodes `R.layout.app_icon` with no
-     * override hook. `app_icon.xml` is shared with folders, app pairs and other surfaces, so it is
-     * deliberately not edited in place -- see design/gesture-transition-reassessment.md §4.
-     *
-     * Note both attributes below are corrections of the stock vertical-grid styling:
-     *  - `centerVertically` must be OFF: its onMeasure() path sums icon + padding + text height,
-     *    which only holds when the icon sits ABOVE the text. In horizontal mode that over-estimates
-     *    content height and produces a large bogus top padding.
-     *  - gravity must be overridden: `BaseIcon.Workspace` inherits `center_horizontal`, which would
-     *    centre the label in the leftover width instead of placing it next to the icon.
-     *
-     * Known gap: the icon keeps the workspace icon size, because `BubbleTextView.mIconSize` is
-     * `private final` and only settable via the `iconSizeOverride` XML attribute. The app-list pane
-     * gets the smaller Niagara icon via `ares_all_apps_icon.xml`; matching it here would require an
-     * override hook in the shared ItemInflater.
-     */
-    private fun applyRowStyle(icon: BubbleTextView) {
-        val res = icon.resources
-        icon.setLayoutHorizontal(true)
+    private fun applyGridStyle(icon: BubbleTextView) {
+        icon.setLayoutHorizontal(false)
         icon.setCenterVertically(false)
-        icon.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        icon.compoundDrawablePadding =
-            res.getDimensionPixelSize(R.dimen.ares_app_row_drawable_padding)
-        val padH = res.getDimensionPixelSize(R.dimen.ares_app_row_padding_horizontal)
-        icon.setPaddingRelative(padH, 0, padH, 0)
-        icon.setTextSize(
-            TypedValue.COMPLEX_UNIT_PX,
-            res.getDimension(R.dimen.ares_app_row_text_size),
-        )
+        icon.gravity = Gravity.CENTER_HORIZONTAL
         icon.maxLines = 1
         icon.ellipsize = TextUtils.TruncateAt.END
     }

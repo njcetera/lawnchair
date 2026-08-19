@@ -3,17 +3,24 @@ package app.lawnchair.areslauncher
 import android.content.Context
 import android.view.MotionEvent
 import android.view.ViewGroup
-import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 
 /**
- * Vertical, continuously-scrolling list of home-screen items -- the Strategy D
- * replacement for CellLayout's grid inside Workspace's single page. See
- * design/vertical-home-strategies.md and design/architecture-reassessment.md.
+ * Continuously-scrolling **masonry grid** of home-screen items, replacing CellLayout's paged grid
+ * inside Workspace's single page.
+ *
+ * Placement follows Windows Phone Start semantics: items pack from the top with no holes, removal
+ * compacts everything after it upward, and insertion pushes subsequent items down. All of that
+ * falls out of one rule -- [AresPacker]'s greedy first-fit over `rank` order -- with
+ * [AresMasonryLayoutManager] turning the resulting cells into pixels. Position is *derived*, never
+ * stored: the model persists `rank` plus each item's `(spanX, spanY)` and nothing else. See
+ * design/requirements-alignment.md §4 and design/scrolling-grid-home.md.
+ *
+ * This replaced an earlier one-item-per-row list. The data wiring survived that change unchanged --
+ * an ordered list already had the no-holes property by construction; only the rendering differs.
  *
  * Hosted as a child of the active page's [com.android.launcher3.ShortcutAndWidgetContainer]
  * (see Workspace.getOrCreateAresHomeList). That container is what
@@ -26,15 +33,35 @@ import com.android.launcher3.celllayout.CellLayoutLayoutParams
  * every touch before PagedView saw it -- killing the Discover feed swipe. See
  * design/architecture-reassessment.md §0.
  */
-class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(context) {
+class AresHomeListView(context: Context, private val launcher: Launcher) : RecyclerView(context) {
 
     val aresAdapter = AresHomeAdapter(launcher)
 
+    private val masonry = AresMasonryLayoutManager { position -> aresAdapter.spanOf(position) }
+
     init {
-        layoutManager = LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false)
+        layoutManager = masonry
         adapter = aresAdapter
         clipToPadding = false
-        ItemTouchHelper(AresHomeReorder.Callback(launcher, this)).attachToRecyclerView(this)
+        applyGridMetrics()
+        // Drag-to-reorder is deliberately absent for now. The ItemTouchHelper wiring here was built
+        // for a one-per-line list, where a drop target is just a row index; under masonry the drop
+        // target is a rank insertion point resolved against the packed layout. Reinstating it is
+        // its own increment -- see design/scrolling-grid-home.md §7.2.
+    }
+
+    /**
+     * Sets the grid's column count and cell height from the device profile.
+     *
+     * Columns follow the launcher's own grid so the home screen matches the density the user
+     * already has configured, rather than inventing a second notion of "how many columns". Cell
+     * height likewise reuses the profile's cell height, which keeps icons and widgets at the
+     * proportions their providers and icon packs were designed against.
+     */
+    private fun applyGridMetrics() {
+        val dp = launcher.deviceProfile
+        masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
+        masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
     }
 
     /**
@@ -100,7 +127,18 @@ class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(cont
         // Intentionally empty.
     }
 
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        // Widget providers can only be told their box once the layout manager has assigned one.
+        aresAdapter.reportPendingWidgetSizes()
+    }
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        // Re-read the grid metrics each measure: folding changes the device profile, and the
+        // column count and cell height must follow it or the packing is computed against stale
+        // geometry.
+        applyGridMetrics()
+
         // ShortcutAndWidgetContainer.onMeasure() calls setMeasuredDimension() *before* measuring
         // its children, so the parent's dimensions are already valid here. Size to them, and
         // sync the CellLayoutLayoutParams so layoutChild() -- which positions us from lp.x/y/

@@ -1091,6 +1091,18 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * AresLauncher: the home grid, or null before any desktop item has been bound.
+     *
+     * <p>Exposed for {@link app.lawnchair.areslauncher.AresHomeScrollGuard}, which needs the grid's
+     * on-screen bounds to decide whether a gesture began on it. Read-only by convention: callers
+     * ask it about geometry, they do not mutate it.
+     */
+    @Nullable
+    public AresHomeListView getAresHomeList() {
+        return mAresHomeList;
+    }
+
+    /**
      * AresLauncher: true once the home list exists, i.e. this Workspace owns desktop items.
      *
      * <p>Used by {@link app.lawnchair.areslauncher.AresWidgetAdd} to scope the widget-add path,
