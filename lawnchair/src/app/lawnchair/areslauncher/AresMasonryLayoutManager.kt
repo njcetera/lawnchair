@@ -64,6 +64,24 @@ class AresMasonryLayoutManager(
     private var layout: AresPacker.Layout? = null
     private var scrollOffset = 0
 
+    /**
+     * Set for one layout pass to animate items from where they were to where packing puts them.
+     *
+     * Off by default, so scrolling and recycling stay instant — animating those would smear the
+     * grid every frame. It is switched on only for a *discrete* change the user caused (a resize,
+     * a removal), where the point is to show the cause and effect: this item grew, so these
+     * neighbours moved aside.
+     */
+    private var animateNextLayout = false
+
+    /**
+     * Pre-layout bounds by adapter position, captured when [animateNextLayout] is set.
+     *
+     * Keyed by position rather than view because packing may hand a position to a different view,
+     * and it is the *item's* movement the animation is describing.
+     */
+    private val previousBounds = mutableMapOf<Int, android.graphics.Rect>()
+
     override fun generateDefaultLayoutParams(): RecyclerView.LayoutParams =
         RecyclerView.LayoutParams(
             RecyclerView.LayoutParams.WRAP_CONTENT,
@@ -104,10 +122,96 @@ class AresMasonryLayoutManager(
             scrollOffset = 0
             return
         }
+        if (animateNextLayout) capturePreviousBounds()
+
         val l = ensureLayout(state)
         scrollOffset = scrollOffset.coerceIn(0, maxScroll(l))
         detachAndScrapAttachedViews(recycler)
         fill(recycler, l)
+
+        if (animateNextLayout) {
+            animateFromPreviousBounds()
+            animateNextLayout = false
+            previousBounds.clear()
+        }
+    }
+
+    /**
+     * Requests that the next layout pass animate rather than snap.
+     *
+     * Call immediately before [invalidatePacking] for a user-initiated change. It is a one-shot
+     * flag: it clears itself after the pass, so a scroll landing right afterwards is unaffected.
+     */
+    fun animateNextLayout() {
+        animateNextLayout = true
+    }
+
+    private fun capturePreviousBounds() {
+        previousBounds.clear()
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val position = getPosition(child)
+            if (position == RecyclerView.NO_POSITION) continue
+            previousBounds[position] = android.graphics.Rect(
+                child.left,
+                child.top,
+                child.right,
+                child.bottom,
+            )
+        }
+    }
+
+    /**
+     * Animates each item from its pre-layout box to its new one.
+     *
+     * Movement is expressed as translation, and a *size* change as a scale that starts at the old
+     * dimensions and relaxes to 1. Animating the measured size instead would mean re-measuring the
+     * child every frame — expensive, and for a widget it would make the provider re-render its
+     * RemoteViews repeatedly mid-animation.
+     *
+     * Scaling is pinned to the top-left pivot so growth reads as the tile extending into the space
+     * its neighbours are vacating, rather than expanding symmetrically from its middle and
+     * appearing to overlap them on the way.
+     *
+     * Items with no previous box (scrolled in, or newly added) are left alone: fading them in
+     * would draw attention to recycling, which is not what the user did.
+     */
+    private fun animateFromPreviousBounds() {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val position = getPosition(child)
+            val old = previousBounds[position] ?: continue
+
+            val dx = (old.left - child.left).toFloat()
+            val dy = (old.top - child.top).toFloat()
+            val newWidth = (child.right - child.left).toFloat()
+            val newHeight = (child.bottom - child.top).toFloat()
+            val sx = if (newWidth > 0f) old.width() / newWidth else 1f
+            val sy = if (newHeight > 0f) old.height() / newHeight else 1f
+
+            val moved = dx != 0f || dy != 0f
+            val resized = sx != 1f || sy != 1f
+            if (!moved && !resized) continue
+
+            child.pivotX = 0f
+            child.pivotY = 0f
+            child.translationX = dx
+            child.translationY = dy
+            // Compose with the edit-mode scale the host may already have applied, rather than
+            // overwriting it -- otherwise a resize would pop the tile back to full size.
+            val restScaleX = child.scaleX
+            val restScaleY = child.scaleY
+            child.scaleX = restScaleX * sx
+            child.scaleY = restScaleY * sy
+
+            child.animate()
+                .translationX(0f)
+                .translationY(0f)
+                .scaleX(restScaleX)
+                .scaleY(restScaleY)
+                .setDuration(LAYOUT_ANIM_MS)
+                .start()
+        }
     }
 
     /** Attaches, measures and positions every item whose cell rect intersects the viewport. */
@@ -227,4 +331,14 @@ class AresMasonryLayoutManager(
 
     /** Current vertical scroll offset in px. */
     fun scrollOffsetPx(): Int = scrollOffset
+
+    private companion object {
+        /**
+         * Duration of the repack animation after a resize or removal.
+         *
+         * Long enough to read as displacement rather than a jump, short enough that a run of
+         * removals does not feel like waiting on the launcher.
+         */
+        const val LAYOUT_ANIM_MS = 200L
+    }
 }
