@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.Launcher
+import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 
 /**
@@ -51,14 +52,19 @@ class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(cont
         // width/height rather than from our measured size -- places us full-bleed.
         val host = parent as? ViewGroup
         val width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
-        val height = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+        val hostHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+
+        // Start below the pinned smartspace rather than on top of it (it occupies grid row 0 of the
+        // same container, so a full-bleed list would overlap row 1).
+        val top = pinnedHeaderBottom(host)
+        val height = (hostHeight - top).coerceAtLeast(0)
 
         // Mutating the existing lp's fields rather than calling setLayoutParams() avoids
         // triggering a nested requestLayout() from inside a measure pass.
         (layoutParams as? CellLayoutLayoutParams)?.let { lp ->
             lp.isLockedToGrid = false
             lp.x = 0
-            lp.y = 0
+            lp.y = top
             lp.width = width
             lp.height = height
         }
@@ -67,5 +73,33 @@ class AresHomeListView(context: Context, launcher: Launcher) : RecyclerView(cont
             MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
         )
+    }
+
+    /**
+     * Bottom edge of the first-page pinned item (the smartspace / at-a-glance header), or 0 when it
+     * isn't present -- it's behind a preference, so a user with smartspace disabled gets the full
+     * height.
+     *
+     * Workspace.bindAndInitFirstWorkspaceScreen() adds that item to this same container via
+     * addViewToCellLayout() at grid cell (0,0) spanning the full width, tagged with
+     * R.id.search_container_workspace. It stays grid-locked, so its CellLayoutLayoutParams carry
+     * resolved pixel bounds. It's added at child index 0 and therefore measured before this view,
+     * so those bounds are already populated by the time we read them; measuredHeight is used as a
+     * fallback in case that ordering ever changes.
+     *
+     * Deliberately reads the smartspace's geometry instead of moving or resizing it -- it is shared
+     * with Launcher3's own first-page handling, so offsetting our own list is the smaller change.
+     */
+    private fun pinnedHeaderBottom(host: ViewGroup?): Int {
+        if (host == null) return 0
+        for (i in 0 until host.childCount) {
+            val child = host.getChildAt(i)
+            if (child === this || child.id != R.id.search_container_workspace) continue
+            if (child.visibility == GONE) return 0
+            val lp = child.layoutParams as? CellLayoutLayoutParams
+            val bottom = if (lp != null && lp.height > 0) lp.y + lp.height else child.measuredHeight
+            return bottom.coerceAtLeast(0)
+        }
+        return 0
     }
 }

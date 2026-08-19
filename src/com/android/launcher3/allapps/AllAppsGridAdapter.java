@@ -43,6 +43,7 @@ import com.android.launcher3.views.ActivityContext;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import app.lawnchair.areslauncher.AresAllApps;
 
 /**
  * The grid view adapter of all the apps.
@@ -86,9 +87,11 @@ public class AllAppsGridAdapter<T extends Context & ActivityContext> extends
         super(activityContext, inflater, apps, adapterProvider);
         mGridLayoutMgr = new AppsGridLayoutManager(mActivityContext);
         mGridLayoutMgr.setSpanSizeLookup(new GridSpanSizer());
-        // AresLauncher: app-list pane is a single vertical column (one app per row), not
-        // Launcher3's stock multi-column grid. See design/implementation-scope.md §8.
-        setAppsPerRow(1);
+        // AresLauncher: the launcher's app-list pane is a single vertical column (one app per row),
+        // not Launcher3's stock multi-column grid. Scoped so the Taskbar's all-apps sheet, which
+        // shares this adapter, keeps its stock grid. See design/niagara-app-list.md §3.
+        setAppsPerRow(AresAllApps.isAresAppListPane(activityContext)
+                ? 1 : activityContext.getDeviceProfile().numShownAllAppsColumns);
     }
 
     /**

@@ -122,6 +122,7 @@ import app.lawnchair.preferences2.PreferenceManager2;
 import app.lawnchair.theme.color.tokens.ColorTokens;
 import app.lawnchair.util.LawnchairUtilsKt;
 import app.lawnchair.ui.StretchRecyclerViewContainer;
+import app.lawnchair.areslauncher.AresAllApps;
 
 /**
  * All apps container view with search support for use in a dragging activity.
@@ -1193,10 +1194,14 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     @Override
     public void onDeviceProfileChanged(DeviceProfile dp) {
         for (AdapterHolder holder : mAH) {
-            // AresLauncher: keep the app-list pane single-column across device-profile changes
-            // (rotation/fold) too. See design/implementation-scope.md §8.
-            holder.mAdapter.setAppsPerRow(1);
-            holder.mAppsList.setNumAppsPerRowAllApps(1);
+            // AresLauncher: keep the launcher's app-list pane single-column across device-profile
+            // changes (rotation/fold) too. Scoped so the Taskbar and secondary-display surfaces,
+            // which share this container, keep their stock column count.
+            // See design/niagara-app-list.md §3.
+            int appsPerRow = AresAllApps.isAresAppListPane(mActivityContext)
+                    ? 1 : dp.numShownAllAppsColumns;
+            holder.mAdapter.setAppsPerRow(appsPerRow);
+            holder.mAppsList.setNumAppsPerRowAllApps(appsPerRow);
             if (holder.mRecyclerView != null) {
                 // Remove all views and clear the pool, while keeping the data same. After this
                 // call, all the viewHolders will be recreated.

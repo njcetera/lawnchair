@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher row metrics, shared by the vertical home list and the app-list pane so both
+     surfaces stay visually consistent. Niagara-style: small de-emphasised icon on the left, label
+     as the dominant element, generous row height. See design/implementation-scope.md §8.
+
+     These are a tuning starting point, not a derived spec. The sparse/text-forward look is a
+     taste call. Adjust here and both surfaces follow.
+-->
+<resources>
+    <!-- Row height. Taller than a dense list row, well short of a grid cell. -->
+    <dimen name="ares_app_row_height">64dp</dimen>
+
+    <!-- Icon is deliberately smaller than the stock all-apps grid icon (~48-56dp) so the label
+         reads as the primary element. -->
+    <dimen name="ares_app_row_icon_size">36dp</dimen>
+
+    <!-- Label is the dominant element, so slightly larger than the stock icon label. -->
+    <dimen name="ares_app_row_text_size">17sp</dimen>
+
+    <!-- Leading inset for the icon, and the gap between icon and label. -->
+    <dimen name="ares_app_row_padding_horizontal">24dp</dimen>
+    <dimen name="ares_app_row_drawable_padding">16dp</dimen>
+</resources>

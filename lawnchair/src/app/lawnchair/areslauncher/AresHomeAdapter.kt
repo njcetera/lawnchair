@@ -1,11 +1,15 @@
 package app.lawnchair.areslauncher
 
+import android.text.TextUtils
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
+import com.android.launcher3.R
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -86,16 +90,58 @@ class AresHomeAdapter(private val launcher: Launcher) :
                 itemView.startLongPressAction()
                 true
             }
+            applyRowStyle(itemView)
         }
         itemView.isHapticFeedbackEnabled = false
 
+        val rowHeight = if (itemView is BubbleTextView) {
+            holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height)
+        } else {
+            // Widgets size themselves; don't force a row height on them.
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        }
         holder.container.addView(
             itemView,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-            ),
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, rowHeight),
         )
+    }
+
+    /**
+     * Applies the Niagara-style row appearance to a home-list icon: icon on the left, label
+     * dominant and adjacent, both vertically centred in a generous row.
+     *
+     * Done programmatically rather than in XML because workspace items are inflated by
+     * [com.android.launcher3.util.ItemInflater], which hardcodes `R.layout.app_icon` with no
+     * override hook. `app_icon.xml` is shared with folders, app pairs and other surfaces, so it is
+     * deliberately not edited in place -- see design/gesture-transition-reassessment.md §4.
+     *
+     * Note both attributes below are corrections of the stock vertical-grid styling:
+     *  - `centerVertically` must be OFF: its onMeasure() path sums icon + padding + text height,
+     *    which only holds when the icon sits ABOVE the text. In horizontal mode that over-estimates
+     *    content height and produces a large bogus top padding.
+     *  - gravity must be overridden: `BaseIcon.Workspace` inherits `center_horizontal`, which would
+     *    centre the label in the leftover width instead of placing it next to the icon.
+     *
+     * Known gap: the icon keeps the workspace icon size, because `BubbleTextView.mIconSize` is
+     * `private final` and only settable via the `iconSizeOverride` XML attribute. The app-list pane
+     * gets the smaller Niagara icon via `ares_all_apps_icon.xml`; matching it here would require an
+     * override hook in the shared ItemInflater.
+     */
+    private fun applyRowStyle(icon: BubbleTextView) {
+        val res = icon.resources
+        icon.setLayoutHorizontal(true)
+        icon.setCenterVertically(false)
+        icon.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        icon.compoundDrawablePadding =
+            res.getDimensionPixelSize(R.dimen.ares_app_row_drawable_padding)
+        val padH = res.getDimensionPixelSize(R.dimen.ares_app_row_padding_horizontal)
+        icon.setPaddingRelative(padH, 0, padH, 0)
+        icon.setTextSize(
+            TypedValue.COMPLEX_UNIT_PX,
+            res.getDimension(R.dimen.ares_app_row_text_size),
+        )
+        icon.maxLines = 1
+        icon.ellipsize = TextUtils.TruncateAt.END
     }
 
     override fun onViewRecycled(holder: ViewHolder) {

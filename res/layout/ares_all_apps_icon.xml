@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher: Niagara-style app-list row (icon-left, label-dominant, generous row height).
+
+     Deliberately a separate file from all_apps_icon.xml, which is shared with the Taskbar's
+     all-apps sheet via BaseAllAppsAdapter; editing that in place restyles the Taskbar too.
+     See design/niagara-app-list.md §3 and design/implementation-scope.md §8.
+
+     Two attributes from the stock layout are deliberately NOT set here:
+       - launcher:centerVertically is incompatible with layoutHorizontal. Its onMeasure() path sums
+         icon + padding + text height, which only holds when the icon is stacked ABOVE the text; in
+         horizontal mode that over-estimates content height and yields a large bogus paddingTop.
+       - the style's android:gravity="center_horizontal" (inherited from BaseIconUnBounded) is
+         overridden below, otherwise the label floats centred in the leftover width instead of
+         sitting next to the icon.
+     Both diagnosed in design/gesture-transition-reassessment.md §4.
+-->
+<com.android.launcher3.BubbleTextView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:launcher="http://schemas.android.com/apk/res-auto"
+    style="@style/BaseIcon.AllApps"
+    android:id="@+id/icon"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/ares_app_row_height"
+    android:drawablePadding="@dimen/ares_app_row_drawable_padding"
+    android:ellipsize="end"
+    android:gravity="start|center_vertical"
+    android:maxLines="1"
+    android:paddingStart="@dimen/ares_app_row_padding_horizontal"
+    android:paddingEnd="@dimen/ares_app_row_padding_horizontal"
+    android:textSize="@dimen/ares_app_row_text_size"
+    launcher:iconDisplay="all_apps"
+    launcher:iconSizeOverride="@dimen/ares_app_row_icon_size"
+    launcher:layoutHorizontal="true" />

@@ -57,6 +57,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import app.lawnchair.areslauncher.AresAllApps;
 
 /**
  * The alphabetically sorted list of applications.
@@ -128,9 +129,11 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
         mAppNameComparator = new AppInfoComparator(context);
         mWorkProviderManager = workProfileManager;
         mPrivateProviderManager = privateProfileManager;
-        // AresLauncher: app-list pane is a single vertical column (one app per row).
-        // See design/implementation-scope.md §8.
-        mNumAppsPerRowAllApps = 1;
+        // AresLauncher: the launcher's app-list pane is a single vertical column (one app per row).
+        // Scoped so the Taskbar and secondary-display all-apps surfaces, which share this class,
+        // keep their stock column count. See design/niagara-app-list.md §3.
+        mNumAppsPerRowAllApps = AresAllApps.isAresAppListPane(mActivityContext)
+                ? 1 : mActivityContext.getDeviceProfile().numShownAllAppsColumns;
         if (mAllAppsStore != null) {
             mAllAppsStore.addUpdateListener(this);
         }

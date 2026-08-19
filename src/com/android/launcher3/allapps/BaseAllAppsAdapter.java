@@ -41,6 +41,8 @@ import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.android.launcher3.BubbleTextView;
+
+import app.lawnchair.areslauncher.AresAllApps;
 import com.android.launcher3.R;
 import com.android.launcher3.allapps.search.SearchAdapterProvider;
 import com.android.launcher3.folder.FolderIcon;
@@ -232,17 +234,32 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
     public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
         switch (viewType) {
             case VIEW_TYPE_ICON:
-                int layout = mActivityContext.getDeviceProfile().inv.enableTwoLinesInAllApps
-                        ? R.layout.all_apps_icon_twoline : R.layout.all_apps_icon;
+                // AresLauncher: the launcher's own app-list pane uses a Niagara-style row layout
+                // (icon-left, label-dominant, fixed row height). Scoped via isAresAppListPane so
+                // the Taskbar's all-apps sheet -- which shares this adapter -- keeps stock
+                // behaviour. See design/niagara-app-list.md §3.
+                boolean aresPane = AresAllApps.isAresAppListPane(mActivityContext);
+                int layout;
+                if (aresPane) {
+                    layout = R.layout.ares_all_apps_icon;
+                } else {
+                    layout = mActivityContext.getDeviceProfile().inv.enableTwoLinesInAllApps
+                            ? R.layout.all_apps_icon_twoline : R.layout.all_apps_icon;
+                }
                 BubbleTextView icon = (BubbleTextView) mLayoutInflater.inflate(
                         layout, parent, false);
                 icon.setLongPressTimeoutFactor(1f);
                 icon.setOnFocusChangeListener(mIconFocusListener);
                 icon.setOnClickListener(mOnIconClickListener);
                 icon.setOnLongClickListener(mOnIconLongClickListener);
-                // Ensure the all apps icon height matches the workspace icons in portrait mode.
-                icon.getLayoutParams().height =
-                        mActivityContext.getDeviceProfile().getAllAppsProfile().getCellHeightPx();
+                if (!aresPane) {
+                    // Ensure the all apps icon height matches the workspace icons in portrait mode.
+                    // Skipped for the Ares pane, whose row height comes from its own layout --
+                    // getCellHeightPx() is a grid-cell height and would override it.
+                    icon.getLayoutParams().height =
+                            mActivityContext.getDeviceProfile().getAllAppsProfile()
+                                    .getCellHeightPx();
+                }
                 return new ViewHolder(icon);
             case VIEW_TYPE_EMPTY_SEARCH:
                 return new ViewHolder(mLayoutInflater.inflate(R.layout.all_apps_empty_search,
