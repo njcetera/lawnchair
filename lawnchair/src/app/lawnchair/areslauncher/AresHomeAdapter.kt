@@ -54,6 +54,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
     var resizeHost: ((ItemInfo) -> Unit)? = null
 
     /**
+     * Invoked when an item's remove (×) badge is tapped, with the item to take off the home screen.
+     *
+     * Host-owned for the same reason as [resizeHost]: removal has to write the model, release a
+     * widget's host id and let the grid repack. Note this removes the item from the **home
+     * screen only** — it never uninstalls the app, which stays in the app list.
+     */
+    var removeHost: ((ItemInfo) -> Unit)? = null
+
+    /**
      * Whether the surface is currently in edit mode.
      *
      * Only consulted to decide whether a widget row shows its resize chevron. The host keeps this
@@ -98,6 +107,26 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
         if (target != null && existing == null) {
             container.addView(AresWidgetResize.createChevron(container) { resizeHost?.invoke(target) })
+        } else if (target == null && existing != null) {
+            container.removeView(existing)
+        }
+        syncRemoveBadgeFor(container, info)
+    }
+
+    /**
+     * The single place a remove badge is added or removed.
+     *
+     * Unlike the chevron this applies to **every** item type — apps, folders and widgets alike —
+     * because anything on the home screen can be taken off it. Otherwise it mirrors the chevron
+     * exactly, including the reason it funnels through one function: widget holders are
+     * `setIsRecyclable(false)`, so a holder can be bound again while still carrying last time's
+     * badge, and a blind `addView` would stack a second one on top.
+     */
+    private fun syncRemoveBadgeFor(container: FrameLayout, info: ItemInfo?) {
+        val existing = container.findViewWithTag<View>(AresRemoveBadge.BADGE_TAG)
+        val target = info?.takeIf { editMode }
+        if (target != null && existing == null) {
+            container.addView(AresRemoveBadge.createBadge(container) { removeHost?.invoke(target) })
         } else if (target == null && existing != null) {
             container.removeView(existing)
         }

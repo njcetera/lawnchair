@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher - the cross itself. Composed into a backdrop by ares_remove_badge.xml; that file
+     is what callers reference, this one is only its top layer.
+
+     A plain cross rather than a minus or a bin: a bin reads as "delete the app" which is exactly
+     the wrong promise (the item leaves the home screen, the app stays installed), and a minus reads
+     as "collapse".
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/textColorPrimary">
+
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M18.3,5.71 16.89,4.3 12,9.19 7.11,4.3 5.7,5.71 10.59,10.6 5.7,15.49l1.41,1.41L12,12.01l4.89,4.89 1.41,-1.41 -4.89,-4.89z" />
+</vector>

@@ -56,4 +56,19 @@
     <dimen name="ares_widget_resize_touch_size">48dp</dimen>
     <!-- Inset from the widget's bottom-end corner. -->
     <dimen name="ares_widget_resize_margin">4dp</dimen>
+
+    <!-- Remove (x) affordance, shown on every home item in edit mode, top-start corner.
+         Shares ares_widget_resize_touch_size and _margin so the two affordances are the same
+         physical inset - they sit on opposite corners of the same tile, and a mismatch reads as a
+         mistake.
+
+         This is the size of the *drawn* badge, not of its touch target. The target stays 48dp; the
+         badge is composed at this size and centred inside it (see ares_remove_badge.xml). Painting
+         the backdrop across the full target instead made the circle nearly as wide as a 1x1 app
+         icon, which read as a blob beside the icon rather than a badge on it. 28dp matches the
+         resize chevron so the two corners carry equal visual weight. -->
+    <dimen name="ares_remove_badge_size">28dp</dimen>
+    <!-- The cross inside that circle. Inset enough to leave a visible ring of backdrop around it,
+         so the glyph reads against a busy icon rather than blending into it. -->
+    <dimen name="ares_remove_badge_glyph_size">18dp</dimen>
 </resources>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher - the remove affordance shown on every home item while the grid is in edit mode.
+
+     Tapping it takes the item off the HOME SCREEN. It does not uninstall the app: iOS conflates
+     those two, a launcher must not. Uninstall stays in the long-press context popup, where it has
+     a confirmation step and where the user already expects to find it.
+
+     ## Why the visible badge is smaller than the view that hosts it
+
+     The first cut painted the backdrop as the ImageView's background, so the circle filled the
+     whole 48dp touch target. On a 1x1 tile that is nearly as wide as the app icon itself, and
+     because the icon is centred in its cell while the badge is pinned to the corner, the two barely
+     overlapped: it read as a detached blob floating beside the icon rather than a badge on it. The
+     user asked for "a little x", and that was not little.
+
+     Both sizes are wanted independently. The touch target has to clear the 44dp minimum; the glyph
+     has to stay small enough not to bury what it sits on. So the target stays 48dp and the drawn
+     badge is composed here at its own size, centred. AresRemoveBadge sets scaleType=CENTER so this
+     draws at its intrinsic size instead of being stretched to fill.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:width="@dimen/ares_remove_badge_size"
+        android:height="@dimen/ares_remove_badge_size"
+        android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="?attr/popupColorPrimary" />
+        </shape>
+    </item>
+
+    <item
+        android:width="@dimen/ares_remove_badge_glyph_size"
+        android:height="@dimen/ares_remove_badge_glyph_size"
+        android:drawable="@drawable/ares_remove_badge_glyph"
+        android:gravity="center" />
+</layer-list>
