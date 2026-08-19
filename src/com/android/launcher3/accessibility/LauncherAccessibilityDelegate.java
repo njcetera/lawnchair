@@ -20,6 +20,7 @@ import android.util.Log;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.accessibility.AccessibilityEvent;
 
 import androidx.annotation.Nullable;
@@ -253,11 +254,21 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
             return actions;
         }
 
+        // AresLauncher §6: every resize action below is expressed as "is the neighbouring region of
+        // the CellLayout vacant", and a widget on the home grid has no CellLayout -- it is a
+        // RecyclerView row, so this cast threw ClassCastException and took the launcher down the
+        // moment any accessibility client walked the tree (reproduced with `uiautomator dump`;
+        // TalkBack would do the same). Offering no resize action is the honest answer until the
+        // list-native resize frame in §6 lands; the chevron is the affordance in the meantime.
+        ViewParent grandParent = host.getParent() == null ? null : host.getParent().getParent();
+        if (!(host.getParent() instanceof DragView) && !(grandParent instanceof CellLayout)) {
+            return actions;
+        }
         CellLayout layout;
         if (host.getParent() instanceof DragView) {
             layout = (CellLayout) ((DragView) host.getParent()).getContentViewParent().getParent();
         } else {
-            layout = (CellLayout) host.getParent().getParent();
+            layout = (CellLayout) grandParent;
         }
         if ((providerInfo.resizeMode & AppWidgetProviderInfo.RESIZE_HORIZONTAL) != 0) {
             if (layout.isRegionVacant(info.cellX + info.spanX, info.cellY, 1, info.spanY) ||
