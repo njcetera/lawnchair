@@ -206,10 +206,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     /**
      * Enters edit mode.
      *
-     * Called from the item long-press handler, which *also* shows `PopupContainerWithArrow`. Both
-     * deliberately happen: the popup is the only route to remove an item or reach its shortcuts, so
-     * suppressing it would lose that with no replacement (per-item affordances are a later
-     * increment). Dismissing the popup leaves the surface in edit mode, ready to drag.
+     * Called from the item long-press handler, which raises **only** this — the context popup is
+     * kept for a long-press made from *inside* the mode. One gesture, one state, so one dismissal
+     * gesture is enough to undo it. See the long-click listener in [AresHomeAdapter] for why the
+     * two used to come up together and why they no longer do.
      */
     fun enterEditMode() {
         if (editMode) return

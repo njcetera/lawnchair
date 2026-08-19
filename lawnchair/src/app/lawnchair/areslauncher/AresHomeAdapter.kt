@@ -398,14 +398,32 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // *enter* edit mode by long-pressing it (folders dragged fine once it was active by other
         // means). The user has a Google folder on their home screen, so it was immediately hit.
         itemView.setOnLongClickListener {
+            // One gesture, one state. A long-press on a tile that is *not* already editing enters
+            // edit mode and nothing else; the context popup comes up only on a long-press made
+            // from inside the mode.
+            //
+            // Showing both at once was incoherent in use, and measurably so. Edit mode and the
+            // popup are two floating states raised by a single gesture, and each dismissal gesture
+            // clears exactly one of them -- so tapping empty space (or pressing BACK) once closed
+            // the popup and left the grid editing, and it took a second identical gesture to
+            // actually leave. It also blocked the thing edit mode is *for*: with the popup up, the
+            // first touch anywhere outside it is spent closing it, so the immediate drag §9C asks
+            // for could not start until the user had dismissed a menu they never asked for.
+            //
+            // Nothing is lost. The popup is still the only route to App info, Uninstall and an
+            // app's shortcuts, and it is still a long-press away -- one made deliberately, from a
+            // surface that is already in the mode. Verified reachable that way on device before
+            // this change was written.
+            //
             // Deliberately not ItemLongClickListener.INSTANCE_WORKSPACE: that listener's job is
             // starting a CellLayout grid-drag, which the packed grid doesn't use.
             // startLongPressAction() -> PopupContainerWithArrow.showForIcon() takes a
-            // BubbleTextView, so only icons get the context popup; a folder enters edit mode
-            // without one. Both paths converge on the same enterEditMode(), which carries the
-            // mid-gesture guard -- edit mode is entered *during* a gesture, so that gesture's own
-            // UP would otherwise read as an empty-space tap and exit immediately.
-            if (itemView is BubbleTextView) {
+            // BubbleTextView, so only icons can show the popup at all; a folder never does.
+            //
+            // enterEditMode() carries the mid-gesture guard -- edit mode is entered *during* a
+            // gesture, so that gesture's own UP would otherwise read as an empty-space tap and
+            // exit immediately -- and is a no-op once the mode is on.
+            if (editMode && itemView is BubbleTextView) {
                 itemView.startLongPressAction()
             }
             editModeHost?.invoke()
