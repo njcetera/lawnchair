@@ -323,6 +323,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     private float mOverlayProgress; // 1 -> overlay completely visible, 0 -> home visible
     private final List<LauncherOverlayCallbacks> mOverlayCallbacks = new ArrayList<>();
 
+    // AresLauncher: right-edge (in LTR) overlay effect driving the app-list pane swipe (§9),
+    // mirroring the feed's left-edge mOverlayEdgeEffect above but on the opposite edge.
+    private OverlayEdgeEffect mAppListOverlayEdgeEffect;
+
     private boolean mForceDrawAdjacentPages = false;
 
     // Handles workspace state transitions
@@ -1542,9 +1546,27 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         return mOverlayEdgeEffect != null;
     }
 
+    /**
+     * AresLauncher: wires the app-list pane (§9) to the edge opposite the feed's — right in LTR,
+     * left in RTL — so both can coexist as independent edge-drag gestures on a single-page
+     * Workspace. Unlike {@link #setLauncherOverlay}, this never falls back to a plain
+     * {@link EdgeEffectCompat} when null; the app-list pane is always available, so this is only
+     * ever called once with a real proxy.
+     */
+    public void setAppListOverlay(LauncherOverlayTouchProxy overlay) {
+        mAppListOverlayEdgeEffect = new OverlayEdgeEffect(getContext(), overlay);
+        if (mIsRtl) {
+            mEdgeGlowLeft = mAppListOverlayEdgeEffect;
+        } else {
+            mEdgeGlowRight = mAppListOverlayEdgeEffect;
+        }
+    }
+
     @Override
     protected void snapToDestination() {
         if (mOverlayEdgeEffect != null && !mOverlayEdgeEffect.isFinished()) {
+            snapToPageImmediately(0);
+        } else if (mAppListOverlayEdgeEffect != null && !mAppListOverlayEdgeEffect.isFinished()) {
             snapToPageImmediately(0);
         } else {
             super.snapToDestination();

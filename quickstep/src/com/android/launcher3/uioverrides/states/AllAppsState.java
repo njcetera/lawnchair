@@ -180,7 +180,10 @@ public class AllAppsState extends LauncherState {
     }
 
     private static boolean isWorkspaceVisible(DeviceProfile deviceProfile) {
-        return deviceProfile.getDeviceProperties().isTablet() || (Flags.allAppsSheetForHandheld() && Flags.allAppsBlur());
+        // AresLauncher §9: always keep the workspace visible+scaled+blurred behind the all-apps
+        // reveal (stock only does this on tablets by default) — the pane transition is meant to
+        // read as one continuous canvas, not an opaque sheet covering a hidden home screen.
+        return true;
     }
 
     @Override
