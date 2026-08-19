@@ -16,28 +16,23 @@
 package com.android.launcher3.uioverrides.states;
 
 import static com.android.app.animation.Interpolators.DECELERATE_2;
-import static com.android.launcher3.Flags.enableScalingRevealHomeAnimation;
 import static com.android.launcher3.logging.StatsLogManager.LAUNCHER_STATE_ALLAPPS;
 
 import android.content.Context;
 import android.graphics.Color;
 
-import app.lawnchair.theme.color.tokens.ColorTokens;
 import com.android.internal.jank.Cuj;
 import com.android.launcher3.DeviceProfile;
-import com.android.launcher3.Flags;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.R;
 import com.android.launcher3.Workspace;
 import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.views.ScrimColors;
-import com.android.quickstep.util.BaseDepthController;
 import com.android.systemui.shared.system.InteractionJankMonitorWrapper;
 
 import java.util.concurrent.TimeUnit;
 
-import app.lawnchair.util.LawnchairUtilsKt;
 
 /**
  * Definition for AllApps state
@@ -51,12 +46,12 @@ public class AllAppsState extends LauncherState {
     /**
      * Fraction of screen width home travels left while the app-list pane comes in (§9).
      *
-     * Chosen by feel on-device: enough that home is visibly *moving with* the gesture rather than
-     * sitting still behind it, but far short of leaving the screen -- home stays visible and
-     * blurred behind the pane by design. Moving slower than the pane also reads as parallax, which
-     * is what makes two surfaces feel like one canvas.
+     * 1.0 -- home moves exactly as far as the pane, so the two behave as one rigid surface being
+     * panned across, not two layers sliding at different rates. An earlier 0.25 parallax was
+     * reported by the user as still reading like "a separate overlay pane"; differing rates are
+     * precisely what communicates depth, which is the opposite of the intent here.
      */
-    private static final float ARES_WORKSPACE_PAN_FRACTION = 0.25f;
+    private static final float ARES_WORKSPACE_PAN_FRACTION = 1.0f;
 
 
     public AllAppsState(int id) {
@@ -127,7 +122,9 @@ public class AllAppsState extends LauncherState {
 
     @Override
     public ScaleAndTranslation getWorkspaceScaleAndTranslation(Launcher launcher) {
-        return new ScaleAndTranslation(launcher.getDeviceProfile().workspaceContentScale,
+        // AresLauncher §9: NO_SCALE, not workspaceContentScale. A shrinking home reads as a layer
+        // receding behind a sheet; on one canvas both regions stay the same size and simply move.
+        return new ScaleAndTranslation(NO_SCALE,
                 getAresWorkspaceTranslationX(launcher), NO_OFFSET);
     }
 
@@ -139,11 +136,9 @@ public class AllAppsState extends LauncherState {
      * user's word for it was "more like an overlap than a pan". A Windows Phone Pivot moves *both*
      * surfaces as one canvas, so home has to travel too.
      *
-     * The offset is a fraction of screen width rather than the full width: at 1.0 home would leave
-     * the screen entirely, which defeats the point -- the whole reason
-     * {@code isWorkspaceVisible()} returns true is that home stays visible, scaled and blurred,
-     * behind the pane. A partial offset also reads as parallax, which is what sells two surfaces as
-     * one moving canvas rather than two slabs sliding in lockstep.
+     * The offset is the FULL screen width. Home leaving the screen is correct for a pan: you have
+     * moved past it, not covered it. {@code isWorkspaceVisible()} still returns true because home
+     * is genuinely visible throughout the drag -- it is only gone once the pan has completed.
      *
      * Returns {@link #NO_OFFSET} when two panels are active: unfolded, the pane is a persistent
      * panel in panel 1 and nothing should slide. {@code AresPaneSwipeController} already suppresses
@@ -173,27 +168,27 @@ public class AllAppsState extends LauncherState {
         }
     }
 
+    /**
+     * AresLauncher §9: no wallpaper depth or blur.
+     *
+     * Stock zooms and blurs the wallpaper so the all-apps sheet reads as floating above a receded
+     * background. On one canvas there is no "behind" -- home and the app list are two regions of
+     * the same flat surface over the same, unmodified wallpaper. Returning 0 matches
+     * {@link LauncherState}'s own default, i.e. the NORMAL-state treatment.
+     */
     @Override
     protected <DEVICE_PROFILE_CONTEXT extends Context & ActivityContext>
             float getDepthUnchecked(DEVICE_PROFILE_CONTEXT context) {
-        if (context.getDeviceProfile().shouldShowAllAppsOnSheet()) {
-            return context.getDeviceProfile().getBottomSheetProfile().getBottomSheetDepth();
-        } else {
-            // The scrim fades in at approximately 50% of the swipe gesture.
-            if (enableScalingRevealHomeAnimation()) {
-                // This means that the depth should be twice of what we want, in order to fully zoom
-                // out during the visible portion of the animation.
-                return BaseDepthController.DEPTH_60_PERCENT;
-            } else {
-                // This means that the depth should be greater than 1, in order to fully zoom out.
-                return 2f;
-            }
-        }
+        return 0f;
     }
 
+    /**
+     * AresLauncher §9: never blur the workspace. Home is a region of the canvas being panned past,
+     * not a backdrop to be pushed out of focus.
+     */
     @Override
     public boolean shouldBlurWorkspace(LauncherState targetState) {
-        return targetState == ALL_APPS || targetState == NORMAL;
+        return false;
     }
 
     @Override
@@ -248,19 +243,20 @@ public class AllAppsState extends LauncherState {
         return dp.getDeviceProperties().isPhone() && !dp.getDeviceProperties().isLandscape();
     }
 
+    /**
+     * AresLauncher §9: no workspace scrim.
+     *
+     * The scrim is a full-screen wash that darkens everything behind the all-apps surface -- the
+     * single strongest cue that one thing is on top of another. It is what remained of the
+     * "overlay" reading after {@code 588df013a3} removed the opaque bottom-sheet panel. On one
+     * canvas nothing is behind anything, so it goes.
+     *
+     * Note this leaves app-list content sitting directly on the wallpaper. If contrast proves
+     * insufficient, the fix is a subtle background on the PANE itself -- which travels with it, as
+     * a page of the canvas would -- never a wash over the workspace behind it.
+     */
     @Override
     public ScrimColors getWorkspaceScrimColor(Launcher launcher) {
-        int backgroundColor;
-        if (!launcher.getDeviceProfile().shouldShowAllAppsOnSheet()) {
-            // Always use an opaque scrim if there's no sheet.
-            backgroundColor = ColorTokens.AllAppsScrimColor.resolveColor(launcher);
-        } else if (!Flags.allAppsBlur()) {
-            // If there's a sheet but no blur, use the old scrim color.
-            backgroundColor = LawnchairUtilsKt.getAllAppsBackgroundColor(launcher, 
-                ColorTokens.WidgetsPickerScrim.resolveColor(launcher));
-        } else {
-            backgroundColor = ColorTokens.AllAppsScrimColor.resolveColor(launcher);
-        }
-        return new ScrimColors(backgroundColor, /* foregroundColor */ Color.TRANSPARENT);
+        return new ScrimColors(Color.TRANSPARENT, /* foregroundColor */ Color.TRANSPARENT);
     }
 }
