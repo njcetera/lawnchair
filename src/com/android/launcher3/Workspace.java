@@ -425,14 +425,123 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // from the shared DragLayer. Mutating DragLayer's children while DragLayer is mid-walk
         // over those same children crashed the launcher on every fold (device-confirmed:
         // "NULL CHILD at i=11, startCount=12, nowCount=11"). Deferring past the dispatch keeps the
-        // view tree stable for the duration of the walk. syncAresAppListPane() is idempotent, so
-        // collapsing repeat posts is safe and avoids redundant re-parenting.
-        removeCallbacks(mSyncAresAppListPane);
-        post(mSyncAresAppListPane);
+        // view tree stable for the duration of the walk.
+        postSyncAresDualPane();
     }
 
     /** See the deferral note in {@link #setInsets(Rect)}. */
-    private final Runnable mSyncAresAppListPane = this::syncAresAppListPane;
+    private final Runnable mSyncAresDualPane = this::syncAresDualPane;
+
+    /**
+     * AresLauncher §22: re-establishes the dual-pane invariant off the current call stack.
+     *
+     * <p>Always deferred, never called inline. Re-anchoring re-parents the pane, which fires its
+     * attach/detach hooks and those mutate the shared DragLayer's children; doing that from inside
+     * another walk over the view tree is what crashed every fold before (see the note in
+     * {@link #setInsets(Rect)}). {@link #syncAresDualPane()} is idempotent, so collapsing repeat
+     * posts is both safe and cheaper than re-parenting several times per bind.
+     */
+    private void postSyncAresDualPane() {
+        removeCallbacks(mSyncAresDualPane);
+        post(mSyncAresDualPane);
+    }
+
+    /**
+     * AresLauncher §22: the complete unfolded dual-pane invariant, re-asserted from scratch.
+     *
+     * <p>Three things must hold together, and asserting only some of them is what left the user
+     * looking at four panels with the app list three screens away:
+     *
+     * <ol>
+     *   <li>the home list is on workspace child 0,
+     *   <li>the app-list pane is on workspace child 1 -- the right-hand panel of the <em>first</em>
+     *       page-pair, which is the one actually on screen,
+     *   <li>no pages exist beyond that pair.
+     * </ol>
+     *
+     * <p>Order matters: the panes have to be re-anchored <em>before</em> the prune, because a stray
+     * page holding the pane does not look empty and would survive the sweep.
+     */
+    private void syncAresDualPane() {
+        reanchorAresHomeList();
+        syncAresAppListPane();
+        pruneAresStrayPages();
+    }
+
+    /**
+     * Puts the home list back on workspace child 0 if something moved the pages under it.
+     *
+     * <p>{@link #getOrCreateAresHomeList()} already pins it there, but only runs while items are
+     * being bound. {@link #applyScreenOrderToChildViews()} re-sorts the child views afterwards, so
+     * without this the home list follows its old page to wherever the persisted screen order puts
+     * it. Deliberately does not create the list -- a workspace with no desktop items should stay
+     * that way.
+     */
+    private void reanchorAresHomeList() {
+        if (mAresHomeList != null) {
+            getOrCreateAresHomeList();
+        }
+    }
+
+    /**
+     * Drops workspace pages beyond the first panel pair while the dual pane is up.
+     *
+     * <p>Strategy D flattens every CONTAINER_DESKTOP item into the single home list on child 0, so
+     * a logical screen carries no content of its own -- the model's screen ids exist only to keep
+     * the loader's cellX/cellY validation happy, and {@link
+     * app.lawnchair.areslauncher.AresWidgetAdd#findFreeCell} mints a fresh one whenever the current
+     * ones are full. Every screen past the first therefore renders as a blank page that the user
+     * can swipe to, and in two-panel mode each one is <em>doubled</em> into a pair.
+     *
+     * <p>Stock's own sweep cannot do this. {@link #stripEmptyScreens()} deliberately preserves any
+     * empty page whose id is in the persisted screen order, and {@link
+     * #convertFinalScreenToEmptyScreenIfNecessary()} gives up entirely as soon as the last page is
+     * non-empty -- which the misplaced pane made true, so the strays it created also protected
+     * themselves. Both behaviours are correct for stock, where an empty page is a place the user
+     * put nothing yet; here there is no such thing.
+     *
+     * <p>Scoped to two-panel mode on purpose: folded page bookkeeping is reported working and is
+     * left exactly as it was.
+     */
+    private void pruneAresStrayPages() {
+        if (mAresHomeList == null || !isTwoPanelEnabled() || mLauncher.isWorkspaceLoading()) {
+            return;
+        }
+        int keep = getPanelCount();
+        if (getChildCount() <= keep) {
+            return;
+        }
+        boolean removedAny = false;
+        // Back to front: removing a child shifts every index above it.
+        for (int i = getChildCount() - 1; i >= keep; i--) {
+            CellLayout page = (CellLayout) getChildAt(i);
+            // Never strip a page that is holding something. After the re-anchoring above this can
+            // only be a genuine grid item, but a widget mid-drop would qualify too and must be left
+            // alone.
+            if (page.getShortcutsAndWidgets().getChildCount() != 0) {
+                continue;
+            }
+            int screenId = getCellLayoutId(page);
+            if (screenId == -1 || screenId == FIRST_SCREEN_ID) {
+                continue;
+            }
+            mWorkspaceScreens.remove(screenId);
+            mScreenOrder.removeValue(screenId);
+            removeView(page);
+            removedAny = true;
+        }
+        if (!removedAny) {
+            return;
+        }
+        if (getNextPage() >= getChildCount()) {
+            setCurrentPage(0);
+        }
+        updateAccessibilityViewPageDescription();
+        showPageIndicatorAtCurrentScroll();
+        // Persist the shortened order, otherwise the stale one is merged back in by
+        // WorkspaceData.collectWorkspaceScreens and the strays return on the next bind.
+        persistCurrentScreenOrderSync();
+    }
 
     private void setPageIndicatorInset() {
         DeviceProfile grid = mLauncher.getDeviceProfile();
@@ -804,8 +913,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         updatePageScrollValues();
         updateCellLayoutMeasures();
         // AresLauncher: panel 1 only exists once a second page has been inserted, so this is the
-        // earliest point the dual-pane app list can be attached during a bind.
+        // earliest point the dual-pane app list can be attached during a bind. Anchor inline so the
+        // pane is never missing for a frame, and post the full sweep so the stray pages this bind is
+        // still busy creating get cleaned up once it settles (pruning inline would fight the bind,
+        // which inserts screens one at a time).
         syncAresAppListPane();
+        postSyncAresDualPane();
         return newScreen;
     }
 
@@ -3825,6 +3938,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             }
         }
         updatePageScrollValues();
+        // AresLauncher §22: this re-sorts the child views into the persisted screen order, which
+        // slides the home list and the app-list pane onto whatever page ends up under them. That is
+        // exactly how the pane came to sit three screens off-screen: it was correctly attached to
+        // child 1 during the bind, and this reordering moved it to child 3 with nothing to put it
+        // back. Re-assert the invariant afterwards.
+        postSyncAresDualPane();
     }
 
     public void reorderBoundWorkspaceScreens(IntArray orderedScreenIds) {
