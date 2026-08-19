@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher §17 - background for the collapsed/expanding search affordance on the app-list
+     pane. A large corner radius reads as a circle while the view is collapsed to its 56dp square
+     and as a pill once it expands, so the same drawable covers both ends of the animation without
+     needing to be swapped mid-morph.
+
+     Ares-owned: res/drawable/bg_all_apps_searchbox.xml is shared with the stock search box (and so
+     with the Taskbar's all-apps surface), so it is deliberately not reused here.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/popupColorPrimary" />
+    <corners android:radius="28dp" />
+</shape>

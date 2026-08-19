@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher §17 - the app-list pane's search affordance.
+
+     Rests collapsed as a circular icon in the bottom-right corner and expands into a full-width
+     input when tapped, so the pane stays sparse (design/implementation-scope.md §17 "SPEC REFINED").
+
+     The root spans the full pane width and never changes size; the *pill* inside it is what morphs.
+     That split is deliberate: the root is a BaseDragLayer child, and BaseDragLayer has its own
+     LayoutParams subclass and an onLayout that repositions children, so animating the root's width
+     there did not take effect. Animating a child inside an ordinary FrameLayout is reliable.
+
+     Ares-owned: res/layout/search_container_all_apps.xml is shared with the Taskbar's all-apps
+     surface and is deliberately not modified.
+-->
+<app.lawnchair.areslauncher.AresSearchContainerView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@id/search_container_all_apps"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/ares_search_collapsed_size">
+
+    <FrameLayout
+        android:id="@+id/ares_search_pill"
+        android:layout_width="@dimen/ares_search_collapsed_size"
+        android:layout_height="match_parent"
+        android:layout_gravity="end|center_vertical"
+        android:background="@drawable/ares_search_background"
+        android:clickable="true"
+        android:focusable="true">
+
+        <com.android.launcher3.ExtendedEditText
+            android:id="@+id/ares_search_input"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/ares_search_input_start_margin"
+            android:layout_marginEnd="@dimen/ares_search_collapsed_size"
+            android:background="@android:color/transparent"
+            android:ellipsize="end"
+            android:focusableInTouchMode="true"
+            android:gravity="start|center_vertical"
+            android:hint="@string/all_apps_search_bar_hint"
+            android:imeOptions="actionSearch|flagNoExtractUi"
+            android:inputType="textNoSuggestions"
+            android:singleLine="true"
+            android:textColor="?android:textColorPrimary"
+            android:textColorHint="?android:textColorTertiary"
+            android:textSize="17sp"
+            android:visibility="gone" />
+
+        <!--
+             Pinned to the trailing edge so it stays put as the pill grows: collapsed it is the whole
+             affordance, expanded it becomes the dismiss button at the end of the input.
+        -->
+        <ImageView
+            android:id="@+id/ares_search_icon"
+            android:layout_width="@dimen/ares_search_collapsed_size"
+            android:layout_height="match_parent"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="@string/all_apps_search_bar_hint"
+            android:padding="@dimen/ares_search_icon_padding"
+            android:src="@drawable/ic_allapps_search"
+            android:tint="?android:textColorSecondary" />
+
+    </FrameLayout>
+
+</app.lawnchair.areslauncher.AresSearchContainerView>

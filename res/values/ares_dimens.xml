@@ -20,4 +20,14 @@
     <!-- Leading inset for the icon, and the gap between icon and label. -->
     <dimen name="ares_app_row_padding_horizontal">24dp</dimen>
     <dimen name="ares_app_row_drawable_padding">16dp</dimen>
+
+    <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
+         expanded it grows to the pane width less twice the resting margin. -->
+    <dimen name="ares_search_collapsed_size">56dp</dimen>
+    <dimen name="ares_search_icon_padding">16dp</dimen>
+    <dimen name="ares_search_input_start_margin">24dp</dimen>
+
+    <!-- Gap from the pane edges when resting. Clears the gesture-nav bar at the bottom. -->
+    <dimen name="ares_search_margin_horizontal">16dp</dimen>
+    <dimen name="ares_search_margin_bottom">24dp</dimen>
 </resources>
