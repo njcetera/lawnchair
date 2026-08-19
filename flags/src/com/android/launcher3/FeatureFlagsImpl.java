@@ -580,7 +580,10 @@ public final class FeatureFlagsImpl implements FeatureFlags {
 
 
     public boolean letterFastScroller() {
-        return false;
+        // AresLauncher: enables the A-Z letter rail in all-apps (Niagara-style scrubbing) instead
+        // of the single draggable thumb. Upstream ships this implemented but flag-gated off.
+        // See design/niagara-app-list.md section 1.
+        return true;
     }
 
     @Override
