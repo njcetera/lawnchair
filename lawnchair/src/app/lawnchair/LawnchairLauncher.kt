@@ -261,6 +261,24 @@ class LawnchairLauncher : QuickstepLauncher() {
             }
         }
 
+        // AresLauncher §20A: home means "put everything back to a known state", so it leaves the
+        // home grid's edit mode -- joining Back and a tap on empty space as the third exit.
+        //
+        // Hooked on the intent rather than on a gesture callback so every route that actually
+        // delivers one behaves identically. Verified on the emulator: the HOME key and the pill
+        // gesture performed *from another app* both arrive here and both now exit edit mode.
+        //
+        // NOT covered, and measured rather than assumed: the pill gesture while the launcher is
+        // already the foreground app. Logcat shows the system's swipe-up gesture monitor "stealing
+        // input gesture ... from app.lawnchair.debug" and no home intent is delivered at all, so
+        // there is nothing here to hook. That case needs a separate decision -- see the report.
+        //
+        // Done BEFORE super, which starts a rebind for ACTION_MAIN: exiting first means the rows
+        // are rebound already out of edit mode instead of carrying badges into the new binding.
+        if (intent?.action == Intent.ACTION_MAIN) {
+            workspace?.aresHomeList?.exitEditMode()
+        }
+
         super.onNewIntent(intent)
     }
 
