@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -52,10 +53,19 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
+    /**
+     * The edit-mode corner dots (§14), drawn beneath the items and scrolling with them.
+     *
+     * Added once and left in place; it draws nothing until [editDots].progress rises above zero,
+     * so there is no cost outside edit mode and no decoration to add and remove.
+     */
+    private val editDots = AresEditGrid.Dots(context, masonry)
+
     init {
         layoutManager = masonry
         adapter = aresAdapter
         clipToPadding = false
+        addItemDecoration(editDots)
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
@@ -255,6 +265,35 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
             setItemClickable(child, !editMode)
             syncChevron(child)
             syncWiggle(child)
+        }
+        animateGridDots()
+    }
+
+    /** Running fade for the grid dots, cancelled before a new one so the two cannot fight. */
+    private var dotsAnimator: ValueAnimator? = null
+
+    /**
+     * Fades the grid dots in and out with the mode (§14).
+     *
+     * Animated rather than switched because they appear alongside the wiggle, and a set of dots
+     * snapping on at the same instant reads as a glitch next to it. The list is invalidated on each
+     * frame because an `ItemDecoration`'s output is not otherwise re-drawn when nothing has scrolled.
+     */
+    private fun animateGridDots() {
+        dotsAnimator?.cancel()
+        val target = if (editMode) 1f else 0f
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            editDots.progress = target
+            invalidate()
+            return
+        }
+        dotsAnimator = ValueAnimator.ofFloat(editDots.progress, target).apply {
+            duration = DOTS_FADE_MS
+            addUpdateListener {
+                editDots.progress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
         }
     }
 
@@ -669,5 +708,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private companion object {
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
+
+        /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
+        const val DOTS_FADE_MS = 120L
     }
 }

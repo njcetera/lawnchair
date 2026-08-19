@@ -332,6 +332,20 @@ class AresMasonryLayoutManager(
     /** Current vertical scroll offset in px. */
     fun scrollOffsetPx(): Int = scrollOffset
 
+    /**
+     * Resolved cell size in px, *after* the square-cell fallback — the same numbers [fill] places
+     * children with.
+     *
+     * Exposed so [AresEditGrid] can draw the grid the items actually snap to rather than a
+     * decorative approximation of it. Reading `columns` and `cellHeightPx` and re-deriving the
+     * width would be a second implementation of `cellWidth()`, free to drift from this one. Both
+     * are 0 until the list has been measured.
+     */
+    fun resolvedCellWidthPx(): Int = cellWidth()
+
+    /** @see resolvedCellWidthPx */
+    fun resolvedCellHeightPx(): Int = cellHeight()
+
     private companion object {
         /**
          * Duration of the repack animation after a resize or removal.

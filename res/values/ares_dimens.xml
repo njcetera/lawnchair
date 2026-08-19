@@ -71,4 +71,14 @@
     <!-- The cross inside that circle. Inset enough to leave a visible ring of backdrop around it,
          so the glyph reads against a busy icon rather than blending into it. -->
     <dimen name="ares_remove_badge_glyph_size">18dp</dimen>
+
+    <!-- §14 / §21 edit-mode grid overlay. Both are drawn by AresEditGrid and are meant to read as
+         one system: dots mark where things CAN go, the outline marks what an item currently DOES
+         occupy. Kept small and faint on purpose - they sit under and over the icons respectively,
+         and anything heavier competes with the content rather than describing it. -->
+    <dimen name="ares_edit_grid_dot_radius">2dp</dimen>
+    <dimen name="ares_edit_cell_outline_width">1dp</dimen>
+    <!-- Matches the corner softness of the icon and widget shapes it traces, so the outline reads
+         as the cell's edge rather than as a box drawn on top of one. -->
+    <dimen name="ares_edit_cell_outline_radius">16dp</dimen>
 </resources>

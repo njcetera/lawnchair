@@ -136,6 +136,33 @@ class AresHomeAdapter(private val launcher: Launcher) :
             container.removeView(existing)
         }
         syncRemoveBadgeFor(container, info)
+        syncCellOutlineFor(container, info)
+    }
+
+    /**
+     * Outlines a widget's allocated cells while editing (§21).
+     *
+     * The user's diagnosis was exact: the × and the chevron are positioned on the **holder
+     * container**, which is the item's allocated cell footprint, but a widget's own rendered
+     * content often does not fill that footprint — providers keep their aspect ratio, or simply
+     * draw smaller. The badges then sit on an invisible boundary and read as floating beside the
+     * widget rather than attached to it. Drawing that boundary fixes the appearance and, more
+     * usefully, shows how much grid the widget actually occupies, which is what you need to know
+     * while cycling its size.
+     *
+     * **Widgets only.** An app icon roughly fills its 1×1 cell already, so outlining every tile
+     * would add a box per icon for no information — noise competing with §14's dots rather than
+     * complementing them.
+     *
+     * The outline goes in the container's *foreground* so it draws above the widget's own content
+     * and, being a property of the container, wiggles and scales with the tile exactly as the two
+     * badges do. It is a drawable, so it takes no touches.
+     */
+    private fun syncCellOutlineFor(container: FrameLayout, info: ItemInfo?) {
+        val wanted = info != null && editMode && isWidget(info)
+        val has = container.foreground != null
+        if (wanted == has) return
+        container.foreground = if (wanted) AresEditGrid.cellOutline(container.context) else null
     }
 
     /**
