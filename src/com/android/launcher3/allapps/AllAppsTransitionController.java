@@ -18,6 +18,7 @@ package com.android.launcher3.allapps;
 import static com.android.app.animation.Interpolators.DECELERATE_1_7;
 import static com.android.app.animation.Interpolators.LINEAR;
 import static com.android.launcher3.LauncherAnimUtils.SCALE_PROPERTY;
+import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_X;
 import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_Y;
 import static com.android.launcher3.LauncherState.ALL_APPS;
 import static com.android.launcher3.LauncherState.ALL_APPS_CONTENT;
@@ -175,12 +176,23 @@ public class AllAppsTransitionController
     private boolean mShouldShowAllAppsOnSheet;
 
     // Animation in this class is controlled by a single variable {@link mProgress}.
-    // Visually, it represents top y coordinate of the all apps container if multiplied with
-    // {@link mShiftRange}.
-
-    // When {@link mProgress} is 0, all apps container is pulled up.
-    // When {@link mProgress} is 1, all apps container is pulled down.
-    private float mShiftRange;      // changes depending on the orientation
+    //
+    // AresLauncher: the reveal axis is HORIZONTAL, not vertical (stock). Visually, mProgress
+    // represents the *left x* coordinate of the all-apps container when multiplied with
+    // {@link mShiftRange}. The app list is the pane to the right of home on a left-to-right
+    // pane canvas ([feed] | [home] | [app list]), so it slides in from the trailing edge.
+    //
+    // When {@link mProgress} is 0, all apps container is fully revealed (translationX = 0).
+    // When {@link mProgress} is 1, all apps container is off-screen (translationX = mShiftRange).
+    //
+    // Consequently {@link mShiftRange} must be WIDTH-derived. Stock uses dp.allAppsShiftRange,
+    // which is height-derived (300dp on a non-sheet surface); reusing it here would leave roughly
+    // a third of the pane permanently on screen at rest. See getAresRevealRange().
+    //
+    // The field/method names below retain their stock "TranslationY" spelling to keep this
+    // upstream-tracked file's diff small; they carry X. Do not "fix" the names without also
+    // re-checking every call site.
+    private float mShiftRange;      // width-derived travel distance of the horizontal reveal
     private float mProgress;        // [0, 1], mShiftRange * mProgress = shiftCurrent
 
     private ScrimView mScrimView;
@@ -202,7 +214,7 @@ public class AllAppsTransitionController
         mNavScrimFlag = Themes.getAttrBoolean(l, R.attr.isMainColorDark)
                 ? FLAG_DARK_NAV : FLAG_LIGHT_NAV;
 
-        setShiftRange(dp.allAppsShiftRange);
+        setShiftRange(getAresRevealRange(dp));
         mAllAppScale.value = 1;
         mLauncher.addOnDeviceProfileChangeListener(this);
         mMSDLPlayerWrapper = MSDLPlayerWrapper.INSTANCE.get(mLauncher.getApplicationContext());
@@ -212,10 +224,23 @@ public class AllAppsTransitionController
         return mShiftRange;
     }
 
+    /**
+     * AresLauncher: travel distance for the horizontal app-list reveal.
+     *
+     * <p>Stock's {@code dp.allAppsShiftRange} is height-derived and wrong for a horizontal reveal
+     * in both directions: on a non-sheet surface it is a fixed 300dp (731px at density 390), which
+     * against a 1080px-wide screen would leave ~349px of the pane permanently visible at rest; on a
+     * sheet surface it is roughly full height, which on a wide inner display overshoots the width
+     * and mis-calibrates the drag. Deriving from width is correct on both.
+     */
+    private static float getAresRevealRange(DeviceProfile dp) {
+        return dp.getDeviceProperties().getWidthPx();
+    }
+
     @Override
     public void onDeviceProfileChanged(DeviceProfile dp) {
         mIsVerticalLayout = dp.isVerticalBarLayout();
-        setShiftRange(dp.allAppsShiftRange);
+        setShiftRange(getAresRevealRange(dp));
 
         if (mIsVerticalLayout) {
             mLauncher.getHotseat().setTranslationY(0);
@@ -238,7 +263,9 @@ public class AllAppsTransitionController
         boolean fromBackground =
                 mLauncher.getStateManager().getCurrentStableState() == BACKGROUND_APP;
         // Allow apps panel to shift the full screen if coming from another app.
-        float shiftRange = fromBackground ? mLauncher.getDeviceProfile().getDeviceProperties().getHeightPx() : mShiftRange;
+        float shiftRange = fromBackground
+                ? getAresRevealRange(mLauncher.getDeviceProfile())
+                : mShiftRange;
         getAppsViewProgressTranslationY().setValue(mProgress * shiftRange);
         mLauncher.onAllAppsTransition(1 - progress);
 
@@ -457,7 +484,7 @@ public class AllAppsTransitionController
         mAppsViewAlpha = new MultiValueAlpha(mAppsView, APPS_VIEW_INDEX_COUNT, View.GONE);
         mAppsViewAlpha.setUpdateVisibility(true);
         mAppsViewTranslationY = new MultiPropertyFactory<>(
-                mAppsView, VIEW_TRANSLATE_Y, APPS_VIEW_INDEX_COUNT, Float::sum);
+                mAppsView, VIEW_TRANSLATE_X, APPS_VIEW_INDEX_COUNT, Float::sum);
     }
 
     /**
