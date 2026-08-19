@@ -188,6 +188,13 @@ class ModelCallbacks(private var launcher: Launcher) : BgDataModel.Callbacks {
         Preconditions.assertUIThread()
         val hadWorkApps = launcher.appsView.shouldShowTabs()
         launcher.appsView.appsStore.setApps(apps, flags, packageUserKeytoUidMap)
+        // AresLauncher: the unfolded dual-pane app list is a second, independent
+        // ActivityAllAppsContainerView, and each container constructs its own AllAppsStore. Feed it
+        // from here, where the full app set, model flags and uid map are in scope -- the store's
+        // flags and map have no accessors, so mirroring from the launcher's store elsewhere could
+        // not be faithful. No-op while folded, when the pane does not exist.
+        launcher.workspace?.aresAppListPane?.appsStore
+            ?.setApps(apps, flags, packageUserKeytoUidMap)
         PopupContainerWithArrow.dismissInvalidPopup(launcher)
         if (
             hadWorkApps != launcher.appsView.shouldShowTabs() &&

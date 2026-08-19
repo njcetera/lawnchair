@@ -145,7 +145,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import app.lawnchair.areslauncher.AresAppListView;
+import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -219,7 +219,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * AresLauncher foldable dual-pane: the persistent app list occupying panel 1 while unfolded.
      * Null while folded. See {@link #syncAresAppListPane()} and design/foldable-dual-pane.md.
      */
-    private AresAppListView mAresAppList;
+    private AresPanelAllAppsContainerView mAresAppList;
 
     @Thunk
     boolean mDeferRemoveExtraEmptyScreen = false;
@@ -1122,24 +1122,58 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * pages appearing during a bind). Both are needed: a fold can happen with pages already built,
      * and pages can be built after the profile is already two-panel.
      */
+    /**
+     * The unfolded dual-pane app list, or null while folded. Exposed so
+     * {@link ModelCallbacks#bindAllApplications} can feed its independent
+     * {@link com.android.launcher3.allapps.AllAppsStore}.
+     */
+    @Nullable
+    public AresPanelAllAppsContainerView getAresAppListPane() {
+        return mAresAppList != null && mAresAppList.getParent() != null ? mAresAppList : null;
+    }
+
+    /**
+     * Per-posture ownership of the floating search affordance.
+     *
+     * Both the folded container and the unfolded pane are full
+     * {@link com.android.launcher3.allapps.ActivityAllAppsContainerView}s with a floating §17 pill,
+     * and both park that pill in the same shared {@link com.android.launcher3.dragndrop.DragLayer}.
+     * Exactly one surface is usable at a time, so exactly one pill should be visible: the pane's
+     * while unfolded, the folded container's otherwise. Without this, unfolding leaves the folded
+     * container's pill floating over the dual-pane layout alongside the pane's own.
+     */
+    private void updateAresSearchOwnership(boolean paneOwnsSearch) {
+        if (mLauncher.getAppsView() == null) {
+            return;
+        }
+        View foldedSearch = mLauncher.getAppsView().getSearchView();
+        if (foldedSearch != null) {
+            foldedSearch.setVisibility(paneOwnsSearch ? GONE : VISIBLE);
+        }
+    }
+
     private void syncAresAppListPane() {
         if (!isTwoPanelEnabled() || getChildCount() < 2) {
             if (mAresAppList != null && mAresAppList.getParent() instanceof ViewGroup oldParent) {
                 oldParent.removeView(mAresAppList);
             }
+            updateAresSearchOwnership(false);
             return;
         }
         CellLayout panel = (CellLayout) getChildAt(1);
         ShortcutAndWidgetContainer target = panel.getShortcutsAndWidgets();
         if (mAresAppList == null) {
-            mAresAppList = new AresAppListView(getContext(), mLauncher);
+            // Inflated, not constructed: onFinishInflate() is where the container binds its
+            // adapters and initialises search, and it never runs for a programmatically built view.
+            mAresAppList = (AresPanelAllAppsContainerView) LayoutInflater.from(getContext())
+                    .inflate(R.layout.ares_panel_all_apps, target, false);
         }
         if (mAresAppList.getParent() != target) {
             if (mAresAppList.getParent() instanceof ViewGroup oldParent) {
                 oldParent.removeView(mAresAppList);
             }
             // isLockedToGrid=false makes CellLayoutLayoutParams.setup() a no-op so these hand-set
-            // bounds survive measurement; AresAppListView keeps them in sync in onMeasure().
+            // bounds survive measurement; the pane keeps them in sync in onMeasure().
             CellLayoutLayoutParams lp = new CellLayoutLayoutParams(0, 0, 1, 1);
             lp.isLockedToGrid = false;
             lp.x = 0;
@@ -1148,6 +1182,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             lp.height = target.getMeasuredHeight();
             target.addView(mAresAppList, lp);
         }
+        updateAresSearchOwnership(true);
     }
 
     @Override

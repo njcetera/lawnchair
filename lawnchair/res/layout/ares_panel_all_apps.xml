@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AresLauncher: the persistent app-list pane for workspace panel 1 when unfolded.
+
+  Inflated rather than constructed so that View.onFinishInflate() runs. That is where
+  ActivityAllAppsContainerView binds its adapters and initialises search, and it is never called
+  for a programmatically constructed view. All three stock hosts inflate the container from XML
+  for the same reason.
+
+  Deliberately carries no android:id. res/layout/all_apps.xml already claims @id/apps_view for the
+  folded container, and Launcher.getAppsView() resolves that id, so a second view sharing it would
+  be ambiguous.
+-->
+<app.lawnchair.areslauncher.AresPanelAllAppsContainerView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:focusable="true"
+    android:saveEnabled="false" />

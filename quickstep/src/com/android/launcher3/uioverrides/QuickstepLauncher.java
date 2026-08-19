@@ -463,6 +463,28 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
                 : getAppsView().getFloatingHeaderView().findFixedRowByType(PredictionRowView.class);
     }
 
+    /**
+     * AresLauncher: feed the unfolded dual-pane app list's prediction row.
+     *
+     * That pane is a second, independent {@link com.android.launcher3.allapps.ActivityAllAppsContainerView},
+     * so it has its own {@link com.android.launcher3.allapps.FloatingHeaderView} and its own
+     * prediction row. Sharing the launcher's predictions keeps the two surfaces at parity rather
+     * than leaving the pane's row permanently empty. Safe to call at any time: it no-ops while
+     * folded, before the apps view exists, or before predictions have arrived.
+     */
+    public void applyAresPanePredictions() {
+        if (getWorkspace() == null || getWorkspace().getAresAppListPane() == null
+                || mAllAppsPredictions == null) {
+            return;
+        }
+        PredictionRowView<?> paneRow = getWorkspace().getAresAppListPane()
+                .getFloatingHeaderView().findFixedRowByType(PredictionRowView.class);
+        if (paneRow != null) {
+            paneRow.setPredictionUiUpdatePaused(false);
+            paneRow.setPredictedApps(mAllAppsPredictions.getContents());
+        }
+    }
+
     // LC-Note: Lawnchair Prediction
     private void reapplyPredictionUi() {
         PredictionRowView<?> predictionRowView = getPredictionRowView();
@@ -472,6 +494,7 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
                 predictionRowView.setPredictedApps(mAllAppsPredictions.getContents());
             }
         }
+        applyAresPanePredictions();
         if (mHotseatPredictionController != null && mHotseatPredictions != null) {
             mHotseatPredictionController.setPredictedItems(mHotseatPredictions);
         }
