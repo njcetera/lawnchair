@@ -67,6 +67,15 @@ class AresPaneSwipeController(launcher: Launcher) :
         if (AbstractFloatingView.getTopOpenView(mLauncher) != null) {
             return false
         }
+        // Unfolded, home and the app list are both already on screen as workspace panels 0 and 1
+        // (design/foldable-dual-pane.md), so there is no pane to swipe *to*. Letting the gesture
+        // run anyway would slide the full-screen ALL_APPS sheet over a layout that already shows
+        // the app list. Keyed off the workspace's own panel count rather than a separate fold
+        // check, so it can never disagree with what is actually laid out.
+        val workspace = mLauncher.workspace
+        if (workspace != null && workspace.panelCount > 1) {
+            return false
+        }
         // Both directions work from anywhere on the pane. Opening was originally scoped to a
         // trailing-edge band, but that made the gesture feel fussy -- the user asked for any
         // horizontal drag on the home screen to pull the app list in, matching how closing already

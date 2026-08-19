@@ -145,6 +145,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import app.lawnchair.areslauncher.AresAppListView;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -213,6 +214,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * design/vertical-home-strategies.md and design/component-verification-1.md.
      */
     private AresHomeListView mAresHomeList;
+
+    /**
+     * AresLauncher foldable dual-pane: the persistent app list occupying panel 1 while unfolded.
+     * Null while folded. See {@link #syncAresAppListPane()} and design/foldable-dual-pane.md.
+     */
+    private AresAppListView mAresAppList;
 
     @Thunk
     boolean mDeferRemoveExtraEmptyScreen = false;
@@ -409,6 +416,9 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         updateCellLayoutMeasures();
         updateWorkspaceWidgetsSizes();
         setPageIndicatorInset();
+        // AresLauncher: runs on every device-profile change, so this is where a live fold/unfold
+        // attaches or detaches the dual-pane app list.
+        syncAresAppListPane();
     }
 
     private void setPageIndicatorInset() {
@@ -780,6 +790,9 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
         updatePageScrollValues();
         updateCellLayoutMeasures();
+        // AresLauncher: panel 1 only exists once a second page has been inserted, so this is the
+        // earliest point the dual-pane app list can be attached during a bind.
+        syncAresAppListPane();
         return newScreen;
     }
 
@@ -1092,6 +1105,49 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             }
         }
         return mAresHomeList;
+    }
+
+    /**
+     * AresLauncher foldable dual-pane: keeps the app-list panel attached to workspace panel 1 while
+     * two-panel mode is active, and detached otherwise.
+     *
+     * <p>Unfolded, {@link #getPanelCount()} is 2 and Launcher3 lays out two side-by-side CellLayout
+     * pages as one logical page-pair. Stock pairs two *home* screens; AresLauncher instead fixes
+     * panel 0 to the home list and panel 1 to the app list, so both panes are visible at once with
+     * no swipe. Folded, panel count drops back to 1, panel 1 ceases to exist, and the established
+     * single-pane swipe navigation (§9) applies unchanged.
+     *
+     * <p>Called from {@link #setInsets(Rect)} (which runs on every device-profile change, so it
+     * covers live fold/unfold) and from {@link #insertNewWorkspaceScreen(int, int)} (which covers
+     * pages appearing during a bind). Both are needed: a fold can happen with pages already built,
+     * and pages can be built after the profile is already two-panel.
+     */
+    private void syncAresAppListPane() {
+        if (!isTwoPanelEnabled() || getChildCount() < 2) {
+            if (mAresAppList != null && mAresAppList.getParent() instanceof ViewGroup oldParent) {
+                oldParent.removeView(mAresAppList);
+            }
+            return;
+        }
+        CellLayout panel = (CellLayout) getChildAt(1);
+        ShortcutAndWidgetContainer target = panel.getShortcutsAndWidgets();
+        if (mAresAppList == null) {
+            mAresAppList = new AresAppListView(getContext(), mLauncher);
+        }
+        if (mAresAppList.getParent() != target) {
+            if (mAresAppList.getParent() instanceof ViewGroup oldParent) {
+                oldParent.removeView(mAresAppList);
+            }
+            // isLockedToGrid=false makes CellLayoutLayoutParams.setup() a no-op so these hand-set
+            // bounds survive measurement; AresAppListView keeps them in sync in onMeasure().
+            CellLayoutLayoutParams lp = new CellLayoutLayoutParams(0, 0, 1, 1);
+            lp.isLockedToGrid = false;
+            lp.x = 0;
+            lp.y = 0;
+            lp.width = target.getMeasuredWidth();
+            lp.height = target.getMeasuredHeight();
+            target.addView(mAresAppList, lp);
+        }
     }
 
     @Override
