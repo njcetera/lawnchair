@@ -428,6 +428,14 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             lp.bottomMargin = grid.hotseatBarSizePx - grid.workspaceCellPaddingXPx;
         }
         mPageIndicator.setLayoutParams(lp);
+
+        // AresLauncher §10 (no dock): showPageIndicatorAtCurrentScroll() already gates the
+        // indicator on this same preference, but it only fires while scrolling -- and a
+        // single-page Strategy D workspace never scrolls, so the indicator would stay visible
+        // forever. Apply the same gate here, on a path that always runs.
+        var isHotseatEnabled = PreferenceCacheExtensionsKt.firstCached(
+                mPreferenceManager2.isHotseatEnabled());
+        mPageIndicator.setVisibility(isHotseatEnabled ? VISIBLE : INVISIBLE);
     }
 
     private void updateCellLayoutMeasures() {

@@ -115,7 +115,12 @@
     <!-- Live information endpoint -->
     <string name="config_default_live_information_endpoint" translatable="false">https://lawnchair.app/live-information.json</string>
 
-    <bool name="config_default_show_hotseat">true</bool>
+    <!-- AresLauncher §10 (no dock): the product vision has no hotseat/dock. Flipping this default
+         is the whole change. Lawnchair already zeroes hotseatBarSizePx (DeviceProfile), swaps in
+         DisabledHotseat (Hotseat), and hides the page indicator (Workspace) off this one flag.
+         See design/component-verification-3.md §5. Left as a preference rather than hardcoded so
+         it stays user-toggleable, per implementation-scope.md §12. -->
+    <bool name="config_default_show_hotseat">false</bool>
     <bool name="config_default_always_reload_icons">true</bool>
     <bool name="config_default_dark_status_bar">false</bool>
     <bool name="config_default_show_notification_count">false</bool>
