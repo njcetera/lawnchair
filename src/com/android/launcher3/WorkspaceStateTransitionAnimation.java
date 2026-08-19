@@ -181,7 +181,16 @@ public class WorkspaceStateTransitionAnimation {
         // position, so every surface on the canvas must map from it linearly. Easing belongs on
         // the settle after release, never on the tracked portion. Stock ZOOM_OUT is retained for
         // every other state, so overview/spring-loaded/hint transitions are untouched.
-        Interpolator translationDefault = state == ALL_APPS
+        //
+        // Keyed on EITHER endpoint being ALL_APPS, not just the target. `state` is the state being
+        // animated *to*, so testing it alone only covered opening (NORMAL -> ALL_APPS). Closing
+        // (ALL_APPS -> NORMAL) targets NORMAL and so fell back to ZOOM_OUT while
+        // AllAppsTransitionController stayed LINEAR -- the same desync, in the other direction,
+        // which the user saw as "swiping left to go back home is having the overlay issue still".
+        // Mirrors the idiom AllAppsTransitionController:472 already uses for the same reason.
+        boolean panningAllApps = state == ALL_APPS
+                || mLauncher.getStateManager().getState() == ALL_APPS;
+        Interpolator translationDefault = panningAllApps
                 ? (config.isUserControlled() ? LINEAR : DECELERATE_1_7)
                 : ZOOM_OUT;
         Interpolator translationInterpolator =
