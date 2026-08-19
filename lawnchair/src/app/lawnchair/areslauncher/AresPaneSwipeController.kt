@@ -6,7 +6,6 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherState
 import com.android.launcher3.LauncherState.ALL_APPS
 import com.android.launcher3.LauncherState.NORMAL
-import com.android.launcher3.Utilities
 import com.android.launcher3.states.StateAnimationConfig
 import com.android.launcher3.touch.AbstractStateChangeTouchController
 import com.android.launcher3.touch.AllAppsSwipeController
@@ -29,11 +28,20 @@ import com.android.launcher3.touch.SingleAxisSwipeDetector
  * controllers *before any child view sees the event*, so a controller is structurally immune to
  * that. See design/gesture-transition-reassessment.md Q1.
  *
+ * ## Where the gesture is live
+ *
+ * Both directions are claimable from anywhere on their respective pane — there is no positional
+ * scoping. Opening was initially restricted to a trailing-edge band, but that read as fussy; the
+ * user asked for any horizontal drag on the home screen to bring the app list in. Containment is
+ * therefore entirely a matter of *axis dominance*, not *position*.
+ *
  * ## How this stays out of the way of everything else
  *
  * - **Vertical scrolling** — `SingleAxisSwipeDetector.shouldScrollStart` requires
  *   `|dx| >= max(touchSlop, |dy|)`, so a drag only counts as horizontal when it genuinely
- *   dominates. Scrolling the home list or the app list is unaffected.
+ *   dominates. Scrolling the home list or the app list is unaffected. This carries the whole
+ *   burden of coexistence now that the edge band is gone, so it is the interaction most worth
+ *   re-testing after any change here.
  * - **The Discover feed** — from `NORMAL` this controller only ever claims *negative* (leftward)
  *   drags, because [getTargetState] returns `fromState` for a positive one and the base class
  *   derives its detectable directions from that. The feed is revealed by a *rightward* drag on
@@ -59,30 +67,12 @@ class AresPaneSwipeController(launcher: Launcher) :
         if (AbstractFloatingView.getTopOpenView(mLauncher) != null) {
             return false
         }
-        return when {
-            mLauncher.isInState(NORMAL) -> startsInOpeningEdgeBand(ev)
-            // Closing works from anywhere on the pane -- unlike opening, there is no competing
-            // edge gesture to disambiguate against, and requiring an edge here would be a precision
-            // burden for the commoner action.
-            mLauncher.isInState(ALL_APPS) -> true
-            else -> false
-        }
-    }
-
-    /**
-     * Whether an opening drag may start here. Scoped to the trailing edge (right in LTR, left in
-     * RTL) so an incidental horizontal flick across the middle of the home screen does not yank the
-     * app list in.
-     *
-     * Note [MotionEvent.getX] is a raw screen coordinate and is *not* layout-direction adjusted,
-     * unlike the displacement the detector reports (`BaseSwipeDetector` negates x under RTL), so
-     * the edge has to be picked explicitly here.
-     */
-    private fun startsInOpeningEdgeBand(ev: MotionEvent): Boolean {
-        if (OPEN_EDGE_BAND_DP <= 0) return true
-        val bandPx = Utilities.dpToPx(OPEN_EDGE_BAND_DP.toFloat())
-        val width = mLauncher.dragLayer.width
-        return if (Utilities.isRtl(mLauncher.resources)) ev.x <= bandPx else ev.x >= width - bandPx
+        // Both directions work from anywhere on the pane. Opening was originally scoped to a
+        // trailing-edge band, but that made the gesture feel fussy -- the user asked for any
+        // horizontal drag on the home screen to pull the app list in, matching how closing already
+        // worked. Axis dominance (see the class doc) is what keeps this from stealing other
+        // gestures, not positional scoping.
+        return mLauncher.isInState(NORMAL) || mLauncher.isInState(ALL_APPS)
     }
 
     override fun getTargetState(
@@ -136,12 +126,6 @@ class AresPaneSwipeController(launcher: Launcher) :
         mLauncher.deviceProfile.deviceProperties.widthPx * DRAG_FRACTION_FOR_FULL_TRANSITION
 
     companion object {
-        /**
-         * Width of the trailing-edge band in which an opening drag may start, in dp.
-         * Set to 0 to allow opening drags anywhere on the home screen.
-         */
-        private const val OPEN_EDGE_BAND_DP = 48
-
         /** Fraction of screen width a drag must cover to complete a transition. */
         private const val DRAG_FRACTION_FOR_FULL_TRANSITION = 0.5f
     }
