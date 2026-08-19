@@ -17,6 +17,7 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import java.util.function.Predicate
 
 /**
@@ -189,6 +190,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * still `rank = 0`: those keep model delivery order until the user reorders something.
      */
     fun addItem(info: ItemInfo) {
+        if (dropDuplicateWidgetRow(info)) return
+
         var index = items.size
         for (i in items.indices) {
             if (items[i].rank > info.rank) {
@@ -199,6 +202,53 @@ class AresHomeAdapter(private val launcher: Launcher) :
         items.add(index, info)
         notifyItemInserted(index)
     }
+
+    /**
+     * Collapses two rows that describe the **same widget instance** into one (§7).
+     *
+     * An `appWidgetId` identifies one live widget held by the launcher's widget host. Two database
+     * rows carrying the same one is always a bug — never a user with two clocks, who would have two
+     * separate ids — and it is the wreckage the pre-fix add flow left behind: `completeAddAppWidget`
+     * could not find the pending host view (see `Workspace.getWidgetForAppWidgetId`), so on the way
+     * back from a configure activity it wrote a second row instead of replacing the first. The user
+     * saw two clocks, one of them stuck as a `PendingAppWidgetHostView` that never finished setting
+     * up.
+     *
+     * `Workspace.getWidgetForAppWidgetId` stops that happening again, but only for a row that is on
+     * screen at the time. This is the row-level backstop for the rest, and it is also what heals a
+     * profile that already has the duplicate — the point of it is that nobody has to wipe data.
+     *
+     * The row kept is whichever finished restoring; a placeholder loses to a real widget. The loser
+     * goes through `deleteItemFromDatabase` and **never** `deleteWidgetInfo`: the two rows share one
+     * `appWidgetId`, and releasing it from the host would take the surviving widget down with it.
+     *
+     * @return true when [info] is the row to discard, so the caller must not insert it.
+     */
+    private fun dropDuplicateWidgetRow(info: ItemInfo): Boolean {
+        if (info !is LauncherAppWidgetInfo) return false
+        val index = items.indexOfFirst {
+            it is LauncherAppWidgetInfo && it.appWidgetId == info.appWidgetId
+        }
+        if (index < 0) return false
+
+        val existing = items[index] as LauncherAppWidgetInfo
+        // Same row arriving twice (a double bind), not two rows: nothing to delete, just don't
+        // list it again. removeItems() exists to keep this rare, but it is cheap to be sure.
+        if (existing === info || existing.id == info.id) return true
+
+        if (isPlaceholder(existing) && !isPlaceholder(info)) {
+            launcher.modelWriter.deleteItemFromDatabase(existing, DUPLICATE_WIDGET_REASON)
+            items.removeAt(index)
+            notifyItemRemoved(index)
+            return false
+        }
+        launcher.modelWriter.deleteItemFromDatabase(info, DUPLICATE_WIDGET_REASON)
+        return true
+    }
+
+    /** A widget row still waiting on binding, restore or a configure activity to finish. */
+    private fun isPlaceholder(info: LauncherAppWidgetInfo): Boolean =
+        info.restoreStatus != LauncherAppWidgetInfo.RESTORE_COMPLETED
 
     fun clear() {
         val size = items.size
@@ -467,5 +517,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private companion object {
         const val TYPE_ICON = 0
         const val TYPE_WIDGET = 1
+        const val DUPLICATE_WIDGET_REASON =
+            "AresLauncher: second database row for an appWidgetId already on the home grid"
     }
 }

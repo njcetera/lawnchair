@@ -14,6 +14,8 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.model.data.LauncherAppWidgetInfo
+import com.android.launcher3.widget.LauncherAppWidgetHostView
 
 /**
  * Continuously-scrolling **masonry grid** of home-screen items, replacing CellLayout's paged grid
@@ -60,6 +62,29 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         aresAdapter.gridColumns = { masonry.columns }
         aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
         aresAdapter.removeHost = { info -> removeFromHome(info) }
+    }
+
+    /**
+     * The attached host view for [appWidgetId], for `Workspace.getWidgetForAppWidgetId` (§7).
+     *
+     * Launcher uses that lookup to find the `PendingAppWidgetHostView` it put up while a configure
+     * activity was running, so it can replace it in place when the activity returns. Stock searches
+     * `CellLayout` children and finds nothing of ours, which cost an extra database row per widget
+     * added through a configure activity — see the call site for the full failure.
+     *
+     * Only *attached* rows can be returned: the adapter is data-backed and a scrolled-off row has no
+     * host view to hand back. That is not a hole in the fix, because everything downstream
+     * (`reInflate`, `updateWidgetSizeRanges`) needs an attached view anyway; the row-level safety net
+     * for the off-screen case is [AresHomeAdapter.addItem]'s duplicate collapse.
+     */
+    fun findWidgetForAppWidgetId(appWidgetId: Int): LauncherAppWidgetHostView? {
+        for (i in 0 until childCount) {
+            val container = getChildAt(i) as? ViewGroup ?: continue
+            val hostView = container.getChildAt(0) as? LauncherAppWidgetHostView ?: continue
+            val info = hostView.tag as? LauncherAppWidgetInfo ?: continue
+            if (info.appWidgetId == appWidgetId) return hostView
+        }
+        return null
     }
 
     /**

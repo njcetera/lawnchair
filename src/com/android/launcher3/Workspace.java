@@ -3898,6 +3898,18 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * For opposite operation. See {@link #addInScreen}.
      */
     public void removeWorkspaceItem(View v) {
+        // AresLauncher §7: the counterpart of addInScreen's Strategy D redirect. A CONTAINER_DESKTOP
+        // item is a RecyclerView row, so getParentCellLayoutForView() below returns null and the
+        // removal is silently a no-op. That bit hardest in PendingAppWidgetHostView.reInflate(),
+        // which swaps a configured widget in by removing the pending view and immediately rebinding
+        // the real one -- with the removal missing, the rebind appended a *second* row for the same
+        // widget rather than replacing it. Matched on identity or database id, because the rebind
+        // hands back a different ItemInfo instance for the same row.
+        if (mAresHomeList != null && v != null && v.getTag() instanceof ItemInfo info
+                && info.container == CONTAINER_DESKTOP) {
+            mAresHomeList.getAresAdapter().removeItems(other -> other == info
+                    || (info.id != ItemInfo.NO_ID && other.id == info.id));
+        }
         CellLayout parentCell = getParentCellLayoutForView(v);
         if (parentCell != null) {
             parentCell.removeView(v);
@@ -4020,6 +4032,19 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     public LauncherAppWidgetHostView getWidgetForAppWidgetId(final int appWidgetId) {
+        // AresLauncher §7: mapOverItems walks CellLayout children, and Strategy D never puts a
+        // desktop widget in one, so this returned null for every widget we host. Launcher relies on
+        // it to find the PendingAppWidgetHostView it put up while a configure activity was running:
+        // with it null, completeAddAppWidget() missed its "replace the pending view" branch, fell
+        // through to addItemToDatabase() and wrote a **second** row for the same widget -- the user
+        // added one clock and got two, one of them stuck mid-setup forever. Ask the home list first;
+        // the CellLayout walk still serves the hotseat and any non-Ares surface.
+        if (mAresHomeList != null) {
+            LauncherAppWidgetHostView hostView = mAresHomeList.findWidgetForAppWidgetId(appWidgetId);
+            if (hostView != null) {
+                return hostView;
+            }
+        }
         return (LauncherAppWidgetHostView) mapOverItems((info, v) ->
                 (info instanceof LauncherAppWidgetInfo lawi) && lawi.appWidgetId == appWidgetId);
     }
