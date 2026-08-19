@@ -26,7 +26,16 @@ import com.android.launcher3.util.TouchController
  * `AllAppsSwipeController` is not in the Quickstep set at all. Naming one and deleting it would be
  * both fragile and mode-specific. Declining by *gesture origin* is neither.
  *
- * ## Why it is scoped to the grid's bounds
+ * ## Why the app-list pane is covered too
+ *
+ * When unfolded, panel 1 hosts a persistent [AresPanelAllAppsContainerView] with its own scrolling
+ * `AllAppsRecyclerView`. It sits *outside* the home grid's bounds, so a guard scoped only to the
+ * grid let stock controllers claim vertical drags there -- and one of them opened `ALL_APPS`,
+ * sliding the folded container's sheet in *over* the persistent pane. The user saw that as "a
+ * second app list slides in and overlays to scroll" while the pane itself never moved. Both
+ * scrolling surfaces therefore have to be declined, not just the grid.
+ *
+ * ## Why it is scoped to those bounds
  *
  * Edge gestures -- quick switch, nav-bar-to-home, overview -- start in the system gesture zone at
  * the very bottom of the screen, outside the grid. Only gestures starting **inside** the grid are
@@ -41,6 +50,7 @@ class AresHomeScrollGuard(
     private val launcher: Launcher,
     private val delegate: TouchController,
     private val gridProvider: () -> AresHomeListView?,
+    private val paneProvider: () -> AresPanelAllAppsContainerView? = { null },
 ) : TouchController {
 
     private var declining = false
@@ -66,15 +76,25 @@ class AresHomeScrollGuard(
      */
     private fun shouldDecline(ev: MotionEvent): Boolean {
         if (!launcher.isInState(LauncherState.NORMAL)) return false
-        val grid = gridProvider() ?: return false
-        if (!grid.isAttachedToWindow || grid.visibility != android.view.View.VISIBLE) return false
+        return startedOver(ev, gridProvider()) || startedOver(ev, paneProvider())
+    }
+
+    /**
+     * True when this gesture started inside [view] while it is a visible, attached surface.
+     *
+     * Uses raw screen coordinates mapped through the view's own location on screen, because the
+     * event arrives in DragLayer coordinates and both surfaces sit several parents down.
+     */
+    private fun startedOver(ev: MotionEvent, view: android.view.View?): Boolean {
+        if (view == null) return false
+        if (!view.isAttachedToWindow || view.visibility != android.view.View.VISIBLE) return false
 
         val loc = IntArray(2)
-        grid.getLocationOnScreen(loc)
+        view.getLocationOnScreen(loc)
         val x = ev.rawX
         val y = ev.rawY
-        return x >= loc[0] && x < loc[0] + grid.width &&
-            y >= loc[1] && y < loc[1] + grid.height
+        return x >= loc[0] && x < loc[0] + view.width &&
+            y >= loc[1] && y < loc[1] + view.height
     }
 
     override fun dump(): String =

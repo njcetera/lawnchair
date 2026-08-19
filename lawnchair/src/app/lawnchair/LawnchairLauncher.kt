@@ -319,10 +319,18 @@ class LawnchairLauncher : QuickstepLauncher() {
         // wrapped so it stands aside for gestures starting on the grid; edge gestures, which begin
         // outside it, are untouched. Our own pane controller is not wrapped: it claims only
         // horizontal drags, which the grid does not want. See AresHomeScrollGuard.
+        // The unfolded app-list pane scrolls too, and sits outside the grid's bounds -- without it
+        // here, a vertical drag on the pane was claimed upstream and opened ALL_APPS, sliding the
+        // folded container's sheet in over the persistent pane.
         val gridProvider = { workspace?.aresHomeList }
+        val paneProvider = { workspace?.aresAppListPane }
         val stock = super.createTouchControllers().map { controller ->
-            app.lawnchair.areslauncher.AresHomeScrollGuard(this, controller, gridProvider)
-                as TouchController
+            app.lawnchair.areslauncher.AresHomeScrollGuard(
+                this,
+                controller,
+                gridProvider,
+                paneProvider,
+            ) as TouchController
         }.toTypedArray()
 
         return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) + stock

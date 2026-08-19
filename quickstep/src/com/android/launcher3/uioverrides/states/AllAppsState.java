@@ -29,6 +29,7 @@ import com.android.launcher3.Flags;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.R;
+import com.android.launcher3.Workspace;
 import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.views.ScrimColors;
 import com.android.quickstep.util.BaseDepthController;
@@ -46,6 +47,16 @@ public class AllAppsState extends LauncherState {
     private static final int STATE_FLAGS =
             FLAG_WORKSPACE_INACCESSIBLE | FLAG_CLOSE_POPUPS | FLAG_HOTSEAT_INACCESSIBLE;
     private static final long BACK_CUJ_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(5);
+
+    /**
+     * Fraction of screen width home travels left while the app-list pane comes in (§9).
+     *
+     * Chosen by feel on-device: enough that home is visibly *moving with* the gesture rather than
+     * sitting still behind it, but far short of leaving the screen -- home stays visible and
+     * blurred behind the pane by design. Moving slower than the pane also reads as parallax, which
+     * is what makes two surfaces feel like one canvas.
+     */
+    private static final float ARES_WORKSPACE_PAN_FRACTION = 0.25f;
 
 
     public AllAppsState(int id) {
@@ -116,8 +127,36 @@ public class AllAppsState extends LauncherState {
 
     @Override
     public ScaleAndTranslation getWorkspaceScaleAndTranslation(Launcher launcher) {
-        return new ScaleAndTranslation(launcher.getDeviceProfile().workspaceContentScale, NO_OFFSET,
-                NO_OFFSET);
+        return new ScaleAndTranslation(launcher.getDeviceProfile().workspaceContentScale,
+                getAresWorkspaceTranslationX(launcher), NO_OFFSET);
+    }
+
+    /**
+     * AresLauncher §9: how far home slides left as the app-list pane comes in from the right.
+     *
+     * Stock returns {@link #NO_OFFSET} here, so the workspace only scales and blurs while the pane
+     * translates across it -- which reads as a sheet dropped on top of a stationary background. The
+     * user's word for it was "more like an overlap than a pan". A Windows Phone Pivot moves *both*
+     * surfaces as one canvas, so home has to travel too.
+     *
+     * The offset is a fraction of screen width rather than the full width: at 1.0 home would leave
+     * the screen entirely, which defeats the point -- the whole reason
+     * {@code isWorkspaceVisible()} returns true is that home stays visible, scaled and blurred,
+     * behind the pane. A partial offset also reads as parallax, which is what sells two surfaces as
+     * one moving canvas rather than two slabs sliding in lockstep.
+     *
+     * Returns {@link #NO_OFFSET} when two panels are active: unfolded, the pane is a persistent
+     * panel in panel 1 and nothing should slide. {@code AresPaneSwipeController} already suppresses
+     * the gesture there, but the state can still be entered by other means, and a translated
+     * workspace under a permanently-visible pane would be wrong in either case.
+     */
+    private static float getAresWorkspaceTranslationX(Launcher launcher) {
+        Workspace<?> workspace = launcher.getWorkspace();
+        if (workspace != null && workspace.getPanelCount() > 1) {
+            return NO_OFFSET;
+        }
+        return -launcher.getDeviceProfile().getDeviceProperties().getWidthPx()
+                * ARES_WORKSPACE_PAN_FRACTION;
     }
 
     @Override
