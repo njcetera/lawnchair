@@ -128,7 +128,6 @@ import com.android.launcher3.util.OverlayEdgeEffect;
 import com.android.launcher3.util.RunnableList;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.util.WallpaperOffsetInterpolator;
-import com.android.launcher3.views.BaseDragLayer;
 import com.android.launcher3.widget.LauncherAppWidgetHostView;
 import com.android.launcher3.widget.NavigableAppWidgetHostView;
 import com.android.launcher3.widget.PendingAddShortcutInfo;
@@ -322,10 +321,6 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     private boolean mOverlayShown = false;
     private float mOverlayProgress; // 1 -> overlay completely visible, 0 -> home visible
     private final List<LauncherOverlayCallbacks> mOverlayCallbacks = new ArrayList<>();
-
-    // AresLauncher: right-edge (in LTR) overlay effect driving the app-list pane swipe (§9),
-    // mirroring the feed's left-edge mOverlayEdgeEffect above but on the opposite edge.
-    private OverlayEdgeEffect mAppListOverlayEdgeEffect;
 
     private boolean mForceDrawAdjacentPages = false;
 
@@ -1042,32 +1037,51 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 Log.e(TAG, "Attempted to add null item to Ares home list");
                 return;
             }
-            getOrCreateAresHomeList().getAresAdapter().addItem(child);
-            // WorkspaceLayoutManager.addInScreen normally wires these on every child it
-            // places into a CellLayout; replicate the parts that aren't CellLayout-specific
-            // since our redirect skips that method entirely for CONTAINER_DESKTOP.
-            child.setHapticFeedbackEnabled(false);
-            if (child instanceof BubbleTextView btv) {
-                // Deliberately not ItemLongClickListener.INSTANCE_WORKSPACE: that listener's
-                // job is starting a CellLayout grid-drag, which doesn't apply to list items.
-                // BubbleTextView.startLongPressAction() is the actual generic, CellLayout-free
-                // mechanism that shows the popup menu -- see component-verification-1.md/-3.md.
-                child.setOnLongClickListener(v -> {
-                    btv.startLongPressAction();
-                    return true;
-                });
-            }
+            // The already-inflated child is discarded: the adapter is data-backed and re-inflates
+            // rows on demand via ItemInflater (the same path that produced this view), which keeps
+            // RecyclerView recycling correct. See design/architecture-reassessment.md §4.
+            getOrCreateAresHomeList().getAresAdapter().addItem(info);
             return;
         }
         WorkspaceLayoutManager.super.addInScreen(child, container, screenId, x, y, spanX, spanY);
     }
 
+    /**
+     * Returns the home list, attaching it to the first page's ShortcutAndWidgetContainer if it
+     * isn't already parented there.
+     *
+     * <p>Always the <em>first</em> page, deliberately, and never the item's own {@code screenId}:
+     * Strategy D flattens every CONTAINER_DESKTOP item into one continuous list, so the model's
+     * screen ids carry no meaning for us. Honouring them instead parks the list on whichever page
+     * the model happened to assign, which in practice is an off-screen one.
+     *
+     * <p>Re-attachment has to be checked on every call, not just at creation: a full rebind runs
+     * {@link #removeAllWorkspaceScreens()}, which removes every CellLayout page and takes the list
+     * with it, before a fresh page is created. The adapter's data lives in the adapter, so it
+     * survives that; only the view needs re-homing.
+     */
     private AresHomeListView getOrCreateAresHomeList() {
         if (mAresHomeList == null) {
-            mAresHomeList = new AresHomeListView(getContext());
-            BaseDragLayer.LayoutParams lp = new BaseDragLayer.LayoutParams(
-                    BaseDragLayer.LayoutParams.MATCH_PARENT, BaseDragLayer.LayoutParams.MATCH_PARENT);
-            mLauncher.getDragLayer().addView(mAresHomeList, lp);
+            mAresHomeList = new AresHomeListView(getContext(), mLauncher);
+        }
+        CellLayout page = getChildCount() > 0 ? (CellLayout) getChildAt(0) : null;
+        if (page != null) {
+            ShortcutAndWidgetContainer target = page.getShortcutsAndWidgets();
+            if (mAresHomeList.getParent() != target) {
+                if (mAresHomeList.getParent() instanceof ViewGroup oldParent) {
+                    oldParent.removeView(mAresHomeList);
+                }
+                // isLockedToGrid=false makes CellLayoutLayoutParams.setup() a no-op, so these
+                // hand-set bounds survive measurement instead of being recomputed from cell spans.
+                // AresHomeListView keeps them in sync with the container in onMeasure().
+                CellLayoutLayoutParams lp = new CellLayoutLayoutParams(0, 0, 1, 1);
+                lp.isLockedToGrid = false;
+                lp.x = 0;
+                lp.y = 0;
+                lp.width = target.getMeasuredWidth();
+                lp.height = target.getMeasuredHeight();
+                target.addView(mAresHomeList, lp);
+            }
         }
         return mAresHomeList;
     }
@@ -1546,27 +1560,9 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         return mOverlayEdgeEffect != null;
     }
 
-    /**
-     * AresLauncher: wires the app-list pane (§9) to the edge opposite the feed's — right in LTR,
-     * left in RTL — so both can coexist as independent edge-drag gestures on a single-page
-     * Workspace. Unlike {@link #setLauncherOverlay}, this never falls back to a plain
-     * {@link EdgeEffectCompat} when null; the app-list pane is always available, so this is only
-     * ever called once with a real proxy.
-     */
-    public void setAppListOverlay(LauncherOverlayTouchProxy overlay) {
-        mAppListOverlayEdgeEffect = new OverlayEdgeEffect(getContext(), overlay);
-        if (mIsRtl) {
-            mEdgeGlowLeft = mAppListOverlayEdgeEffect;
-        } else {
-            mEdgeGlowRight = mAppListOverlayEdgeEffect;
-        }
-    }
-
     @Override
     protected void snapToDestination() {
         if (mOverlayEdgeEffect != null && !mOverlayEdgeEffect.isFinished()) {
-            snapToPageImmediately(0);
-        } else if (mAppListOverlayEdgeEffect != null && !mAppListOverlayEdgeEffect.isFinished()) {
             snapToPageImmediately(0);
         } else {
             super.snapToDestination();

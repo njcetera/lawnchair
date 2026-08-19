@@ -2840,11 +2840,6 @@ public class Launcher extends StatefulActivity<LauncherState>
         mWorkspace.setLauncherOverlay(overlay);
     }
 
-    /** AresLauncher §9: wires the right-edge (in LTR) app-list pane swipe. See {@link Workspace#setAppListOverlay}. */
-    public void setAppListOverlay(LauncherOverlayTouchProxy overlay) {
-        mWorkspace.setAppListOverlay(overlay);
-    }
-
     /**
      * Persistent callback which notifies when an activity launch is deferred because the activity
      * was not yet resumed.

@@ -161,10 +161,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // AresLauncher §9: right-edge swipe opens the app-list pane, mirroring the feed's
-        // left-edge overlay wiring below but driving the ALL_APPS state transition instead.
-        setAppListOverlay(app.lawnchair.areslauncher.AppListPaneOverlay(this))
-
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
         preferenceManager2.enableFeed.get().distinctUntilChanged().onEach { enable ->
