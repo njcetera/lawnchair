@@ -192,19 +192,26 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val itemView = launcher.itemInflater.inflateItem(info, holder.container) ?: return
 
         if (itemView is BubbleTextView) {
-            // Deliberately not ItemLongClickListener.INSTANCE_WORKSPACE: that listener's job is
-            // starting a CellLayout grid-drag, which doesn't apply to list rows.
-            // BubbleTextView.startLongPressAction() is the generic, CellLayout-free mechanism that
-            // shows the popup menu -- see component-verification-1.md/-3.md.
-            itemView.setOnLongClickListener {
-                itemView.startLongPressAction()
-                // ...and enter edit mode (§4). Both happen deliberately: the popup is the only way
-                // to remove an item or reach its shortcuts, while edit mode is what makes the
-                // surface draggable. Dismissing the popup leaves edit mode active.
-                editModeHost?.invoke()
-                true
-            }
             applyGridStyle(itemView)
+        }
+
+        // Long-press enters edit mode for EVERY item type. This was previously gated on
+        // `itemView is BubbleTextView`, and FolderIcon is not one -- so a folder could never
+        // *enter* edit mode by long-pressing it (folders dragged fine once it was active by other
+        // means). The user has a Google folder on their home screen, so it was immediately hit.
+        itemView.setOnLongClickListener {
+            // Deliberately not ItemLongClickListener.INSTANCE_WORKSPACE: that listener's job is
+            // starting a CellLayout grid-drag, which the packed grid doesn't use.
+            // startLongPressAction() -> PopupContainerWithArrow.showForIcon() takes a
+            // BubbleTextView, so only icons get the context popup; a folder enters edit mode
+            // without one. Both paths converge on the same enterEditMode(), which carries the
+            // mid-gesture guard -- edit mode is entered *during* a gesture, so that gesture's own
+            // UP would otherwise read as an empty-space tap and exit immediately.
+            if (itemView is BubbleTextView) {
+                itemView.startLongPressAction()
+            }
+            editModeHost?.invoke()
+            true
         }
         itemView.isHapticFeedbackEnabled = false
 
