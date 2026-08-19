@@ -1091,6 +1091,21 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * AresLauncher §4: true while the home grid is in edit mode.
+     *
+     * <p>Also read by {@link app.lawnchair.areslauncher.AresPaneSwipeController}, and it is not
+     * redundant with {@link #isAresReorderInProgress()}. That one only reports a reorder that has
+     * <em>already</em> begun, which is circular for a sideways drag: the controller claims
+     * horizontal gestures before any child view sees them, so the grid never receives the moves
+     * that would have started the reorder in the first place, and dragging an icon left or right
+     * did nothing. Edit mode is the state in which a horizontal drag on the grid means "move this
+     * item", so the controller stands down for its whole duration.
+     */
+    public boolean isAresEditMode() {
+        return mAresHomeList != null && mAresHomeList.isEditMode();
+    }
+
+    /**
      * AresLauncher: the home grid, or null before any desktop item has been bound.
      *
      * <p>Exposed for {@link app.lawnchair.areslauncher.AresHomeScrollGuard}, which needs the grid's

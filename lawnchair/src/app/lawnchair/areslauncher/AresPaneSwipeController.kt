@@ -84,6 +84,15 @@ class AresPaneSwipeController(launcher: Launcher) :
         if (workspace != null && workspace.isAresReorderInProgress()) {
             return false
         }
+        // §4: while the grid is in edit mode a horizontal drag means "move this item", so this
+        // controller stands down for the whole mode -- not just once a reorder is under way. The
+        // check above cannot cover it: controllers run before any child view sees the event, so
+        // claiming the gesture here starves the grid of the moves that would have *started* the
+        // reorder, and dragging an icon sideways did nothing at all (verified on device). The pane
+        // is still reachable while editing by leaving the mode first, which is a tap or Back.
+        if (workspace != null && workspace.isAresEditMode()) {
+            return false
+        }
         // Both directions work from anywhere on the pane. Opening was originally scoped to a
         // trailing-edge band, but that made the gesture feel fussy -- the user asked for any
         // horizontal drag on the home screen to pull the app list in, matching how closing already

@@ -1,5 +1,7 @@
 package app.lawnchair.areslauncher
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.view.MotionEvent
 import android.view.View
@@ -57,6 +59,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         aresAdapter.editModeHost = { enterEditMode() }
         aresAdapter.gridColumns = { masonry.columns }
         aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
+        aresAdapter.removeHost = { info -> removeFromHome(info) }
     }
 
     /**
@@ -84,6 +87,34 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * item untouched and this simply returns — the view and the database cannot drift apart, and
      * there is no revert path to get wrong.
      */
+    /**
+     * Takes [info] off the home screen and lets the grid compact around the gap.
+     *
+     * Removes from the adapter first so the change is on screen immediately, then writes the model.
+     * The order matters for feel, not correctness: waiting on the write would leave the tile under
+     * the finger for a beat after a tap that clearly meant "go away".
+     *
+     * **Removes from the home screen only — never uninstalls.** The app stays installed and stays
+     * in the app list; uninstall lives in the long-press popup. See [AresRemoveBadge].
+     *
+     * No explicit repack call: positions are derived from the resulting order, so compaction is
+     * simply what the next layout pass computes. This is the first interaction that exercises that
+     * property against real removals rather than the packer's own tests.
+     */
+    private fun removeFromHome(info: ItemInfo) {
+        val id = info.id
+        val removed = aresAdapter.removeItems { it.id == id }
+        if (!removed) return
+
+        AresRemoveBadge.removeFromHome(launcher, info)
+        masonry.animateNextLayout()
+        masonry.invalidatePacking()
+
+        announceForAccessibility(
+            context.getString(com.android.launcher3.R.string.item_removed),
+        )
+    }
+
     private fun cycleWidgetSize(info: ItemInfo) {
         val allowed = AresWidgetResize.allowedSizes(launcher, info, masonry.columns)
         if (allowed.isEmpty()) return
@@ -99,6 +130,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
             (findViewHolderForAdapterPosition(position) as? AresHomeAdapter.ViewHolder)
                 ?.let { aresAdapter.reportSizeAfterResize(info, it.container) }
         }
+        // Animate the repack: the widget grows into the space, and the items it displaces slide
+        // rather than teleport. Without this the whole grid re-lays out in a single frame, which
+        // reads as a glitch rather than as a size change.
+        masonry.animateNextLayout()
         masonry.invalidatePacking()
 
         announceForAccessibility(
@@ -126,6 +161,21 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private var enteredEditModeDuringGesture = false
 
+    /**
+     * Running wiggle animators, keyed by the holder container they rotate.
+     *
+     * Held so they can be cancelled individually as rows recycle and wholesale on exit. An
+     * animator left running on a recycled view would rotate whatever item was bound into it next,
+     * including outside edit mode.
+     */
+    private val wiggles = mutableMapOf<View, ObjectAnimator>()
+
+    /**
+     * True while the grid is in edit mode.
+     *
+     * Also read by [AresPaneSwipeController] via `Workspace.isAresEditMode()`, so a horizontal drag
+     * while editing reorders the grid instead of pulling the app-list pane in.
+     */
     fun isEditMode(): Boolean = editMode
 
     /**
@@ -153,6 +203,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         setReorderInProgress(false)
         // Set before the visual walk, for the same reason as enterEditMode (§6).
         aresAdapter.setEditMode(false)
+        // Cancel every animator up front rather than relying on the per-child walk: children that
+        // scrolled out while editing are no longer attached, so the walk would never reach them and
+        // their animators would outlive the mode.
+        clearWiggles()
         applyEditModeVisual()
         return true
     }
@@ -171,7 +225,71 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
             child.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
             setItemClickable(child, !editMode)
             syncChevron(child)
+            syncWiggle(child)
         }
+    }
+
+    /**
+     * Starts or stops one row's edit-mode wiggle.
+     *
+     * ## Why a wiggle at all
+     *
+     * The scale-down alone proved too subtle to notice, so there was no way to tell whether the
+     * surface was editable — which made taps that no longer launched look broken rather than
+     * intentional. The oscillation is the iOS/Windows Phone cue, and crucially **its absence is the
+     * signal that you are back to normal**, so exiting has visible feedback too.
+     *
+     * ## Why the phase is offset per item
+     *
+     * Every tile rotating in lockstep reads as one animated sheet rather than a set of loose
+     * objects. Seeding each animator's play time from its adapter position breaks that up. The
+     * offset is derived from *position*, not a random value, so a row landing back on screen after
+     * a scroll resumes at the phase it would have had — otherwise recycling would visibly re-sync
+     * tiles as they scrolled into view.
+     *
+     * ## Rotation, on the container
+     *
+     * Applied to the holder container rather than the item view, matching the scale and the two
+     * affordances — so the × and the chevron wiggle *with* the tile instead of sitting still over a
+     * moving icon. (For a widget the item view is an `AppWidgetHostView`, whose children the
+     * provider replaces on every update; the container is the only stable place to attach to.)
+     *
+     * Honours the system animator scale: with animations off, items simply hold the edit-mode
+     * scale, which still distinguishes the mode without motion.
+     */
+    private fun syncWiggle(child: View) {
+        val running = wiggles.remove(child)
+        running?.cancel()
+
+        if (!editMode) {
+            child.rotation = 0f
+            return
+        }
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            child.rotation = 0f
+            return
+        }
+
+        val position = getChildAdapterPosition(child)
+        val animator = ObjectAnimator.ofFloat(child, View.ROTATION, -WIGGLE_DEGREES, WIGGLE_DEGREES)
+        animator.duration = WIGGLE_PERIOD_MS
+        animator.repeatMode = ObjectAnimator.REVERSE
+        animator.repeatCount = ObjectAnimator.INFINITE
+        animator.start()
+        // Seed the phase *after* start(): currentPlayTime only takes effect on a running animator.
+        if (position != NO_POSITION) {
+            animator.currentPlayTime = (position * WIGGLE_PHASE_STEP_MS) % WIGGLE_PERIOD_MS
+        }
+        wiggles[child] = animator
+    }
+
+    /** Stops every wiggle and clears the rotation, so nothing is left tilted. */
+    private fun clearWiggles() {
+        for ((child, animator) in wiggles) {
+            animator.cancel()
+            child.rotation = 0f
+        }
+        wiggles.clear()
     }
 
     /**
@@ -198,6 +316,15 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         child.scaleX = scale
         child.scaleY = scale
         setItemClickable(child, !editMode)
+        syncWiggle(child)
+    }
+
+    override fun onChildDetachedFromWindow(child: View) {
+        super.onChildDetachedFromWindow(child)
+        // Stop the animator with the view it belongs to. Left running, it would keep rotating a
+        // recycled view after a different item had been bound into it.
+        wiggles.remove(child)?.cancel()
+        child.rotation = 0f
     }
 
     /**
@@ -252,14 +379,34 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // The resize chevron is a real clickable child, so this listener must not
                     // swallow its terminal UP the way it does for the rest of a tile. Recorded at
                     // DOWN because by UP the coordinates may have drifted within the slop.
+                    // Both affordances get identical treatment: a gesture starting on either is a
+                    // tap on a control, never a drag handle and never a tile tap to swallow.
                     downOnChevron = downOnChild?.let { child ->
-                        AresWidgetResize.isPointOnChevron(child, e.x - child.left, e.y - child.top)
+                        val localX = e.x - child.left
+                        val localY = e.y - child.top
+                        AresWidgetResize.isPointOnChevron(child, localX, localY) ||
+                            AresRemoveBadge.isPointOnBadge(child, localX, localY)
                     } ?: false
                     downX = e.x
                     downY = e.y
                     movedPastSlop = false
                     dragStarted = false
                     enteredEditModeDuringGesture = false
+                    // Claim the gesture for the grid from the outset, while editing and on an item.
+                    //
+                    // Starting a reorder is otherwise circular: the drag only begins once the touch
+                    // passes the slop threshold, but an ancestor claims the gesture before that
+                    // happens. Traced on device, a sideways drag delivered exactly one ACTION_MOVE
+                    // and then ACTION_CANCEL -- Workspace is a PagedView and intercepts horizontal
+                    // drags to change pages -- so `startDrag` was never reached and the item never
+                    // moved. `setReorderInProgress` issues the same call but only *after* a drag is
+                    // running, which is too late to be what starts one.
+                    //
+                    // Scoped to items so empty-space gestures still bubble to Workspace for the
+                    // wallpaper/widgets popup, and released on UP/CANCEL below.
+                    if (editMode && downOnChild != null) {
+                        rv.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
                     return false
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -282,6 +429,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     val onChevron = downOnChevron
                     downOnChild = null
                     downOnChevron = false
+                    // Release the claim taken at DOWN. Left set, the *next* gesture would start with
+                    // ancestors still suppressed -- so a horizontal swipe meant for the app-list
+                    // pane would be silently eaten by a grid that is no longer editing.
+                    rv.parent?.requestDisallowInterceptTouchEvent(false)
                     // Let the chevron's own OnClickListener fire: consuming here would deliver
                     // ACTION_CANCEL to it and the resize would never happen.
                     if (onChevron) return false
@@ -295,6 +446,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                 MotionEvent.ACTION_CANCEL -> {
                     downOnChild = null
                     dragStarted = false
+                    rv.parent?.requestDisallowInterceptTouchEvent(false)
                 }
             }
             return false
@@ -365,12 +517,22 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      *
      * Empty space only exists when the content doesn't fill the viewport -- in which case there is
      * nothing to scroll -- so declining it costs no scrolling behaviour.
+     *
+     * ## Why edit mode is excluded
+     *
+     * While editing, the grid must *keep* empty-space gestures: tapping empty space is how the mode
+     * is left, and that is recognised at `ACTION_UP`. Declining the `ACTION_DOWN` drops this view
+     * out of the dispatch chain for the rest of the gesture, so the `UP` is delivered to Workspace
+     * instead and [editModeTouchListener] never sees it -- tap-to-exit could not fire at all, and
+     * only the Back button worked (verified on device: BACK cleared the affordances, an empty-space
+     * tap did not). The wallpaper/widgets popup this guard exists to protect is not wanted mid-edit
+     * anyway, and outside edit mode the behaviour is unchanged.
      */
     private var gestureStartedOnEmptySpace = false
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN) {
-            gestureStartedOnEmptySpace = findChildViewUnder(e.x, e.y) == null
+            gestureStartedOnEmptySpace = !editMode && findChildViewUnder(e.x, e.y) == null
         }
         if (gestureStartedOnEmptySpace) return false
         return super.onInterceptTouchEvent(e)
@@ -378,7 +540,12 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (gestureStartedOnEmptySpace) return false
-        return super.onTouchEvent(e)
+        val handled = super.onTouchEvent(e)
+        // A grid whose content is shorter than the viewport has nothing to scroll, and a view that
+        // returns false for ACTION_DOWN receives no further events in that gesture. Claiming the
+        // DOWN while editing keeps this view in the chain so the terminal UP -- the tap that leaves
+        // edit mode -- actually arrives.
+        return handled || (editMode && e.actionMasked == MotionEvent.ACTION_DOWN)
     }
 
     /**
@@ -464,5 +631,25 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private companion object {
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
+
+        /**
+         * Half-amplitude of the edit-mode wiggle.
+         *
+         * Small on purpose: enough to read as alive across a screen of tiles, not so much that
+         * labels become hard to read or a 4-wide widget's corners sweep into its neighbours.
+         */
+        const val WIGGLE_DEGREES = 1.4f
+
+        /** One half-cycle. The full period is twice this, since the animator reverses. */
+        const val WIGGLE_PERIOD_MS = 180L
+
+        /**
+         * Phase offset applied per adapter position.
+         *
+         * Deliberately not a divisor of [WIGGLE_PERIOD_MS]: a value that divides evenly makes
+         * every Nth tile share a phase, which reintroduces the visible banding this is meant to
+         * avoid.
+         */
+        const val WIGGLE_PHASE_STEP_MS = 47L
     }
 }
