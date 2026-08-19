@@ -38,9 +38,18 @@ public class InsettableFrameLayout extends FrameLayout implements Insettable {
 
     @Override
     public void setInsets(Rect insets) {
-        final int n = getChildCount();
-        for (int i = 0; i < n; i++) {
+        // AresLauncher: re-read the count each pass and skip nulls. Stock captured the count once,
+        // so any child removed during the walk made getChildAt() return null and NPE in
+        // setFrameLayoutChildInsets. That is reachable because this walk recurses through every
+        // Insettable descendant (line 29), and a descendant's attach/detach can legitimately
+        // mutate a shared parent such as DragLayer. Confirmed on device: "NULL CHILD at i=11,
+        // startCount=12, nowCount=11" during a fold. The trigger is also fixed at source (see
+        // Workspace#setInsets), but this keeps a view-tree mutation from being a hard crash.
+        for (int i = 0; i < getChildCount(); i++) {
             final View child = getChildAt(i);
+            if (child == null) {
+                continue;
+            }
             setFrameLayoutChildInsets(child, insets, mInsets);
         }
         mInsets.set(insets);

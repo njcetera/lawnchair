@@ -416,10 +416,21 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         updateCellLayoutMeasures();
         updateWorkspaceWidgetsSizes();
         setPageIndicatorInset();
-        // AresLauncher: runs on every device-profile change, so this is where a live fold/unfold
-        // attaches or detaches the dual-pane app list.
-        syncAresAppListPane();
+        // AresLauncher: a live fold/unfold reaches us here, so this is where the dual-pane app list
+        // attaches or detaches -- but it must NOT run inline. We are inside LauncherRootView's
+        // recursive inset dispatch, and attaching/detaching the pane fires its
+        // onAttachedToWindow/onDetachedFromWindow, which add and remove the floating search pill
+        // from the shared DragLayer. Mutating DragLayer's children while DragLayer is mid-walk
+        // over those same children crashed the launcher on every fold (device-confirmed:
+        // "NULL CHILD at i=11, startCount=12, nowCount=11"). Deferring past the dispatch keeps the
+        // view tree stable for the duration of the walk. syncAresAppListPane() is idempotent, so
+        // collapsing repeat posts is safe and avoids redundant re-parenting.
+        removeCallbacks(mSyncAresAppListPane);
+        post(mSyncAresAppListPane);
     }
+
+    /** See the deferral note in {@link #setInsets(Rect)}. */
+    private final Runnable mSyncAresAppListPane = this::syncAresAppListPane;
 
     private void setPageIndicatorInset() {
         DeviceProfile grid = mLauncher.getDeviceProfile();
