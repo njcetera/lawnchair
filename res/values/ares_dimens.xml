@@ -7,12 +7,17 @@
      taste call. Adjust here and both surfaces follow.
 -->
 <resources>
-    <!-- Row height. Taller than a dense list row, well short of a grid cell. -->
-    <dimen name="ares_app_row_height">64dp</dimen>
+    <!-- Row height. Taller than a dense list row, well short of a grid cell.
+         Reduced 64dp -> 52dp: on a real device the app list runs to hundreds of entries and 64dp
+         rows made scrolling to the end take too long. 52dp still clears the 44dp minimum hit
+         target with room to spare and keeps the airy, text-forward feel; going lower starts to
+         read like a stock dense drawer, which is the look this deliberately avoids. -->
+    <dimen name="ares_app_row_height">52dp</dimen>
 
     <!-- Icon is deliberately smaller than the stock all-apps grid icon (~48-56dp) so the label
-         reads as the primary element. -->
-    <dimen name="ares_app_row_icon_size">36dp</dimen>
+         reads as the primary element. Trimmed with the row height so the icon keeps roughly the
+         same proportion of the row rather than crowding it. -->
+    <dimen name="ares_app_row_icon_size">32dp</dimen>
 
     <!-- Label is the dominant element, so slightly larger than the stock icon label. -->
     <dimen name="ares_app_row_text_size">17sp</dimen>
@@ -25,11 +30,13 @@
          smaller text, shorter height, de-emphasised colour. The letter is a signpost, not content,
          so it should recede next to the 17sp app labels it groups. Leading inset matches the row
          padding so letters and icons share one left edge. -->
-    <dimen name="ares_section_header_height">40dp</dimen>
+    <!-- Trimmed alongside the row height: with ~26 letter groups in a real app list, header
+         chrome is a meaningful share of total scroll length. -->
+    <dimen name="ares_section_header_height">32dp</dimen>
     <dimen name="ares_section_header_text_size">13sp</dimen>
     <!-- Extra breathing room above a header so each letter group reads as a distinct block.
          None below: the header should sit close to the apps it introduces. -->
-    <dimen name="ares_section_header_padding_top">16dp</dimen>
+    <dimen name="ares_section_header_padding_top">10dp</dimen>
 
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->

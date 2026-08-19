@@ -144,7 +144,16 @@
     <bool name="config_default_app_drawer_haptic_feedback">true</bool>
     <bool name="config_default_show_hidden_apps_in_search">false</bool>
     <bool name="config_default_enable_smart_hide">false</bool>
-    <bool name="config_default_show_suggested_apps_at_drawer_top">true</bool>
+    <!-- AresLauncher: no predicted-apps row above the app list. The system taskbar already gives
+         one-tap access to favourites, so a second favourites strip above an alphabetical list was
+         redundant and cost a screenful of scroll before reaching "A".
+
+         Done through Lawnchair's own preference rather than by excluding PredictionRowView from
+         FloatingHeaderView's row scan: that left findFixedRowByType() returning null and
+         QuickstepLauncher.dump() NPE'd on it, crash-looping the launcher on any dumpsys. Keeping
+         the row registered but GONE is the supported path (getExpectedHeight() already returns 0
+         and shouldDraw() false in that state), and it stays user-reversible in settings. -->
+    <bool name="config_default_show_suggested_apps_at_drawer_top">false</bool>
     <bool name="config_default_enable_font_selection">true</bool>
     <bool name="config_default_enable_smartspace_calendar_selection">true</bool>
     <bool name="config_default_dts2">true</bool>
@@ -152,7 +161,11 @@
     <bool name="config_default_show_icon_labels_on_home_screen">true</bool>
     <bool name="config_default_show_icon_labels_in_drawer">true</bool>
     <bool name="config_default_enable_fuzzy_search">false</bool>
-    <bool name="config_default_enable_smartspace">true</bool>
+    <!-- AresLauncher: At a Glance is off by default. It occupied grid row 0 of the home page and
+         forced AresHomeListView to start below it; with it gone the masonry grid starts at the top
+         of the page. The offset logic is deliberately kept (it reads the pinned item's bounds and
+         returns 0 when absent), so re-enabling this in settings still lays out correctly. -->
+    <bool name="config_default_enable_smartspace">false</bool>
     <bool name="config_default_enable_feed">false</bool>
     <bool name="config_default_enable_icon_selection">false</bool>
     <bool name="config_default_show_component_names">false</bool>
