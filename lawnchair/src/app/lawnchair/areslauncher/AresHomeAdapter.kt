@@ -5,11 +5,14 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
+import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -94,6 +97,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
         }
         itemView.isHapticFeedbackEnabled = false
 
+        if (itemView is FolderIcon) {
+            holder.container.addView(
+                buildFolderRow(itemView, holder.container),
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height),
+                ),
+            )
+            return
+        }
+
         val rowHeight = if (itemView is BubbleTextView) {
             holder.container.resources.getDimensionPixelSize(R.dimen.ares_app_row_height)
         } else {
@@ -104,6 +118,69 @@ class AresHomeAdapter(private val launcher: Launcher) :
             itemView,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, rowHeight),
         )
+    }
+
+    /**
+     * Wraps a [FolderIcon] into a row matching [applyRowStyle]'s app rows: preview on the left,
+     * label dominant and adjacent, both vertically centred.
+     *
+     * A folder can't reuse [applyRowStyle] because [FolderIcon] is a `FrameLayout` that *draws* its
+     * preview in `onDraw` rather than carrying it as a compound drawable, and its own label is a
+     * `match_parent` child offset downwards by `iconSizePx + iconDrawablePaddingPx`. So the stock
+     * arrangement is inherently icon-above-label.
+     *
+     * This uses only public API -- no vendored edits. The preview's position is controlled
+     * indirectly, via the two inputs `PreviewItemManager` feeds to `PreviewBackground.setup()`:
+     *  - X: `basePreviewOffsetX = (measuredWidth - previewSize) / 2`, so constraining the
+     *    FolderIcon to a narrow leading box centres the preview inside that box instead of across
+     *    the whole row. Box width is chosen so the preview's left edge lands on the same leading
+     *    inset an app row's icon uses.
+     *  - Y: `basePreviewOffsetY = paddingTop + folderIconOffsetYPx`, so paddingTop centres it.
+     *
+     * The built-in label is hidden via the public `setTextVisible(false)` and replaced with a
+     * sibling `TextView`, which is what lets the label sit *beside* the preview rather than under
+     * it. Colour and text are taken from the real label so themed/dark handling stays consistent.
+     *
+     * Because the FolderIcon now occupies only the leading box, the row forwards clicks to it.
+     */
+    private fun buildFolderRow(folderIcon: FolderIcon, parent: ViewGroup): ViewGroup {
+        val res = parent.resources
+        val grid = launcher.deviceProfile
+        val rowHeight = res.getDimensionPixelSize(R.dimen.ares_app_row_height)
+        val padH = res.getDimensionPixelSize(R.dimen.ares_app_row_padding_horizontal)
+        val previewSize = grid.folderIconSizePx
+        val stockLabel = folderIcon.folderName
+
+        folderIcon.setTextVisible(false)
+        // Vertically centre the drawn preview inside the row. setup() adds folderIconOffsetYPx on
+        // top of paddingTop, so subtract it back out.
+        folderIcon.setPadding(
+            0,
+            ((rowHeight - previewSize) / 2 - grid.folderIconOffsetYPx).coerceAtLeast(0),
+            0,
+            0,
+        )
+
+        val label = TextView(parent.context).apply {
+            text = stockLabel.text
+            setTextColor(stockLabel.textColors)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, res.getDimension(R.dimen.ares_app_row_text_size))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        }
+
+        return LinearLayout(parent.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(folderIcon, LinearLayout.LayoutParams(padH * 2 + previewSize, rowHeight))
+            addView(
+                label,
+                LinearLayout.LayoutParams(0, rowHeight, 1f).apply { marginEnd = padH },
+            )
+            setOnClickListener { folderIcon.performClick() }
+            setOnLongClickListener { folderIcon.performLongClick() }
+        }
     }
 
     /**
