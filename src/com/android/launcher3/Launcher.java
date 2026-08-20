@@ -891,7 +891,8 @@ public class Launcher extends StatefulActivity<LauncherState>
                         () -> getStateManager().goToState(NORMAL));
             } else {
                 CellPos presenterPos = getCellPosMapper().mapModelToPresenter(requestArgs);
-                if (requestArgs.container == CONTAINER_DESKTOP) {
+                if (requestArgs.container == CONTAINER_DESKTOP
+                        && !AresWidgetAdd.isAresHome(this)) {
                     // When the screen id represents an actual screen (as opposed to a rank)
                     // we make sure that the drop page actually exists.
                     int newScreenId = ensurePendingDropLayoutExists(presenterPos.screenId);
@@ -899,15 +900,18 @@ public class Launcher extends StatefulActivity<LauncherState>
                             presenterPos.cellX, presenterPos.cellY, newScreenId, CONTAINER_DESKTOP)
                                     .screenId;
                 }
-                final CellLayout dropLayout =
-                        mWorkspace.getScreenWithId(presenterPos.screenId);
+                final CellLayout dropLayout = aresResolveDropLayout(presenterPos.screenId);
 
-                dropLayout.setDropPending(true);
+                if (dropLayout != null) {
+                    dropLayout.setDropPending(true);
+                }
                 final Runnable onComplete = new Runnable() {
                     @Override
                     public void run() {
                         completeTwoStageWidgetDrop(resultCode, appWidgetId, requestArgs);
-                        dropLayout.setDropPending(false);
+                        if (dropLayout != null) {
+                            dropLayout.setDropPending(false);
+                        }
                     }
                 };
                 mWorkspace.removeExtraEmptyScreenDelayed(
@@ -950,6 +954,37 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     /**
+     * AresLauncher: the CellLayout page a pending widget drop should be anchored to.
+     *
+     * <p>Fixes a FATAL NullPointerException the user hit on hardware as soon as the home grid held
+     * enough items to fill screen 0: a widget's configure activity returning {@code RESULT_OK}
+     * landed in {@link #handleActivityResult}, which dereferenced
+     * {@code mWorkspace.getScreenWithId(presenterPos.screenId)} unconditionally.
+     *
+     * <p>Under Strategy D a desktop item's {@code screenId} is <em>model bookkeeping only</em> —
+     * every one of them is rendered by {@code AresHomeListView} on page 0, and
+     * {@link Workspace#addInScreen} never consults the screen id for {@code CONTAINER_DESKTOP}. But
+     * {@link app.lawnchair.areslauncher.AresWidgetAdd#findFreeCell} deliberately spills onto a
+     * <em>new</em> screen id once screen 0's grid is occupied, because {@code
+     * LoaderCursor.checkItemPlacement} occupancy-checks per screen and would otherwise delete the
+     * item on the next load. So screen ids above 0 are normal and expected here, while the matching
+     * CellLayout page does not exist and must not be conjured: creating one is what §22's stray-page
+     * sweep then has to undo, and rewriting {@code requestArgs.screenId} to an extra-empty-screen id
+     * would discard the very allocation that keeps the loader from deleting the widget.
+     *
+     * <p>So: resolve to the first page, which always exists (it is created by
+     * {@link Workspace#bindAndInitFirstWorkspaceScreen}) and is the page the home list is actually
+     * attached to. Same rule {@code Workspace.getOrCreateAresHomeList} already follows. Still
+     * nullable, and every caller must treat it so — nothing guarantees a page during teardown.
+     */
+    @Nullable
+    private CellLayout aresResolveDropLayout(int presenterScreenId) {
+        return mWorkspace.getScreenWithId(AresWidgetAdd.isAresHome(this)
+                ? WorkspaceLayoutManager.FIRST_SCREEN_ID
+                : presenterScreenId);
+    }
+
+    /**
      * Check to see if a given screen id exists. If not, create it at the end, return the new id.
      *
      * @param screenId the screen id to check
@@ -970,7 +1005,9 @@ public class Launcher extends StatefulActivity<LauncherState>
     @Thunk
     void completeTwoStageWidgetDrop(
             final int resultCode, final int appWidgetId, final PendingRequestArgs requestArgs) {
-        CellLayout cellLayout = mWorkspace.getScreenWithId(
+        // AresLauncher: same resolution as handleActivityResult -- see aresResolveDropLayout. This
+        // one is dereferenced one level down, inside Workspace.getFinalPositionForDropAnimation.
+        CellLayout cellLayout = aresResolveDropLayout(
                 getCellPosMapper().mapModelToPresenter(requestArgs).screenId);
         Runnable onCompleteRunnable = null;
         int animationType = 0;
@@ -998,13 +1035,19 @@ public class Launcher extends StatefulActivity<LauncherState>
             mAppWidgetHolder.deleteAppWidgetId(appWidgetId);
             animationType = Workspace.CANCEL_TWO_STAGE_WIDGET_DROP_ANIMATION;
         }
-        if (mDragLayer.getAnimatedView() != null) {
+        if (mDragLayer.getAnimatedView() != null && cellLayout != null) {
             mWorkspace.animateWidgetDrop(requestArgs, cellLayout,
                     (DragView) mDragLayer.getAnimatedView(), onCompleteRunnable,
                     animationType, boundWidget, true);
-        } else if (onCompleteRunnable != null) {
-            // The animated view may be null in the case of a rotation during widget configuration
-            onCompleteRunnable.run();
+        } else {
+            // The animated view may be null in the case of a rotation during widget configuration.
+            // AresLauncher adds the second condition: with no page to fly to there is no geometry
+            // for the flight, but the add itself must still complete -- dropping the animation is
+            // cosmetic, dropping the completion loses the widget and leaks its allocated id.
+            mDragLayer.clearAnimatedView();
+            if (onCompleteRunnable != null) {
+                onCompleteRunnable.run();
+            }
         }
     }
 
