@@ -378,7 +378,52 @@ class LawnchairLauncher : QuickstepLauncher() {
             } as TouchController
         }.toTypedArray()
 
-        return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) + stock
+        // §11a: Lawnchair's OWN vertical swipe controller has to be guarded too, and its absence
+        // from the guard was the notification-shade hijack.
+        //
+        // MEASURED, on the emulator, unfolded, with the probe in
+        // BaseDragLayer.findControllerToHandleTouch: a fresh downward drag over the app-list pane
+        // was offered to all nine controllers and NONE of them claimed the ACTION_DOWN -- the guard
+        // declined StatusBarTouchController and five other stock controllers with overPane=true --
+        // and the notification shade opened anyway. The same drag inside Settings did not open it,
+        // so it was never a system-wide gesture, and logcat showed no input monitor stealing it.
+        //
+        // VerticalSwipeTouchController is the one vertical controller in that list that was NOT
+        // wrapped, and the DOWN-only probe could not see it claim, because its
+        // onControllerInterceptTouchEvent returns `detector.isDraggingOrSettling` -- false at DOWN,
+        // true only once the drag passes slop on a later MOVE. Its route to the shade is:
+        //
+        //   getSwipeDirection() arms DIRECTION_DOWN when `overrideSwipeDown ||
+        //   overrideTwoFingerSwipeDown`. overrideSwipeDown is false at default, but
+        //   twoFingerSwipeDownGestureHandler defaults to OpenQuickSettings, which is not NoOp, so
+        //   overrideTwoFingerSwipeDown is TRUE and the downward direction is armed. onDrag() then
+        //   branches on pointerCount, and the ONE-finger branch calls gestureController.onSwipeDown()
+        //   -- whose handler defaults to GestureHandlerConfig.OpenNotifications.
+        //
+        // So a one-finger downward drag opens the shade because a TWO-finger preference armed the
+        // direction. §11a's table eliminated this controller on the grounds that
+        // swipeDownGestureHandler was still at its default; that is true and is not sufficient,
+        // because getSwipeDirection() is an OR with the two-finger preference. That elimination is
+        // now withdrawn.
+        //
+        // It explains every observation on the record: the asymmetry the user described (a stream
+        // that STARTS upward is classified up by BothAxesSwipeDetector and never reaches the down
+        // branch, while a fresh downward stream does); that it happens over the home grid as well
+        // as the pane (this controller is scoped to neither); and that it is worst unfolded, since
+        // canInterceptTouch() requires LauncherState.NORMAL -- which unfolded is where the launcher
+        // stays, with the pane persistent, while folded the app list puts it in ALL_APPS.
+        //
+        // Wrapping restores the guard's stated contract rather than changing the gesture: the guard
+        // declines only in NORMAL and only for gestures starting inside the grid or the pane, so
+        // Lawnchair's swipe gestures are untouched everywhere else.
+        val guardedVerticalSwipe = app.lawnchair.areslauncher.AresHomeScrollGuard(
+            this,
+            verticalSwipeController,
+            gridProvider,
+            paneProvider,
+        )
+
+        return arrayOf<TouchController>(paneSwipeController, guardedVerticalSwipe) + stock
     }
 
     override fun handleHomeTap() {

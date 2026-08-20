@@ -1,9 +1,13 @@
 package app.lawnchair.areslauncher
 
+import android.util.Log
 import android.view.MotionEvent
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherState
 import com.android.launcher3.util.TouchController
+import com.android.launcher3.views.BaseDragLayer.ARES_TOUCH_PROBE
+
+private const val ARES_PROBE_TAG = "AresTouchProbe"
 
 /**
  * Wraps a stock [TouchController] so it declines gestures that begin on the scrolling home grid.
@@ -75,8 +79,22 @@ class AresHomeScrollGuard(
      * event arrives in DragLayer coordinates and the grid sits several parents down.
      */
     private fun shouldDecline(ev: MotionEvent): Boolean {
-        if (!launcher.isInState(LauncherState.NORMAL)) return false
-        return startedOver(ev, gridProvider()) || startedOver(ev, paneProvider())
+        val normal = launcher.isInState(LauncherState.NORMAL)
+        val overGrid = normal && startedOver(ev, gridProvider())
+        val overPane = normal && !overGrid && startedOver(ev, paneProvider())
+        val decline = overGrid || overPane
+        if (ARES_TOUCH_PROBE) {
+            // §11a instrumentation. This is the *other* half of the probe in
+            // BaseDragLayer.findControllerToHandleTouch: that one records which controller claimed
+            // the DOWN, this one records why this wrapper handed back false, so a decline by the
+            // guard is never confused with a delegate that genuinely did not want the gesture.
+            Log.i(
+                ARES_PROBE_TAG,
+                "  guard[${delegate.javaClass.simpleName}] decline=$decline" +
+                    " normalState=$normal overGrid=$overGrid overPane=$overPane",
+            )
+        }
+        return decline
     }
 
     /**

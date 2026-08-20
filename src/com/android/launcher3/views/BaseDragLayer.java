@@ -180,25 +180,77 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
                 && y >= mSystemGestureRegion.top && y < getHeight() - mSystemGestureRegion.bottom;
     }
 
+    /**
+     * AresLauncher §11a instrumentation: record which controller, if any, claims an ACTION_DOWN.
+     *
+     * <p>The notification-shade hijack has now killed three hypotheses that were reasoned rather
+     * than measured, and one "elimination" that was an artefact of our own wrapper: a probe placed
+     * inside {@code StatusBarTouchController.canInterceptTouch} recorded silence, but
+     * {@code AresHomeScrollGuard} wraps that controller and returns false before ever calling its
+     * delegate, so the probe was unreachable by construction. Silence from inside a wrapped
+     * controller says nothing.
+     *
+     * <p>This probe sits at the one place every controller is offered the event, so it cannot be
+     * shadowed by a wrapper. It fires only on ACTION_DOWN -- which is where interception is decided
+     * -- so it is a handful of lines per gesture, not per frame.
+     *
+     * <p>Filter with {@code adb logcat -s AresTouchProbe}. Flip to false to silence it.
+     */
+    public static final boolean ARES_TOUCH_PROBE = true;
+    private static final String ARES_PROBE_TAG = "AresTouchProbe";
+
     private TouchController findControllerToHandleTouch(MotionEvent ev) {
+        boolean probe = ARES_TOUCH_PROBE && ev.getActionMasked() == ACTION_DOWN;
         AbstractFloatingView topView = AbstractFloatingView.getTopOpenView(mContainer);
         if (topView != null
                 && (isEventWithinSystemGestureRegion(ev)
                 || topView.canInterceptEventsInSystemGestureRegion())
                 && topView.onControllerInterceptTouchEvent(ev)) {
+            if (probe) {
+                Log.i(ARES_PROBE_TAG, "  CLAIMED by floating view "
+                        + topView.getClass().getSimpleName());
+            }
             return topView;
         }
 
         for (TouchController controller : mControllers) {
-            if (controller.onControllerInterceptTouchEvent(ev)) {
+            boolean claimed = controller.onControllerInterceptTouchEvent(ev);
+            if (probe) {
+                Log.i(ARES_PROBE_TAG, "  offered " + controller + " -> " + claimed);
+            }
+            if (claimed) {
+                if (ARES_TOUCH_PROBE && !probe) {
+                    // A claim on a LATER event, not on the DOWN. This line exists because its
+                    // absence hid §11a's actual cause for a whole investigation: a DOWN-only probe
+                    // showed VerticalSwipeTouchController answering false and it was written off,
+                    // but its onControllerInterceptTouchEvent returns
+                    // `detector.isDraggingOrSettling`, which only becomes true once the drag passes
+                    // slop on a MOVE. Same blind-spot family as instrumenting a wrapped delegate.
+                    Log.i(ARES_PROBE_TAG, "  CLAIMED MID-GESTURE by " + controller
+                            + " action=" + ev.getActionMasked());
+                }
                 return controller;
             }
+        }
+        if (probe) {
+            Log.i(ARES_PROBE_TAG, "  NO CONTROLLER CLAIMED THE DOWN"
+                    + " (the event goes on to the view tree, and anything it does not consume"
+                    + " reaches the system)");
         }
         return null;
     }
 
     protected boolean findActiveController(MotionEvent ev) {
         mActiveController = null;
+        if (ARES_TOUCH_PROBE && ev.getActionMasked() == ACTION_DOWN) {
+            Log.i(ARES_PROBE_TAG, "DOWN raw=(" + ev.getRawX() + "," + ev.getRawY() + ")"
+                    + " local=(" + ev.getX() + "," + ev.getY() + ")"
+                    + " insideGestureRegion=" + isEventWithinSystemGestureRegion(ev)
+                    + " systemGestureRegion=" + mSystemGestureRegion
+                    + " dispatchState=0x" + Integer.toHexString(mTouchDispatchState)
+                    + " canFindActiveController=" + canFindActiveController()
+                    + " controllers=" + (mControllers == null ? 0 : mControllers.length));
+        }
         if (canFindActiveController()) {
             mActiveController = findControllerToHandleTouch(ev);
             if (mActiveController != null) {
