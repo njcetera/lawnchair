@@ -59,9 +59,20 @@ object AresInfoBadge {
      * [label] is the item's own name and is spoken rather than drawn, for the same reason the ×
      * does it: it turns a row of identical "Options" buttons into "Chrome options".
      */
-    fun createBadge(container: FrameLayout, label: CharSequence?, onTap: () -> Unit): View {
+    @JvmOverloads
+    fun createBadge(
+        container: FrameLayout,
+        label: CharSequence?,
+        touchSizePx: Int = 0,
+        onTap: () -> Unit,
+    ): View {
         val res = container.resources
-        val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+        // See AresRemoveBadge.createBadge: a folder cell cannot carry two 48dp targets side by side.
+        val touch = if (touchSizePx > 0) {
+            touchSizePx
+        } else {
+            res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+        }
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
         // Mirror of the ×: pull the drawn circle into the top-END corner by padding the far sides,
         // leaving the whole 48dp view touchable. See AresRemoveBadge.

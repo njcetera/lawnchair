@@ -57,9 +57,22 @@ object AresRemoveBadge {
      * touch target to satisfy the 44dp minimum. Growing the glyph to fill the target instead would
      * bury the icon it sits on.
      */
-    fun createBadge(container: FrameLayout, label: CharSequence?, onTap: () -> Unit): View {
+    @JvmOverloads
+    fun createBadge(
+        container: FrameLayout,
+        label: CharSequence?,
+        touchSizePx: Int = 0,
+        onTap: () -> Unit,
+    ): View {
         val res = container.resources
-        val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+        // A caller may need a smaller target than the grid's. A folder cell is ~83dp, and two
+        // 48dp targets side by side need 234px of a 202px cell -- they would overlap by about
+        // 52px and which one a tap reached would depend on draw order. See AresFolderEdit.
+        val touch = if (touchSizePx > 0) {
+            touchSizePx
+        } else {
+            res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+        }
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
         // Pull the drawn circle into the top-start corner, away from the centre of its own touch
         // target, by padding the two FAR sides. The 48dp view stays fully touchable; only the

@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import com.android.launcher3.Launcher
+import com.android.launcher3.R
 import com.android.launcher3.Reorderable
 import com.android.launcher3.ShortcutAndWidgetContainer
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
@@ -58,7 +59,9 @@ import com.android.launcher3.util.MultiTranslateDelegate.INDEX_REORDER_PREVIEW_O
  */
 object AresFolderEdit {
 
-    private const val CELL_TAG = "ares_folder_edit_cell"
+    private const val TAG = "AresFolderEdit"
+
+private const val CELL_TAG = "ares_folder_edit_cell"
 
     private const val REMOVE_REASON = "removed from folder by user in home edit mode"
 
@@ -317,10 +320,65 @@ object AresFolderEdit {
         private fun createCell(parent: ViewGroup, info: ItemInfo): View {
             val cell = EditCell(parent.context)
             cell.tag = CELL_TAG
+
+            // The frost, same drawable the home grid uses (§23/§25).
+            //
+            // It was originally home-only, on the owner's instruction that it "makes sense for it
+            // to just be on the home screen edit and not inside folders when editing". They
+            // reversed that after the badges moved into their corners, and the reason is structural
+            // rather than cosmetic: on the grid the frost box IS the visible cell boundary, so a
+            // corner-anchored badge reads as anchored because there is a rectangle for it to be in
+            // the corner of. Without the box the same badge is a circle hovering near an icon's
+            // edge -- "they'll just look like it's floating on apps in folders without the blur
+            // background [to] ground them to the app".
+            //
+            // Watch the layering rather than assuming this is free: an open folder already draws
+            // its own translucent panel, so this is frost over frost. If it reads muddy the answer
+            // is a lower alpha here, not removing it -- the box is load-bearing for the badges now.
+            cell.background = AresEditGrid.cellOutline(cell.context)
+
+            // Both badges take a REDUCED target here. A folder cell is ~83dp (202x240px measured):
+            // two 48dp targets side by side need 234px of a 202px width and would overlap by about
+            // 52px, leaving which control a tap reached down to draw order. Halving the width less
+            // the margins is what actually fits. This is below the 44dp guideline and that is a
+            // real cost, mitigated by EditCell.dispatchTouchEvent already handing the icon's centre
+            // back to the icon -- so the miss case is "the drag starts" rather than "the wrong
+            // destructive control fires".
+            val margin = cell.resources.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+            val touch = ((parent.width / columnsOf(parent)) - 2 * margin) / 2
+
             // Named for the same reason as on the grid: a folder of six apps would otherwise offer
             // six controls that all announce themselves as "Remove".
-            cell.addView(AresRemoveBadge.createBadge(cell, info.title) { removeFromFolder(info) })
+            cell.addView(
+                AresRemoveBadge.createBadge(cell, info.title, touch) { removeFromFolder(info) },
+            )
+            if (AresInfoBadge.hasMenu(info)) {
+                cell.addView(
+                    AresInfoBadge.createBadge(cell, info.title, touch) { showMenuFor(info) },
+                )
+            }
             return cell
+        }
+
+        /** Columns in the open folder's grid, defaulting to 4 when it cannot be read. */
+        private fun columnsOf(parent: ViewGroup): Int =
+            (parent as? com.android.launcher3.CellLayout)?.countX?.takeIf { it > 0 } ?: 4
+
+        /**
+         * Raises the context menu for an app **inside** the folder (§25).
+         *
+         * Anchors to the icon the folder is drawing, not to our overlay cell: the popup positions
+         * itself against a `BubbleTextView`, and the overlay is a transparent box sitting on top of
+         * one. Edit mode is left alone, exactly as on the grid — the menu is asked for *while*
+         * arranging, so dropping the mode would discard the arrangement in progress.
+         */
+        private fun showMenuFor(info: ItemInfo) {
+            val icon = cells.entries.firstOrNull { (view, _) ->
+                (view as? com.android.launcher3.BubbleTextView)?.tag === info
+            }?.key
+            if (!AresInfoBadge.showMenu(icon)) {
+                android.util.Log.w(TAG, "no menu could be shown for ${info.targetComponent}")
+            }
         }
 
         private fun newCellParams() = CellLayoutLayoutParams(-1, -1, 1, 1).apply {
