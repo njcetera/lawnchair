@@ -845,7 +845,13 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 getCurrentPage(),
                 tabsHidden);
 
-        int padding = (hideSearchBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+        int stockPadding = (hideSearchBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+        // AresLauncher §11c: the stock value is room reserved under a search bar we do not draw,
+        // and it put the app list's first row 88px below where the home grid's first row starts.
+        // Scoped to our own pane; the Taskbar's all-apps sheet and the secondary-display host share
+        // this class, still show a search bar, and keep the stock padding.
+        int padding = AresAllApps.appListTopPaddingPx(
+                mActivityContext, isAresWorkspacePanel(), stockPadding);
         mAH.forEach(adapterHolder -> {
             adapterHolder.mPadding.top = padding;
             adapterHolder.applyPadding();
@@ -1224,6 +1230,19 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         if (needsInvalidate) {
             invalidate();
         }
+    }
+
+    /**
+     * AresLauncher §11c: true for the persistent app-list pane that lives inside the Workspace when
+     * unfolded, false for the folded sheet (and for every stock host of this class).
+     *
+     * The two start at different heights -- the panel is a Workspace page and begins exactly where
+     * the home grid's page begins, while the sheet begins at the status-bar inset and the home
+     * page's CellLayout adds its own padding below that. So the top padding that lines the first row
+     * up with the home grid differs, and it differs by *container*, not by posture.
+     */
+    protected boolean isAresWorkspacePanel() {
+        return false;
     }
 
     protected void updateBackgroundVisibility(DeviceProfile deviceProfile) {

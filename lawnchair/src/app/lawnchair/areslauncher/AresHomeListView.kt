@@ -68,6 +68,11 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         layoutManager = masonry
         adapter = aresAdapter
         clipToPadding = false
+        // §11c. Goes through super because our own setPadding() is a deliberate no-op (see below):
+        // ShortcutAndWidgetContainer would otherwise clobber this on every measure pass.
+        // AresMasonryLayoutManager already lays every cell out from paddingTop, and AresEditGrid
+        // derives its dot origin from the same value, so both follow this without further change.
+        super.setPadding(0, AresAllApps.homeListTopPaddingPx(context), 0, 0)
         addItemDecoration(editDots)
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)

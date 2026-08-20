@@ -51,6 +51,12 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     override fun updateBackgroundVisibility(deviceProfile: DeviceProfile) {}
 
     /**
+     * This *is* the workspace panel, so the §11c alignment padding it needs is the panel's, not the
+     * folded sheet's. See [AresAllApps.appListTopPaddingPx].
+     */
+    override fun isAresWorkspacePanel(): Boolean = true
+
+    /**
      * Same delegate the folded container uses, so this pane gets the identical §17 collapsed
      * bottom-right affordance rather than the stock top-anchored bar. Using a different delegate
      * here would reintroduce exactly the divergence this class exists to remove.

@@ -38,6 +38,68 @@
          None below: the header should sit close to the apps it introduces. -->
     <dimen name="ares_section_header_padding_top">10dp</dimen>
 
+    <!-- §11c "the top of the apps in the home page should line up with the top of the apps in the
+         all list. Right now its a little off and it looks awkward".
+
+         MEASURED on the emulator (Pixel 10 Pro Fold profile, 390dpi, density 2.4375) on 054a327,
+         before any change. All values are absolute screen y of the *icon box*, not of the painted
+         artwork; see the note below on why the box is the thing that can be aligned:
+
+           folded    home first tile top 178, icon box +6   -> 184
+                     app-list recycler top 152, pad +88, header +78, row icon +24 -> 342 (359 painted)
+           unfolded  home first tile top 203, icon box +6   -> 209
+                     app-list recycler top 203, pad +88, header +78, row icon +24 -> 393 (410 painted)
+
+         So the two surfaces were 175px (folded) and 201px (unfolded) apart. Three separate
+         contributions, only the first of which is a mistake:
+
+           88px  the app-list recycler's stock top padding. It is
+                 R.dimen.all_apps_search_bar_bottom_padding (36dp), reserved to clear a search bar
+                 that this design does not show: §17 moved the affordance to a collapsed circle in
+                 the bottom-right corner. Pure leftover; removed by these dimens.
+           78px  the first letter section header. Structural, and it is what §11b fixes: with five
+                 recents at the top of the list the first row is an app row, not a header.
+           18px  the app row centres a 32dp icon in a 52dp row (+24px), while a home tile puts its
+                 icon 6px below the cell top. That difference is what the two dimens below cancel.
+
+         Why the icon BOX and not the painted pixels: the painted inset is a property of each app's
+         adaptive icon, not of the surface. Measured on the same screenshot, Files paints full-bleed
+         (146px in a 146px box) while Calendar paints at 60% (88px in the same box). There is no
+         single painted offset to align, so the box (the frame every icon is drawn into) is the
+         only well-defined target. A full-bleed icon then aligns exactly; a circular one is inset
+         proportionally on both surfaces, so it lands ~5dp lower on home, where the icon is 60dp
+         against the list's 32dp. That residual cannot be removed without making the two icon sizes
+         equal, which would undo the Niagara look.
+
+         Two values because the two app-list containers start at different heights. The unfolded
+         AresPanelAllAppsContainerView is a page of the same Workspace as the home grid, so both
+         recyclers begin at the same y (measured 203/203) and nothing has to be added. The folded
+         sheet is a DragLayer child that begins at the status-bar inset (152) while the home page's
+         CellLayout carries a further 26px of its own top padding (178), so the sheet has to make
+         that up.
+
+         Selected by which container it is, NOT by posture. An earlier revision branched on
+         DeviceProfile.isTwoPanels and was measured wrong on the device: folded, the sheet's first
+         row still came out at the panel's 0dp and sat 25px out. The flag itself is right (a smoke
+         run in the same session read isTwoPanels:false folded, true unfolded), so what failed is
+         freshness, not the flag: setupHeader() is where this padding is decided and it does not
+         re-run on a posture change, so a posture-derived value is frozen at whatever the posture
+         was when the header was last set up.
+
+         Container identity has no such failure mode (a container's identity cannot go stale),
+         and it is the more honest discriminator anyway, since the offset is a property of where the
+         container is attached rather than of how the device is opened.
+
+         Both gated on AresAllApps.isAresAppListPane, so the Taskbar's all-apps sheet and the
+         secondary-display host keep stock padding. -->
+    <dimen name="ares_app_list_top_padding_panel">0dp</dimen>
+    <dimen name="ares_app_list_top_padding_sheet">10dp</dimen>
+    <!-- The 18px above, as dp. Applied to the home list rather than subtracted from the app list
+         because the app list would need a NEGATIVE padding to absorb it when unfolded (both
+         recyclers start at the same y there), and a negative padding enlarges a RecyclerView's clip
+         box instead of moving its content. Costs 7dp of home grid height. -->
+    <dimen name="ares_home_list_top_padding">7dp</dimen>
+
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->
     <dimen name="ares_search_collapsed_size">56dp</dimen>
