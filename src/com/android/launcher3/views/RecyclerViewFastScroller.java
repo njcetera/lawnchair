@@ -58,6 +58,7 @@ import com.android.launcher3.util.Themes;
 import java.util.Collections;
 import java.util.List;
 
+import app.lawnchair.areslauncher.AresAllApps;
 import app.lawnchair.theme.color.tokens.ColorTokens;
 
 /**
@@ -107,8 +108,31 @@ public class RecyclerViewFastScroller extends View {
     private static final List<Rect> SYSTEM_GESTURE_EXCLUSION_RECT =
             Collections.singletonList(new Rect());
 
-    private final int mMinWidth;
-    private final int mMaxWidth;
+    /**
+     * AresLauncher §13 follow-up: the app-list thumb, drawn wider and pulled inboard.
+     *
+     * The user said it was "a little bit hard to grab". Measured on the emulator before changing
+     * anything, and the touch target was never the problem: the scroller view is
+     * {@code fastscroll_width} = 58dp wide and its hit column runs the whole of that, of which
+     * ~32dp lands on screen. What is small is what you can *see* — {@code fastscroll_end_margin} is
+     * -26dp, so the view hangs 63px past the right edge and the thumb is drawn centred 8px from it,
+     * leaving about 7dp of a 6dp-wide thumb visible and hard against the bezel. (Note
+     * {@code fastscroll_thumb_touch_inset}, -24dp, is declared in dimens.xml and read nowhere in
+     * this fork — it is not widening anything.)
+     *
+     * So this adds visual weight and moves the thumb fully into view, rather than enlarging a touch
+     * area that is already generous. The dimens themselves are left alone: they are vendored and
+     * shared with the Taskbar's all-apps sheet, the secondary-display list and the widget picker,
+     * and editing them in place is the exact failure mode change-practices.md opens with.
+     */
+    private static final float ARES_TRACK_MIN_WIDTH_DP = 10f;
+    private static final float ARES_TRACK_MAX_WIDTH_DP = 14f;
+    private static final float ARES_THUMB_INSET_DP = 8f;
+
+    private int mMinWidth;
+    private int mMaxWidth;
+    /** Horizontal shift applied to the track and thumb; non-zero only on the Ares app list. */
+    private int mAresThumbInset;
     private final int mThumbPadding;
 
     /** Keeps the last known scrolling delta/velocity along y-axis. */
@@ -398,8 +422,12 @@ public class RecyclerViewFastScroller extends View {
             return;
         }
         int saveCount = canvas.save();
-        canvas.translate(getWidth() / 2, mRv.getScrollBarTop());
-        mThumbDrawOffset.set(getWidth() / 2, mRv.getScrollBarTop());
+        // mAresThumbInset is 0 everywhere except the Ares app list, where it brings the thumb in
+        // off the bezel; the gesture-exclusion rect below is offset by the same amount so it keeps
+        // tracking where the thumb is actually drawn.
+        int centreX = getWidth() / 2 - mAresThumbInset;
+        canvas.translate(centreX, mRv.getScrollBarTop());
+        mThumbDrawOffset.set(centreX, mRv.getScrollBarTop());
         // Draw the track
         float halfW = mWidth / 2;
         boolean useLetterFastScroller = shouldUseLetterFastScroller();
@@ -501,6 +529,17 @@ public class RecyclerViewFastScroller extends View {
 
     public void setFastScrollerLocation(@NonNull FastScrollerLocation location) {
         mFastScrollerLocation = location;
+        // Applied here rather than in the constructor because the location is not known until
+        // bindFastScrollbar. Gated on BOTH the location and the host, so the widget picker (a
+        // Launcher too) and the Taskbar's all-apps sheet (ALL_APPS_SCROLLER, but hosted by
+        // TaskbarOverlayContext) both keep the stock metrics. See ARES_TRACK_MIN_WIDTH_DP.
+        if (location == ALL_APPS_SCROLLER && AresAllApps.isAresAppListPane(mActivityContext)) {
+            float density = getResources().getDisplayMetrics().density;
+            mMinWidth = Math.round(ARES_TRACK_MIN_WIDTH_DP * density);
+            mMaxWidth = Math.round(ARES_TRACK_MAX_WIDTH_DP * density);
+            mAresThumbInset = Math.round(ARES_THUMB_INSET_DP * density);
+            setTrackWidth(mMinWidth);
+        }
     }
 
     private void animatePopupVisibility(boolean visible) {
