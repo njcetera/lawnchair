@@ -104,7 +104,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private fun showItemMenu(info: ItemInfo) {
         val container = childForItem(info)
         val itemView = (container as? ViewGroup)?.getChildAt(0)
-        if (!AresInfoBadge.showMenu(launcher, itemView, info)) {
+        if (!AresInfoBadge.showMenu(itemView)) {
             Log.w(TAG, "no menu could be shown for ${info.targetComponent}")
         }
     }

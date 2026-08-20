@@ -1,17 +1,14 @@
 package app.lawnchair.areslauncher
 
-import android.content.ActivityNotFoundException
 import android.graphics.Rect
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.android.launcher3.BubbleTextView
-import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
 import com.android.launcher3.model.data.ItemInfo
-import com.android.launcher3.util.PackageManagerHelper
 
 /**
  * The context-menu (!) affordance shown on icons and widgets while the grid is in edit mode.
@@ -26,18 +23,20 @@ import com.android.launcher3.util.PackageManagerHelper
  * > *"for icons and widgets, add another option in the top right with a ! icon and when clicked, it
  * > pulls up the app menu... this will allow us to maintain that menu functionality"*
  *
- * ## Icons and widgets take different routes, because only one of them has a popup
+ * ## App icons only
  *
- * `BubbleTextView.startLongPressAction()` funnels into `PopupContainerWithArrow.showForIcon()`,
- * whose parameter type is `BubbleTextView`. **A widget can never show that popup** — there is no
- * such thing to show for one. So an icon gets the real menu, and a widget gets the entry that menu
- * would have led to anyway: the provider's App info page, via
- * [PackageManagerHelper.startDetailsActivityForInfo], which resolves the component from the
- * `ItemInfo` and therefore works for a widget as well as an icon.
+ * Not widgets. The first cut gave them one too — the ask said "for icons and widgets" — and it was
+ * withdrawn after use: *"we shouldn't have the ! for widgets. only app icons."* It was never a
+ * clean fit. `BubbleTextView.startLongPressAction()` funnels into
+ * `PopupContainerWithArrow.showForIcon()`, whose parameter type is `BubbleTextView`, so **a widget
+ * can never show that popup** — the badge could only ever have opened App info for the provider,
+ * which is one entry from a menu rather than the menu, and a widget already carries the resize
+ * chevron and the × without needing a third control.
  *
- * Folders get **no** badge. There is no popup for a folder either, and §18 already establishes that
- * a folder carries no × — you empty a folder to remove it — so adding a lone affordance to the one
- * item type that has no menu behind it would promise something that does not exist.
+ * Folders get none either. There is no popup for a folder, and §18 already gives a folder no ×
+ * — you empty a folder to remove it — so a lone affordance on the one item type with no menu
+ * behind it would promise something that does not exist. The apps **inside** a folder do carry
+ * one; that surface is [AresFolderEdit].
  *
  * ## Why this rides on the holder container
  *
@@ -117,32 +116,23 @@ object AresInfoBadge {
      * call site so the badge and its hit-test cannot disagree about which items carry one.
      */
     fun hasMenu(info: ItemInfo): Boolean =
-        info.itemType == Favorites.ITEM_TYPE_APPWIDGET ||
-            info.itemType == Favorites.ITEM_TYPE_APPLICATION ||
+        info.itemType == Favorites.ITEM_TYPE_APPLICATION ||
             info.itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT
 
     /**
-     * Raises the menu for [info], given the tile's [itemView].
+     * Raises the menu for the tile currently drawn as [itemView].
      *
-     * An icon gets the real `PopupContainerWithArrow` through the same call a long-press used to
-     * make. Anything else — in practice a widget — gets App info for its provider, because no popup
-     * exists for it.
+     * The same call a long-press used to make, so this is the real `PopupContainerWithArrow` with
+     * the app's shortcuts, App info, Uninstall and Widgets — not a reconstruction of it.
      *
-     * Returns false when nothing could be shown, so the caller can decline rather than leave the
-     * user with a control that silently does nothing.
+     * Returns false when there is nothing to show, so the caller can decline rather than leave the
+     * user with a control that silently does nothing. That happens when the holder is not currently
+     * attached (scrolled off between the tap and the lookup), which is why the badge's own presence
+     * is not taken as proof that a view exists to anchor to.
      */
-    fun showMenu(launcher: Launcher, itemView: View?, info: ItemInfo): Boolean {
-        if (itemView is BubbleTextView) {
-            itemView.startLongPressAction()
-            return true
-        }
-        return try {
-            PackageManagerHelper.startDetailsActivityForInfo(launcher, info, null, null)
-            true
-        } catch (e: SecurityException) {
-            false
-        } catch (e: ActivityNotFoundException) {
-            false
-        }
+    fun showMenu(itemView: View?): Boolean {
+        val icon = itemView as? BubbleTextView ?: return false
+        icon.startLongPressAction()
+        return true
     }
 }
