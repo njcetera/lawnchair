@@ -250,6 +250,28 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         if (editMode) return
         editMode = true
         enteredEditModeDuringGesture = true
+        // Claim the rest of THIS gesture for the grid, so the long-press can continue straight into
+        // a drag without lifting -- which is the natural motion, and did not work.
+        //
+        // Two ancestors were taking it, both because they decide at ACTION_DOWN, when edit mode was
+        // still off. Measured on the emulator by holding an icon until the badges appeared and then
+        // dragging without lifting:
+        //
+        //  - leftward, the app-list pane opened instead (mState Normal -> AllApps) and the tile did
+        //    not move. AresPaneSwipeController runs from BaseDragLayer.findControllerToHandleTouch
+        //    and latches its answer in mNoIntercept at DOWN, so re-checking isAresEditMode() there
+        //    can never see a mode entered later in the same gesture.
+        //  - rightward, nothing happened at all: Workspace is a PagedView and intercepts horizontal
+        //    drags to change pages, so the grid was starved of the moves that would have started
+        //    the reorder.
+        //
+        // requestDisallowInterceptTouchEvent covers both at once, because the flag propagates the
+        // whole way up and ViewGroup.dispatchTouchEvent skips onInterceptTouchEvent entirely while
+        // it is set -- and BaseDragLayer's controller dispatch *is* an onInterceptTouchEvent. It is
+        // cleared automatically at the next ACTION_DOWN, and explicitly on this gesture's UP/CANCEL
+        // by the touch listener below, which already issues the same call for gestures that begin
+        // inside the mode.
+        parent?.requestDisallowInterceptTouchEvent(true)
         // Set BEFORE applyEditModeVisual: that walk calls back into the adapter to add chevrons,
         // and would otherwise read the previous mode and add none (§6).
         aresAdapter.setEditMode(true)
