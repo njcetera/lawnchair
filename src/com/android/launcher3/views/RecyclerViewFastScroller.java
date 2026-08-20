@@ -667,9 +667,26 @@ public class RecyclerViewFastScroller extends View {
     private void updatePopupY(int lastTouchY) {
         updatePopupX();
         int height = mPopupView.getHeight();
-        // Aligns the rounded corner of the pop up with the top of the thumb.
-        float top = mRv.getScrollBarTop() + lastTouchY + (getScrollThumbRadius() / 2f)
-                - (height / 2f);
+        // Stock aligns the bubble's rounded corner with the TOP of the thumb, which leaves it
+        // sitting most of a thumb-height above the finger -- "the renders just slightly high".
+        //
+        // AresLauncher centres it on the thumb instead. `lastTouchY` is the thumb's own top offset
+        // (setThumbOffsetY passes the same value), so biasing by half the thumb height puts the
+        // bubble's centre exactly on the thumb's centre. The arithmetic, at 390dpi:
+        //
+        //   thumb height   52dp = 127px      -> stock bias  radius/2 = 19px
+        //   thumb radius   14 + 1 + 1 = 38px -> ares  bias  height/2 = 63px
+        //   difference     44px (18dp) of upward offset removed
+        //
+        // Gated, like every other metric in this file, because RecyclerViewFastScroller also backs
+        // the Taskbar's all-apps sheet, the secondary-display list and the widget picker, and
+        // stock's alignment is deliberate upstream.
+        float bias = mIsAresAppList ? (mThumbHeight / 2f) : (getScrollThumbRadius() / 2f);
+        float top = mRv.getScrollBarTop() + lastTouchY + bias - (height / 2f);
+        // The clamp is stock's, and it is inert in our configuration -- worth recording, because it
+        // was written against a full-height track and ours is the middle half. Folded: track top
+        // 548, track height 1096, popup height 151, so `top` runs 536..1505 against a permitted
+        // 0..1655. It does not bite at either end of the travel, before or after the bias change.
         top = Utilities.boundToRange(top, 0,
                 getTop() + mRv.getScrollBarTop() + mRv.getScrollbarTrackHeight() - height);
         mPopupView.setTranslationY(top);
