@@ -322,7 +322,8 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
      * The stock track runs the full side of the screen, which the user asked to shorten: <i>"in the
      * app list the scroll bar takes the entire side of the screen. can we shrink that down to the
      * middle 2/3 so that its easier to quickly scroll and it also doesn't overlap with the search
-     * icon."</i> Three things fall out of one change:
+     * icon."</i> Then, having used it: <i>"I would like to shorten the scroll bar a bit more - maybe
+     * 25% smaller"</i> — so 2/3 became the middle half. Three things fall out of one change:
      *
      * <ul>
      *   <li>less thumb travel covers the same list, so scrubbing is quicker;
@@ -333,7 +334,7 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
      *       the quick handle will keep trigger the notification trey pulldown").
      * </ul>
      */
-    private static final float ARES_TRACK_HEIGHT_FRACTION = 2f / 3f;
+    private static final float ARES_TRACK_HEIGHT_FRACTION = 1f / 2f;
 
     /**
      * True when this is the launcher's own app-list pane rather than the Taskbar's all-apps sheet.
