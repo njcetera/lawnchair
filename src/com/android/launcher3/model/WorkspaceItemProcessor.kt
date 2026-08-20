@@ -511,11 +511,27 @@ class WorkspaceItemProcessor(
         collection.title = c.getString(c.mTitleIndex)
         collection.spanX = 1
         collection.spanY = 1
+        // AresLauncher §4: read RANK back for EVERY collection, not just app pairs.
+        //
+        // Stock set this only in the app-pair branch, with the comment below, because the two cases
+        // it cared about are both content-ordering: an app pair nested in a folder needs its rank,
+        // and a folder on the workspace is positioned by cellX/cellY so its own rank is dead weight.
+        // Under AresLauncher's masonry home, `rank` is the *entire* stored position model -- there
+        // are no x/y coordinates -- so a FolderInfo that loads at the default rank 0 sorts to the
+        // front of the grid no matter where the user dragged it, and takes every tie with it.
+        //
+        // Measured on emulator-5554 before the fix: a folder persisted at `rank 9` bound with
+        // `rank=0` and rendered second, while every other row on the same grid bound at its stored
+        // rank. It is also what made a whole grid appear to come back in `_id` order -- with the
+        // folder pinned at 0 and its neighbours also still 0, the tie fell through to model
+        // delivery order.
+        //
+        // Inert for stock paths: nothing reads a workspace folder's own rank (the hotseat derives
+        // its slot from screenId, and every folder-content read walks getContents()), and this only
+        // ever restores the value the row was already written with.
+        collection.rank = c.rank
         if (collection is FolderInfo) {
             collection.options = c.options
-        } else {
-            // An app pair may be inside another folder, so it needs to preserve rank information.
-            collection.rank = c.rank
         }
 
         c.markRestored()

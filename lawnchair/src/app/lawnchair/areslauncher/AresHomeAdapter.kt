@@ -244,19 +244,36 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * Inserts an item at its `rank` position rather than appending.
      *
      * The model does not hand items over in rank order: icons and widgets arrive in **separate
-     * bind batches**, so appending renders every widget after every icon regardless of where the
-     * user put it. Observed directly — a widget saved at rank 2 came back rendered last after a
-     * reboot, while the icons around it were correctly ordered.
+     * bind batches**, and within each batch `BaseLauncherBinder` sorts *spatially* by
+     * `(screenId, cellY, cellX)`. Under masonry those cell coordinates are stale bookkeeping that
+     * nothing renders from, so delivery order carries no meaning at all — appending would render
+     * every widget after every icon regardless of where the user put them. Observed directly: a
+     * widget saved at rank 2 came back rendered last after a reboot, while the icons around it were
+     * correctly ordered.
      *
-     * Insertion is stable for equal ranks, which matters on a fresh profile where every row is
-     * still `rank = 0`: those keep model delivery order until the user reorders something.
+     * ## Ties break on `id`, deliberately — never on arrival order
+     *
+     * Equal ranks are not hypothetical. They arise on a fresh profile (every row still `rank = 0`),
+     * and they arise in normal use: a folder collapsing hands its survivor a rank, and the widget
+     * add path appends at `max + 1`, so any path that mis-numbers produces a pair. Left as a
+     * *stable* insert, a tie resolves by model delivery order — i.e. by those stale `cellX`/`cellY`
+     * values, in two batches. That is reproducible only by accident: it changes when an unrelated
+     * write touches a cell, and it puts every widget after every icon within a tie group.
+     *
+     * Comparing `(rank, id)` instead gives a **total order** over the list. `id` is the model's
+     * primary key — unique, stable, and present before the row is ever bound — so a set of colliding
+     * ranks comes back in the same visual order after every reload, which is the property that
+     * matters. It is not a *meaningful* order, and it is not meant to be; the packer is a pure
+     * function of the sequence, so an arbitrary-but-fixed sequence still renders identically every
+     * time. `AresHomeReorder.persistOrder` renumbers the whole grid densely on any drag, so a
+     * collision heals as soon as the user rearranges anything.
      */
     fun addItem(info: ItemInfo) {
         if (dropDuplicateWidgetRow(info)) return
 
         var index = items.size
         for (i in items.indices) {
-            if (items[i].rank > info.rank) {
+            if (sortsAfter(items[i], info)) {
                 index = i
                 break
             }
@@ -264,6 +281,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
         items.add(index, info)
         notifyItemInserted(index)
     }
+
+    /** True when [existing] belongs strictly after [incoming] in the grid's total order. */
+    private fun sortsAfter(existing: ItemInfo, incoming: ItemInfo): Boolean =
+        existing.rank > incoming.rank ||
+            (existing.rank == incoming.rank && existing.id > incoming.id)
 
     /**
      * Collapses two rows that describe the **same widget instance** into one (§7).

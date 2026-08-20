@@ -79,6 +79,16 @@ public class LauncherDelegate {
                         CellLayout cellLayout = mLauncher.getCellLayout(info.container,
                                 mLauncher.getCellPosMapper().mapModelToPresenter(info).screenId);
                         finalItem =  info.getContents().remove(0);
+                        // AresLauncher §4: the survivor takes the folder's PLACE, so it must take
+                        // the folder's rank. It arrives here carrying the rank it held *inside* the
+                        // folder -- 0, 1, 2 ... -- and addOrMoveItemInDatabase writes that straight
+                        // out through ItemInfo.onAddToDatabase. On the masonry home, where rank is
+                        // the whole position model, that both drops the survivor at an arbitrary
+                        // spot and collides with whatever real row already holds that rank (two home
+                        // rows were observed at rank 6 this way). Stock is unaffected: it places a
+                        // collapsed folder's survivor by the cellX/cellY passed on the same line,
+                        // and never reads this rank back for a workspace or hotseat item.
+                        finalItem.rank = info.rank;
                         newIcon = mLauncher.getItemInflater().inflateItem(finalItem, cellLayout);
                         mLauncher.getModelWriter().addOrMoveItemInDatabase(finalItem,
                                 info.container, info.screenId, info.cellX, info.cellY);
