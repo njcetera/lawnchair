@@ -1099,6 +1099,11 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         val dp = launcher.deviceProfile
         masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
         masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
+        // §23. The obvious source is the profile's own cell spacing, and it does not work:
+        // `dp.cellLayoutBorderSpacePx` measures 0.0px on both axes here (the profile folds its
+        // spacing into cellWidthPx instead — 169px against our 260px masonry cell), so inheriting
+        // it is indistinguishable from having no gutter. Measured before relying on it.
+        masonry.gutterPx = resources.getDimensionPixelSize(R.dimen.ares_home_tile_gutter)
     }
 
     /**

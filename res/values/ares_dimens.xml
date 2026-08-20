@@ -149,4 +149,18 @@
          here" after the user has deliberately held still for half a second. Shares the outline's
          corner radius so the two read as the same shape at different weights. -->
     <dimen name="ares_drop_ring_width">3dp</dimen>
+
+    <!-- §23 Space between adjacent home tiles. Half is taken from each side of every cell, so
+         neighbours end up a full gutter apart and the grid's outer edge loses only half of one.
+
+         Deliberately OUR OWN value rather than the device profile's cell spacing, which is the
+         obvious thing to reuse and does not work: DeviceProfile.cellLayoutBorderSpacePx measures
+         0.0px on both axes for this grid (verified on the Pixel 10 Pro Fold, 4x6 - the profile
+         puts its spacing inside cellWidthPx instead, 169px against our 260px masonry cell). A
+         gutter inherited from it would silently be no gutter at all.
+
+         Small on purpose. Without any, adjacent widgets touch and any widget drawing a shadow or
+         a floating button past its own bounds reads as overlapping its neighbour; much more than
+         this and a 1x1 tile has too little room left for an icon and its label. -->
+    <dimen name="ares_home_tile_gutter">8dp</dimen>
 </resources>
