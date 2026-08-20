@@ -61,9 +61,14 @@ object AresRemoveBadge {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        // Pull the drawn circle into the top-start corner, away from the centre of its own touch
+        // target, by padding the two FAR sides. The 48dp view stays fully touchable; only the
+        // CENTER-scaled drawable moves. Centred it landed on the app icon rather than beside it.
+        val pull = res.getDimensionPixelSize(R.dimen.ares_badge_corner_pull)
 
         return ImageView(container.context).apply {
             tag = BADGE_TAG
+            setPaddingRelative(0, 0, pull, pull)
             // The drawable carries its own backdrop and is composed at the size it should be drawn
             // at, so it is set as the image and rendered CENTER -- at intrinsic size inside the
             // larger touch target -- rather than as a background stretched across the whole view.

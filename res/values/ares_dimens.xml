@@ -134,6 +134,23 @@
          so the glyph reads against a busy icon rather than blending into it. -->
     <dimen name="ares_remove_badge_glyph_size">18dp</dimen>
 
+    <!-- How far the drawn badge is pulled toward its corner, away from the centre of its own touch
+         target.
+
+         The touch target has to stay 48dp for the hit-target minimum, but the badge drawn inside it
+         is only 28dp, and centred it lands 34px from the tile corner (48dp box plus a 4dp margin,
+         at 2.4375 density). A 158px icon centred in a 260px cell starts at 51px, so the two overlap
+         and the badge reads as sitting ON the icon rather than in the corner of its tile - "the
+         icons are kinda squished on top of the icons".
+
+         Applied as padding on the two far sides, so the CENTER-scaled drawable shifts into its
+         corner while the whole 48dp view stays touchable. 15dp puts the badge's outer edge about
+         6px from the corner, which clears the icon on a 1x1 tile.
+
+         Only possible now that a tile is its whole cell again: while tiles were inset to make a
+         gutter, there was no corner left to move into. -->
+    <dimen name="ares_badge_corner_pull">15dp</dimen>
+
     <!-- §14 / §21 edit-mode grid overlay. Both are drawn by AresEditGrid and are meant to read as
          one system: dots mark where things CAN go, the outline marks what an item currently DOES
          occupy. Kept small and faint on purpose - they sit under and over the icons respectively,

@@ -90,15 +90,20 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * what an item is *currently drawn as*: holders are recycled, and for an icon the popup anchors
      * to the `BubbleTextView` itself, not to the holder container the badge lives on.
      *
-     * Edit mode is left first. The popup and edit mode are two floating states, and leaving both up
-     * together is the exact incoherence that made long-press stop raising the popup in the first
-     * place — each dismissal gesture clears only one of them, so the user has to dismiss twice. See
-     * the long note in [AresHomeAdapter]'s long-click handler.
+     * **Edit mode stays on.** The first cut left it, on the reasoning in [AresHomeAdapter]'s
+     * long-click handler — that a popup and edit mode are two floating states and each dismissal
+     * gesture clears only one. In use that was wrong here, and the owner said so: *"it does take us
+     * out of edit mode tho"*.
+     *
+     * The distinction is intent. That reasoning was about a single long-press raising both at once,
+     * unasked, which left the user dismissing a menu they never opened before they could drag
+     * anything. Tapping ! is a deliberate request for the menu *while arranging*, and dropping out
+     * of the mode to serve it throws away the arrangement they were in the middle of. Dismissing
+     * the popup now returns them to editing, which is where they were.
      */
     private fun showItemMenu(info: ItemInfo) {
         val container = childForItem(info)
         val itemView = (container as? ViewGroup)?.getChildAt(0)
-        exitEditMode()
         if (!AresInfoBadge.showMenu(launcher, itemView, info)) {
             Log.w(TAG, "no menu could be shown for ${info.targetComponent}")
         }

@@ -64,9 +64,13 @@ object AresInfoBadge {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        // Mirror of the ×: pull the drawn circle into the top-END corner by padding the far sides,
+        // leaving the whole 48dp view touchable. See AresRemoveBadge.
+        val pull = res.getDimensionPixelSize(R.dimen.ares_badge_corner_pull)
 
         return ImageView(container.context).apply {
             tag = BADGE_TAG
+            setPaddingRelative(pull, 0, 0, pull)
             // CENTER, not a stretched background -- see ares_remove_badge.xml for why the drawn
             // badge is composed smaller than the touch target that hosts it.
             setImageResource(R.drawable.ares_info_badge)
