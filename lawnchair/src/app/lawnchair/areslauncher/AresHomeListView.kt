@@ -462,6 +462,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         val previous = floatSuspendedFor
         if (previous === child) return
         floatSuspendedFor = child
+        // The reflow stands down on the same tile for the same reason, and at exactly the same two
+        // moments: `ItemTouchHelper` owns this view's translation until the drop settles.
+        masonry.reflowExempt = child
         if (previous != null) syncWiggle(previous)
         if (child != null) syncWiggle(child)
     }
@@ -473,6 +476,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         }
         wiggles.clear()
         floatSuspendedFor = null
+        masonry.reflowExempt = null
     }
 
     /**
@@ -1106,6 +1110,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
     fun setReorderInProgress(inProgress: Boolean) {
         reorderInProgress = inProgress
+        // Live reflow (§4) is on for exactly the life of a drag: displaced tiles flow to their new
+        // cells instead of appearing there. Outside a drag it must be off, or every scroll and
+        // recycle would spring.
+        masonry.reflowActive = inProgress
         // Belt and braces alongside the controller check: also stop ancestors intercepting.
         parent?.requestDisallowInterceptTouchEvent(inProgress)
     }

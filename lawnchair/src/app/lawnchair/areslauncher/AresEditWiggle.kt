@@ -39,15 +39,18 @@ import kotlin.math.sin
  *
  * ## Who else owns `translationX/Y` on these views
  *
- * Three other animators write the same two properties, and all three are started *later* than the
- * float, so they win for their duration and the float resumes when they end:
+ * The float no longer writes `translationX/Y` itself. It contributes an *orbit offset* to
+ * [AresEditMotion], which sums it with the reflow displacement and performs the single write — see
+ * that file for the full precedence table. The other writers, and what they do to the float:
  *
+ *  - **The reflow** ([AresEditMotion]) — composed with, not fought. It carries a tile that the
+ *    packer displaced during a drag to its new cell, and the tile keeps floating on the way.
  *  - [AresMasonryLayoutManager.animateFromPreviousBounds] — the 200ms repack after a resize or a
- *    removal, both of which only happen in edit mode.
+ *    removal, both of which only happen in edit mode. Takes the property outright for its duration.
  *  - `FolderAnimationManager` — animates each icon's translation while a folder opens and closes.
  *  - `ItemTouchHelper` — owns the dragged tile's translation frame-by-frame for the whole drag.
  *
- * The third one is **not** benign, which is why [AresHomeListView.setFloatSuspendedFor] stops the
+ * The last one is **not** benign, which is why [AresHomeListView.setFloatSuspendedFor] stops the
  * float on the tile being picked up and restarts it on `clearView`. `ItemTouchHelper` writes at
  * *draw* time rather than from an animator callback, so it and the float would trade the property
  * within a frame; and independently of that, a lifted tile should not still be drifting — iOS stops
@@ -119,8 +122,15 @@ object AresEditWiggle {
             // iteration*, which is exactly the phase, and it avoids boxing a Float per frame per
             // tile. Interpolation is linear, so the two agree.
             val theta = it.animatedFraction * TAU
-            view.translationX = radius * cos(theta).toFloat()
-            view.translationY = radius * sin(theta).toFloat()
+            // Through AresEditMotion rather than straight onto translationX/Y: the orbit is one of
+            // two continuous contributors to a tile's translation (the reflow is the other), and a
+            // BubbleTextView's translation is owned by a MultiTranslateDelegate that a direct write
+            // silently erases. See AresEditMotion.write.
+            AresEditMotion.setOrbit(
+                view,
+                radius * cos(theta).toFloat(),
+                radius * sin(theta).toFloat(),
+            )
             view.rotation = TILT_DEGREES * sin(theta).toFloat()
         }
         animator.start()
@@ -144,8 +154,10 @@ object AresEditWiggle {
      * a recycled row, or one whose animator was never created because animations are off.
      */
     fun reset(view: View) {
-        view.translationX = 0f
-        view.translationY = 0f
+        // Drops the reflow with the orbit. This is the funnel for "this view has stopped editing"
+        // -- a recycled row, a detached child, the mode ending -- and a spring left holding a
+        // displacement would keep writing to whatever item was bound into the view next.
+        AresEditMotion.clear(view)
         view.rotation = 0f
     }
 }

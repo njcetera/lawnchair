@@ -139,6 +139,7 @@ import java.util.stream.Stream;
 
 import com.patrykmichalik.opto.core.PreferenceExtensionsKt;
 import app.lawnchair.areslauncher.AresFolderDrag;
+import app.lawnchair.areslauncher.AresFolderEdit;
 import app.lawnchair.preferences2.PreferenceManager2;
 import app.lawnchair.theme.color.ColorOption;
 import app.lawnchair.theme.color.tokens.ColorTokens;
@@ -1224,7 +1225,11 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (mTargetRank != mPrevTargetRank) {
             mReorderAlarm.cancelAlarm();
             mReorderAlarm.setOnAlarmListener(mReorderAlarmListener);
-            mReorderAlarm.setAlarm(REORDER_DELAY);
+            // AresLauncher: REORDER_DELAY unchanged for every folder except the one currently being
+            // edited on our home surface, which uses a shorter wait so the icons flow with the
+            // finger instead of holding still and then shuffling all at once. The animation itself
+            // is stock's and is left alone. See AresFolderEdit#reorderDelayMs.
+            mReorderAlarm.setAlarm(AresFolderEdit.reorderDelayMs(this, REORDER_DELAY));
             mPrevTargetRank = mTargetRank;
 
             if (d.stateAnnouncer != null) {

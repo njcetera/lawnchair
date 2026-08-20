@@ -6,11 +6,13 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import com.android.launcher3.Launcher
+import com.android.launcher3.Reorderable
 import com.android.launcher3.ShortcutAndWidgetContainer
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.folder.Folder
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.util.MultiTranslateDelegate.INDEX_REORDER_PREVIEW_OFFSET
 
 /**
  * Editing **inside** an open folder, while the home grid is in edit mode (§18).
@@ -88,6 +90,34 @@ object AresFolderEdit {
         session?.stop()
         session = null
     }
+
+    /**
+     * How long [folder] should wait over a new target position before rearranging, in ms.
+     *
+     * Called from `Folder.onDragOver` in place of the bare `REORDER_DELAY`. Returns the Ares value
+     * **only for the one folder currently being edited on our home surface**, and hands back
+     * [stockDelay] for everything else — an app-drawer folder, a taskbar folder, any folder outside
+     * edit mode. The scope is the point: this changes the feel of the interaction the user asked
+     * about and nothing else.
+     *
+     * ## Why this is the knob, and not a missing animation
+     *
+     * Establish before changing: `FolderPagedView.realTimeReorder` **already animates**, 230ms per
+     * icon on a 30ms stagger via `CellLayout.animateChildToPosition`. Stacking a second animator on
+     * that is exactly how the home grid ended up with four writers on one property.
+     *
+     * What makes it read as a jump is `Folder.onDragOver`, which cancels and re-arms this alarm on
+     * *every* change of target rank. While the finger is moving the alarm is perpetually restarted
+     * and the arrangement never moves at all; hold still for a quarter of a second and it all
+     * shuffles at once. Shortening the wait is what turns that into flow.
+     *
+     * (The second half of the folder fix is not here: the edit-mode float used to write
+     * `translationX` directly, which erases a `MultiTranslateDelegate` channel — including the very
+     * one `animateChildToPosition` animates. See [AresEditMotion].)
+     */
+    @JvmStatic
+    fun reorderDelayMs(folder: Folder, stockDelay: Int): Int =
+        if (session?.folder === folder) AresEditMotion.FOLDER_REORDER_DELAY_MS else stockDelay
 
     /**
      * True when [x],[y] — in [icon]'s own coordinate space — fall on that icon's × badge.
@@ -241,6 +271,20 @@ object AresFolderEdit {
                 // instead of drifting across a rotating icon.
                 startWiggle(icon, index)
                 startWiggle(cell, index)
+
+                // ...and share the slide, during a rearrangement. `animateChildToPosition` moves
+                // the icon with a translation while leaving its layout params at the old cell, and
+                // the badge's bounds are copied from those layout params -- so without this the ×
+                // would sit at the old cell for the whole 230ms and then jump to the new one. Not
+                // an animator: the value is copied from the one stock is already running.
+                val slide = (icon as? Reorderable)?.translateDelegate
+                if (slide != null) {
+                    AresEditMotion.setFollow(
+                        cell,
+                        slide.getTranslationX(INDEX_REORDER_PREVIEW_OFFSET).value,
+                        slide.getTranslationY(INDEX_REORDER_PREVIEW_OFFSET).value,
+                    )
+                }
             }
 
             // Anything that has left the folder: stop its animator and drop its badge. A wiggle

@@ -93,6 +93,43 @@ class AresMasonryLayoutManager(
      */
     private val previousBounds = mutableMapOf<Int, android.graphics.Rect>()
 
+    /**
+     * True while a drag is in flight, which turns on the **live reflow** (§4).
+     *
+     * The host sets it alongside `setReorderInProgress`. Every layout pass taken while it is on
+     * springs each tile the packer moved from where it was drawn to where it now sits, instead of
+     * letting it appear there. Off outside a drag, so scrolling, recycling and binding stay
+     * instant — springing those would smear the whole grid.
+     */
+    var reflowActive: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!value) previousDrawnLeft.clear()
+        }
+
+    /**
+     * The tile `ItemTouchHelper` is dragging, which the reflow must never touch.
+     *
+     * It writes that view's `translationX/Y` every frame to keep it under the finger; a spring on
+     * the same property would fight it within the frame. Set by
+     * [AresHomeListView.setFloatSuspendedFor], which is the same moment and the same reason the
+     * float stands down.
+     */
+    var reflowExempt: View? = null
+
+    /**
+     * Where each attached child was **drawn** at the top of the current layout pass.
+     *
+     * Keyed by view, unlike [previousBounds], and that difference is the whole point. A repack
+     * after a resize describes *positions* moving; a reorder describes *this item* moving, and
+     * under a reorder the item at position 5 after the pass is not the one that was there before
+     * it. Stable ids mean the recycler hands the same `View` back for the same item, so the view is
+     * the identity to key on.
+     */
+    private val previousDrawnLeft = mutableMapOf<View, Float>()
+    private val previousDrawnTop = mutableMapOf<View, Float>()
+
     override fun generateDefaultLayoutParams(): RecyclerView.LayoutParams =
         RecyclerView.LayoutParams(
             RecyclerView.LayoutParams.WRAP_CONTENT,
@@ -134,6 +171,10 @@ class AresMasonryLayoutManager(
             return
         }
         if (animateNextLayout) capturePreviousBounds()
+        // Never both: the repack animation is an exclusive owner of the tiles it touches, and it
+        // cannot overlap a drag anyway (its only triggers are affordance taps).
+        val reflow = reflowActive && !animateNextLayout
+        if (reflow) captureDrawnPositions()
 
         val l = ensureLayout(state)
         scrollOffset = scrollOffset.coerceIn(0, maxScroll(l))
@@ -144,6 +185,8 @@ class AresMasonryLayoutManager(
             animateFromPreviousBounds()
             animateNextLayout = false
             previousBounds.clear()
+        } else if (reflow) {
+            reflowFromDrawnPositions()
         }
     }
 
@@ -169,6 +212,61 @@ class AresMasonryLayoutManager(
                 child.right,
                 child.bottom,
             )
+        }
+    }
+
+    /**
+     * Records where every attached child is currently **drawn**, before the pass moves it.
+     *
+     * `left` plus the reflow's own displacement, and deliberately **not** plus the float's orbit:
+     * the orbit is a continuous oscillation about the resting position, so folding it in would bake
+     * a couple of dp of wobble into the spring's start value on every repack. The reflow term is
+     * what makes retargeting exact — a tile already halfway to its last destination starts the next
+     * spring from halfway, not from the box it never reached.
+     *
+     * Taken at the top of the layout pass, which is what keeps **scrolling** out of the reflow: an
+     * auto-scroll during a drag goes through `scrollVerticallyBy`, so by the time a layout pass
+     * runs the children have already moved with it and the measured delta is zero.
+     */
+    private fun captureDrawnPositions() {
+        previousDrawnLeft.clear()
+        previousDrawnTop.clear()
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            previousDrawnLeft[child] = child.left + AresEditMotion.reflowX(child)
+            previousDrawnTop[child] = child.top + AresEditMotion.reflowY(child)
+        }
+    }
+
+    /**
+     * Springs every child the packing moved from where it was drawn to where it now sits.
+     *
+     * A child with no recorded position scrolled in during the pass and is left where it landed —
+     * springing it in from off-screen would draw attention to recycling, which is not something the
+     * user did. The dragged tile is skipped outright; see [reflowExempt].
+     */
+    private fun reflowFromDrawnPositions() {
+        var moved = 0
+        var furthest = 0f
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            if (child === reflowExempt) continue
+            val oldLeft = previousDrawnLeft[child] ?: continue
+            val oldTop = previousDrawnTop[child] ?: continue
+            val dx = oldLeft - child.left
+            val dy = oldTop - child.top
+            if (dx == 0f && dy == 0f) continue
+            AresEditMotion.displaceTo(child, dx, dy)
+            moved++
+            furthest = maxOf(furthest, kotlin.math.hypot(dx, dy))
+        }
+        previousDrawnLeft.clear()
+        previousDrawnTop.clear()
+        // One line per packing change during a drag, which is the granularity of "the user moved
+        // something". A reflow that silently does nothing is indistinguishable from one that is too
+        // fast to see, and that ambiguity has cost this project a verification pass before.
+        if (moved > 0) {
+            android.util.Log.d(TAG, "reflow: $moved tile(s), furthest ${furthest.toInt()}px")
         }
     }
 
@@ -225,6 +323,13 @@ class AresMasonryLayoutManager(
             val moved = dx != 0f || dy != 0f
             val resized = sx != 1f || sy != 1f
             if (!moved && !resized) continue
+
+            // This animation is an exclusive owner of the tile's translation for its duration, so
+            // any reflow still in flight on it is dropped rather than left summing underneath.
+            // Stated rather than assumed: the two cannot overlap today (a repack is triggered only
+            // by an affordance tap, and a gesture starting on an affordance never becomes a drag),
+            // and this is what keeps that true if a future path breaks the assumption.
+            AresEditMotion.clearReflow(child)
 
             child.translationX = dx
             child.translationY = dy
@@ -379,6 +484,8 @@ class AresMasonryLayoutManager(
     fun resolvedCellHeightPx(): Int = cellHeight()
 
     private companion object {
+        const val TAG = "AresMasonry"
+
         /**
          * Duration of the repack animation after a resize or removal.
          *
