@@ -512,9 +512,17 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
         if (getPageCount() <= 0) {
             return 0;
         }
+        // AresLauncher: while a dwell preview is open, measure the FULL grid rather than the rows
+        // that happen to be occupied. The previewed empty slot has no child view, so the
+        // occupied-rows walk cannot see it -- and a folder whose contents exactly fill its grid
+        // grew a row for the incoming icon and then measured at its old height, leaving that slot
+        // outside the box it drew. See Folder#aresIsPreviewingDrag.
+        boolean previewing = mFolder.aresIsPreviewingDrag();
         int maxPageHeight = 0;
         for (int i = 0; i < getPageCount(); i++) {
-            maxPageHeight = Math.max(maxPageHeight, getPageAt(i).getDesiredHeightForOccupiedRows());
+            CellLayout page = getPageAt(i);
+            maxPageHeight = Math.max(maxPageHeight,
+                    previewing ? page.getDesiredHeight() : page.getDesiredHeightForOccupiedRows());
         }
         return maxPageHeight + getPaddingTop() + getPaddingBottom();
     }

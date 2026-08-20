@@ -268,6 +268,9 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     private boolean mSuppressFolderDeletion = false;
     private boolean mSuppressContentUpdate = false;
 
+    /** AresLauncher: see {@link #aresIsPreviewingDrag()}. */
+    private boolean mAresPreviewingDrag = false;
+
     private boolean mItemAddedBackToSelfViaIcon = false;
     private boolean mIsEditingName = false;
 
@@ -881,12 +884,45 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mTargetRank = mEmptyCellRank;
         items.add(null);    // The empty spot the preview moves around.
 
+        // Set BEFORE animateOpen, because animateOpen measures the folder and the measurement is
+        // what this flag changes. See aresIsPreviewingDrag.
+        mAresPreviewingDrag = true;
         animateOpen(items, mEmptyCellRank / mContent.itemsPerPage());
         if (!mIsOpen) {
+            mAresPreviewingDrag = false;
             return false;
         }
         mActivityContext.getDragController().removeDropTarget(this);
         return true;
+    }
+
+    /**
+     * AresLauncher: true while a dwell preview is open, so this folder is sized for the item that
+     * is about to arrive as well as the ones it already holds.
+     *
+     * <p>{@link FolderPagedView#getDesiredHeight()} normally measures **occupied rows** — it walks
+     * the children's layout params for the deepest one. The previewed empty slot has no child, so
+     * a folder whose contents exactly fill its grid measured at its old height while its grid had
+     * grown a row underneath: the slot the icon was going to land in was outside the box being
+     * drawn. Reported as "the folder doesn't resize to the potential new app count".
+     *
+     * <p>Scoped to the preview rather than fixed in the occupied-rows measurement itself, because
+     * that measurement is right everywhere else — a folder at rest should not reserve empty rows.
+     */
+    public boolean aresIsPreviewingDrag() {
+        return mAresPreviewingDrag;
+    }
+
+    /**
+     * AresLauncher: ends the preview *sizing* without closing the folder.
+     *
+     * <p>Called at the moment a drop is committed. The item is about to become real content, so
+     * from here the ordinary occupied-rows measurement is the correct one again — and it has to be
+     * cleared before {@link #addFolderContent} triggers the re-layout, or the folder keeps a row
+     * of empty space it no longer needs.
+     */
+    public void aresEndPreviewSizing() {
+        mAresPreviewingDrag = false;
     }
 
     /** AresLauncher: the rank the previewed empty slot currently sits at. */
@@ -949,6 +985,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
      * stock uses in {@link #completeDragExit()}, and in the same order.
      */
     public void aresEndPreviewDrag() {
+        mAresPreviewingDrag = false;
         mEmptyCellRank = mInfo.getContents().size();
         mPrevTargetRank = -1;
         if (mIsOpen) {

@@ -153,6 +153,21 @@ object AresFolderPreview {
             forget()
             return false
         }
+        // THE SAME OPEN FOLDER THE MODE ALREADY HAS, not a second presentation of one.
+        //
+        // AresFolderEdit is what puts the frost box, the × and the ! on a folder's apps while edit
+        // mode is on. A dwell opens the folder from inside that same mode, so it has to look the
+        // same: reported as "the folder opens (yay) but the apps in the folder don't have the
+        // blur". Attaching the existing session is the fix rather than drawing a frost of our own
+        // -- the box is the visible cell boundary a corner-anchored badge is anchored to, and two
+        // implementations of it would drift the moment either is restyled.
+        //
+        // It detaches itself when the folder leaves the window, which is exactly what closing the
+        // preview does, so there is no unwind to get wrong here.
+        if (list.isEditMode()) {
+            AresFolderEdit.attach(launcher, icon)
+        }
+
         // AFTER the folder is in the DragLayer, so the ghost is added over it. Its elevation makes
         // that independent of add order, but there is no reason to rely on both.
         AresDragGhost.show(launcher, list.draggedTile())
@@ -306,6 +321,10 @@ object AresFolderPreview {
         cancelSettle()
         val rank = f.aresPreviewRank().coerceIn(0, info.getContents().size)
 
+        // Before addFolderContent, which re-lays the folder out: the slot is about to hold a real
+        // item, so the folder should measure by its occupied rows again from here or it keeps a
+        // row of empty space it no longer needs.
+        f.aresEndPreviewSizing()
         f.addFolderContent(item, rank, true)
         f.aresPersistContentRanks()
         Log.i(TAG, "dropped item ${item.id} into folder ${info.id} at rank $rank")
