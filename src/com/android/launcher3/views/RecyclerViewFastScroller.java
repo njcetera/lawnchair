@@ -409,11 +409,15 @@ public class RecyclerViewFastScroller extends View {
         mTouchOffsetY = 0;
         mLastTouchY = 0;
         mIgnoreDragGesture = false;
-        if (mIsDragging) {
-            mIsDragging = false;
-            animatePopupVisibility(false);
-            showActiveScrollbar(false);
-        }
+        mIsDragging = false;
+        // AresLauncher: the tear-down runs whether or not this scroller still believes it is
+        // dragging. It used to sit inside `if (mIsDragging)`, so any path that cleared that flag
+        // without also tidying the affordances left them on screen with nothing left to take them
+        // down -- the user's report was a section-letter bubble that survived the finger lift.
+        // Both calls below are idempotent, so running them on a scroller that was never dragging
+        // costs a no-op animation and nothing else.
+        animatePopupVisibility(false);
+        showActiveScrollbar(false);
     }
 
     @Override
@@ -542,16 +546,52 @@ public class RecyclerViewFastScroller extends View {
         }
     }
 
+    /**
+     * Shows or hides whatever this scroller puts on screen while the thumb is being dragged.
+     *
+     * ## AresLauncher: hiding is unconditional, and covers BOTH affordances
+     *
+     * There are two of them — the section-letter bubble ({@link #mPopupView}) and the A–Z rail
+     * ({@code getLetterList()}) — and {@link #shouldUseLetterFastScroller()} picks one. Showing may
+     * stay selective, because only one of them is the affordance in use. **Hiding may not**: a
+     * branch-selective hide can only ever take down the one the branch currently names, so anything
+     * the other branch put up (or that was left up by an earlier state) stays on screen with
+     * nothing left to remove it. The user's report — a letter bubble that survives the finger lift
+     * — is that shape.
+     *
+     * The asymmetry is real in stock and not hypothetical:
+     * {@link #updateFastScrollSectionNameAndThumbOffset} calls {@code mPopupView.setText(...)} on
+     * *both* branches, so the popup is fed by a shared path and hidden by a selective one.
+     *
+     * The `mPopupVisible != visible` guard is likewise dropped on the hide. It exists to avoid
+     * restarting an animation that is already running, which is a show-side concern; on the hide
+     * side it is exactly what makes a stale flag permanent, because a scroller that believes it is
+     * already hidden will decline to hide anything.
+     *
+     * The invariant worth keeping, rather than this one fix: **hide must cover every view show can
+     * touch.** If a third affordance is ever added, it belongs in both halves.
+     */
     private void animatePopupVisibility(boolean visible) {
-        if (mPopupVisible != visible) {
-            mPopupVisible = visible;
+        if (!visible) {
+            mPopupVisible = false;
+            mPopupView.animate().cancel();
+            mPopupView.animate().alpha(0f).setDuration(150).start();
+            // Null on every FastScrollRecyclerView except AllAppsRecyclerView -- the widget
+            // picker's scroller has no rail to hide.
+            ConstraintLayout letterList = mRv.getLetterList();
+            if (letterList != null) {
+                letterList.animate().cancel();
+                letterList.animate().alpha(0f).setDuration(150).start();
+            }
+            return;
+        }
+        if (!mPopupVisible) {
+            mPopupVisible = true;
             if (shouldUseLetterFastScroller()) {
-                mRv.getLetterList().animate().alpha(visible ? 1f : 0f)
-                        .setDuration(visible ? 200 : 150).start();
+                mRv.getLetterList().animate().alpha(1f).setDuration(200).start();
             } else {
                 mPopupView.animate().cancel();
-                mPopupView.animate().alpha(visible ? 1f : 0f)
-                        .setDuration(visible ? 200 : 150).start();
+                mPopupView.animate().alpha(1f).setDuration(200).start();
             }
         }
     }

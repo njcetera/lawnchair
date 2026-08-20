@@ -566,9 +566,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 }
             }
         }
-        if (mTouchHandler != null) {
-            mTouchHandler.endFastScrolling();
-        }
+        endFastScrolling();
         if (mHeader != null && mHeader.getVisibility() == VISIBLE) {
             mHeader.reset(animate);
         }
@@ -1266,12 +1264,39 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 .log(LAUNCHER_ALLAPPS_COUNT);
     }
 
+    /**
+     * Ends any fast-scroll gesture this view is still holding, and forgets it.
+     *
+     * AresLauncher: hoisted out of {@link #reset} so the two mid-gesture bails below can use it
+     * too. Guarded on the handler rather than on any state the scroller keeps, so it runs exactly
+     * once per scrub and is a no-op the rest of the time — {@link #onTouchEvent} sees every touch
+     * that reaches this view, including the many that have nothing to do with the scrollbar.
+     */
+    private void endFastScrolling() {
+        if (mTouchHandler != null) {
+            mTouchHandler.endFastScrolling();
+            mTouchHandler = null;
+        }
+    }
+
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
         // The AllAppsContainerView houses the QSB and is hence visible from the Workspace
         // Overview states. We shouldn't intercept for the scrubber in these cases.
         if (!isInAllApps()) {
-            mTouchHandler = null;
+            // AresLauncher: tear the scrubber down before letting go of it. This branch abandons
+            // mTouchHandler mid-gesture, so a scrub in flight never receives its terminal UP or
+            // CANCEL and endFastScrolling() is never reached -- the section-letter bubble and the
+            // widened track are left on screen, and reset()'s later cleanup cannot help because it
+            // is guarded on the very handler this line just cleared.
+            //
+            // It is reachable here in a way it is not in stock. LauncherAllAppsContainerView reads
+            // isInStableState(ALL_APPS), and this fork moves between home and the app list with a
+            // horizontal pane drag (AresPaneSwipeController), which runs from
+            // BaseDragLayer.findControllerToHandleTouch *before any child view sees the event*. A
+            // thumb on the scrollbar that drifts sideways enough to be claimed leaves the state
+            // non-stable for the rest of the gesture -- even if it settles back on ALL_APPS.
+            endFastScrolling();
             return false;
         }
 
@@ -1293,6 +1318,10 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
         if (!isInAllApps()) {
+            // AresLauncher: same reason as the identical bail in onInterceptTouchEvent above --
+            // this is the other half of the gesture's exit, and a scrub abandoned here would keep
+            // its affordances on screen. endFastScrolling() is idempotent.
+            endFastScrolling();
             return false;
         }
 
