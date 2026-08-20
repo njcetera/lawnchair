@@ -346,7 +346,30 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private fun tileScale(child: View): Float {
         val rest = if (editMode) EDIT_MODE_SCALE else 1f
-        return if (child === pickedUp) rest * AresEditMotion.PICKUP_SCALE_FACTOR else rest
+        if (child !== pickedUp) return rest
+
+        // The bump is a RATIO, which is size-blind, and on a big enough tile it lifts the tile
+        // straight past the edge of the list. A 1x1 icon grows about 8px and looks right; a
+        // full-width widget grows ~31px against a viewport with nothing spare, and the result is a
+        // widget clipped along both sides while it is held. Reported as "holding a large widget, it
+        // enlarges but it's too big so it's getting clipped".
+        //
+        // So keep 1.12 as the intent and clamp it to what actually fits. Anything at or below about
+        // three columns still gets the full bump; only the tiles that would overflow are reduced,
+        // and they are reduced to exactly the largest lift that stays inside the viewport rather
+        // than being denied one.
+        // Keep the gutter's worth of margin while lifted, rather than letting the bump run right
+        // out to the physical edge: a full-width tile clamps to exactly the list width otherwise,
+        // which is not clipped but reads as though it is about to be.
+        val desired = rest * AresEditMotion.PICKUP_SCALE_FACTOR
+        val gutter = masonry.gutterPx.toFloat()
+        val availW = (width - paddingLeft - paddingRight).toFloat() - gutter
+        val availH = (height - paddingTop - paddingBottom).toFloat() - gutter
+        val fitW = if (child.width > 0 && availW > 0f) availW / child.width else desired
+        val fitH = if (child.height > 0 && availH > 0f) availH / child.height else desired
+        // Never below the resting scale: a tile taller than the viewport would otherwise be told to
+        // shrink on pick-up, which reads as the opposite of being lifted.
+        return minOf(desired, fitW, fitH).coerceAtLeast(rest)
     }
 
     /**

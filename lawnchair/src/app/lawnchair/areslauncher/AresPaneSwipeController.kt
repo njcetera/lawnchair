@@ -160,7 +160,20 @@ class AresPaneSwipeController(launcher: Launcher) :
         mLauncher.deviceProfile.deviceProperties.widthPx * DRAG_FRACTION_FOR_FULL_TRANSITION
 
     companion object {
-        /** Fraction of screen width a drag must cover to complete a transition. */
-        private const val DRAG_FRACTION_FOR_FULL_TRANSITION = 0.5f
+        /**
+         * Fraction of screen width a drag must cover to complete a transition.
+         *
+         * **1.0 means the surface tracks the finger exactly**, and that is the point: §2 asks for a
+         * continuous Windows Phone Pivot pan, where the content is attached to the fingertip.
+         *
+         * This was 0.5, which completed the whole transition in half a screen of travel — so the
+         * panes moved at *twice* finger speed and the gesture read as a parallax slide rather than
+         * a drag. Reported as *"the scroll is moving faster than my finger giving a parallax
+         * effect. It should accurately track my finger."*
+         *
+         * A full screen of travel is not a burden in practice: `onDragEnd` still resolves flings by
+         * velocity, so a quick flick completes the switch without dragging the whole way across.
+         */
+        private const val DRAG_FRACTION_FOR_FULL_TRANSITION = 1.0f
     }
 }
