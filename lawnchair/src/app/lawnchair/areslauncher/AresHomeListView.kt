@@ -689,6 +689,30 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         private var movedPastSlop = false
         private var dragStarted = false
 
+        /**
+         * Picks the item up after [PICKUP_HOLD_MS], for a touch that started while the mode was
+         * already on. Cancelled by any movement before it fires, which is what makes that gesture a
+         * scroll instead.
+         */
+        private val pickUp = Runnable {
+            // The position check is not belt-and-braces: getChildViewHolder THROWS
+            // IllegalArgumentException for a view that is no longer a direct child, and 200ms is
+            // long enough for a rebind or a fling to have retired the holder under the finger.
+            val child = downOnChild
+            val holder = child
+                ?.takeIf { getChildAdapterPosition(it) != NO_POSITION }
+                ?.let { getChildViewHolder(it) }
+            if (holder == null) {
+                Log.d(TAG, "pick-up hold elapsed but the tile is gone")
+                return@Runnable
+            }
+            Log.d(TAG, "pick-up hold elapsed; starting drag")
+            dragStarted = true
+            itemTouchHelper.startDrag(holder)
+        }
+
+        private fun cancelPickUp() = removeCallbacks(pickUp)
+
         override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -731,13 +755,45 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     if (editMode && downOnChild != null) {
                         rv.parent?.requestDisallowInterceptTouchEvent(true)
                     }
+                    // A FRESH touch on an item, i.e. one made while the mode was already on, has to
+                    // be HELD before it picks anything up. See the note on the MOVE branch.
+                    cancelPickUp()
+                    if (editMode && downOnChild != null && !downOnChevron) {
+                        Log.d(TAG, "arming pick-up hold")
+                        postDelayed(pickUp, PICKUP_HOLD_MS)
+                    }
                     return false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (!movedPastSlop && exceededSlop(e)) movedPastSlop = true
-                    // A gesture that began on the chevron is a resize tap, not a drag handle --
-                    // otherwise the smallest wobble while tapping would pick the widget up.
-                    if (editMode && !dragStarted && movedPastSlop && !downOnChevron) {
+
+                    // TWO GESTURES, TWO RULES, and the difference is which touch this is.
+                    //
+                    // The long-press that ENTERS edit mode may continue straight into a drag with
+                    // no second hold -- that is 5a4944a054 and the user confirmed it is right:
+                    // "when we hold down an app to go into edit mode, the correct behavior which
+                    // youre already doing is to allow the app to immediately be able to move."
+                    //
+                    // A FRESH touch, made while the mode is already on, must not. The grid scrolls
+                    // vertically (§4 masonry, one continuous tall grid), so an immediate grab on
+                    // any fresh touch leaves no gesture to scroll with, and it gets worse as the
+                    // grid grows: "you currently allow items to be moved by immediately touching
+                    // them which causes issues if we end up need to scroll on the homepage."
+                    // iOS can afford the immediate grab because its home screen is PAGED and
+                    // nothing is lost; ours is not.
+                    //
+                    // So the fresh touch is picked up by a timer (armed at DOWN above) and this
+                    // branch only cancels it: move before it fires and the gesture belongs to the
+                    // RecyclerView, which scrolls. This listener never intercepts a MOVE, so
+                    // declining to start a drag is all that is needed -- the scroll is already
+                    // wired, it was simply being pre-empted.
+                    //
+                    // A gesture that began on an affordance is a tap on a control either way, so
+                    // it never arms the timer and never starts a drag here.
+                    if (movedPastSlop && !dragStarted) cancelPickUp()
+                    if (editMode && !dragStarted && movedPastSlop && !downOnChevron &&
+                        enteredEditModeDuringGesture
+                    ) {
                         val holder = downOnChild?.let { getChildViewHolder(it) }
                         if (holder != null) {
                             dragStarted = true
@@ -746,6 +802,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     }
                 }
                 MotionEvent.ACTION_UP -> {
+                    cancelPickUp()
                     // A stationary touch. The gesture that *entered* edit mode is excluded, or the
                     // mode would end the instant the long-press finger lifted.
                     val tap = !movedPastSlop && !dragStarted && !enteredEditModeDuringGesture
@@ -776,6 +833,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    cancelPickUp()
                     downOnChild = null
                     dragStarted = false
                     rv.parent?.requestDisallowInterceptTouchEvent(false)
@@ -862,6 +920,29 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * anyway, and outside edit mode the behaviour is unchanged.
      */
     private var gestureStartedOnEmptySpace = false
+
+    /**
+     * Observes every event this view receives, and abandons a pending folder drop on a CANCEL.
+     *
+     * ## Why here rather than in an OnItemTouchListener
+     *
+     * The user's rule for the dwell is explicit: *"a user needs to manually release before an item
+     * is actually added to a folder."* An `ACTION_CANCEL` — the notification shade pulled down
+     * mid-drag, an incoming call, any window taking focus — is not a release, but `ItemTouchHelper`
+     * routes it through `select(null, ACTION_STATE_IDLE)` and then `clearView` exactly as it routes
+     * a normal lift. Nothing downstream can tell the two apart, so a cancelled drag would file the
+     * icon into the folder and persist it.
+     *
+     * `editModeTouchListener` cannot see the CANCEL reliably: `ItemTouchHelper` registers its own
+     * `OnItemTouchListener` first (it is attached in the first `init` block, ours in the second),
+     * and once it intercepts, `RecyclerView` routes the remainder of the gesture to it alone.
+     * `dispatchTouchEvent` is above all of that and always runs. It consumes nothing — the return
+     * value is `super`'s, untouched.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_CANCEL) AresFolderDrop.cancel()
+        return super.dispatchTouchEvent(ev)
+    }
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -972,5 +1053,16 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
         /** Same as the dots: fast enough to feel like a response, slow enough not to snap. */
         const val DROP_RING_FADE_MS = 120L
+
+        /**
+         * How long a **fresh** touch in edit mode must be held before it picks an item up.
+         *
+         * Distinctly shorter than a system long-press (500ms), which is what enters the mode in the
+         * first place -- reusing that value would make the two gestures indistinguishable in the
+         * hand. Long enough that a flick meant to scroll never grabs anything, short enough that a
+         * deliberate press does not feel like waiting. One constant, expected to be tuned on the
+         * user's device.
+         */
+        const val PICKUP_HOLD_MS = 200L
     }
 }
