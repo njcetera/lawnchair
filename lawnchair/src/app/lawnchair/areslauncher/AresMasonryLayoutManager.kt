@@ -351,24 +351,83 @@ class AresMasonryLayoutManager(
         }
     }
 
-    /** Attaches, measures and positions every item whose cell rect intersects the viewport. */
+    /**
+     * The host, captured so [fill] can ask whether a child's holder may be recycled.
+     *
+     * Widget holders are `setIsRecyclable(false)` (see [AresHomeAdapter.onCreateViewHolder]) because
+     * re-attaching an `AppWidgetHostView` disturbs its sizing and RemoteViews state. Recycling one
+     * anyway does not reuse it — the pool refuses a non-recyclable holder — it *destroys* it, and
+     * the next scroll back builds a fresh host view and asks the provider to re-render. So those
+     * children are kept attached and simply laid out where the packing puts them, on-screen or off.
+     * A home grid holds a handful of widgets, so the bound is small and known.
+     */
+    private var host: RecyclerView? = null
+
+    override fun onAttachedToWindow(view: RecyclerView) {
+        super.onAttachedToWindow(view)
+        host = view
+    }
+
+    override fun onDetachedFromWindow(view: RecyclerView, recycler: RecyclerView.Recycler) {
+        super.onDetachedFromWindow(view, recycler)
+        host = null
+    }
+
+    private fun mayRecycle(child: View): Boolean =
+        host?.getChildViewHolder(child)?.isRecyclable ?: true
+
+    /** True when the cell at [position] intersects the viewport at the current [scrollOffset]. */
+    private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int): Boolean {
+        if (position !in l.cells.indices) return false
+        val top = l.cells[position].y * ch
+        val bottom = top + spanProvider.getSpan(position).h.coerceAtLeast(1) * ch
+        return bottom > scrollOffset && top < scrollOffset + (height - paddingTop - paddingBottom)
+    }
+
+    /**
+     * Attaches, measures and positions every item whose cell rect intersects the viewport, and
+     * removes the ones that no longer do.
+     *
+     * ## Why this reconciles instead of assuming an empty child list
+     *
+     * The layout path scraps everything first, so on that path the reconciliation is a no-op and
+     * every position comes back out of scrap. The **scroll** path must not scrap — see
+     * [scrollVerticallyBy] — so it arrives here with children still attached, and those have to be
+     * kept rather than requested again: `Recycler.getViewForPosition` only finds a view that is in
+     * *scrap*, so asking for a position that is already attached-and-not-scrapped builds a
+     * **second** view for the same item. That is what leaves a stale, wrongly-sized tile drawn over
+     * its neighbours once the grid is tall enough to recycle.
+     */
     private fun fill(recycler: RecyclerView.Recycler, l: AresPacker.Layout) {
         val cw = cellWidth()
         val ch = cellHeight()
         if (cw <= 0 || ch <= 0) return
 
-        val viewportTop = scrollOffset
-        val viewportBottom = scrollOffset + (height - paddingTop - paddingBottom)
+        // Recycle anything that has left the viewport or whose position no longer exists, and index
+        // what is left by position so it is reused rather than duplicated. Backwards, because
+        // removeAndRecycleView shifts every later index down.
+        val attached = HashMap<Int, View>()
+        for (i in childCount - 1 downTo 0) {
+            val child = getChildAt(i) ?: continue
+            val position = getPosition(child)
+            val keep = position in l.cells.indices &&
+                (isVisible(l, position, ch) || !mayRecycle(child)) &&
+                // Two children claiming one position is the corrupt state this whole function
+                // exists to prevent. If it is ever reached anyway, keep one and drop the rest --
+                // repairing on the next pass beats rendering both on top of each other.
+                !attached.containsKey(position)
+            if (keep) attached[position] = child else removeAndRecycleView(child, recycler)
+        }
 
         for (position in l.cells.indices) {
+            if (!isVisible(l, position, ch) && !attached.containsKey(position)) continue
             val cell = l.cells[position]
             val span = spanProvider.getSpan(position)
             val top = cell.y * ch
             val bottom = top + span.h.coerceAtLeast(1) * ch
-            if (bottom <= viewportTop || top >= viewportBottom) continue
 
-            val view = recycler.getViewForPosition(position)
-            addView(view)
+            val view = attached[position]
+                ?: recycler.getViewForPosition(position).also { addView(it) }
 
             val lp = view.layoutParams as RecyclerView.LayoutParams
             val w = span.w.coerceIn(1, columns) * cw - lp.leftMargin - lp.rightMargin
@@ -401,7 +460,18 @@ class AresMasonryLayoutManager(
         val consumed = target - scrollOffset
         if (consumed == 0) return 0
         scrollOffset = target
-        detachAndScrapAttachedViews(recycler)
+        // ⛔ Never call detachAndScrapAttachedViews here. It is a *layout-pass* primitive: the views
+        // it detaches go into Recycler.mAttachedScrap, and the only thing that ever drains that is
+        // LayoutManager.removeAndRecycleScrapInt, which RecyclerView runs at the end of
+        // dispatchLayout. A scroll is not a layout pass, so anything scrapped and not re-requested
+        // in the same call is stranded: detached from the view tree, still held as scrap, and still
+        // matched by position when a later pass asks for a view. Widget holders are
+        // setIsRecyclable(false), so they cannot even be pooled to recover. Measured consequence on
+        // the user's device: 12 rendered children against 11 database rows, the extra one a stale
+        // tile of a span nothing owned, drawn across its neighbours. It only ever appeared once the
+        // grid was tall enough to scroll, which is why every fixture that fit on one screen missed
+        // it. [fill] removes and recycles what left the viewport instead, which is legal in a
+        // scroll and leaves nothing behind.
         fill(recycler, l)
         return consumed
     }
