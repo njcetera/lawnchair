@@ -129,10 +129,22 @@ public class RecyclerViewFastScroller extends View {
     private static final float ARES_TRACK_MAX_WIDTH_DP = 14f;
     private static final float ARES_THUMB_INSET_DP = 8f;
 
+    /**
+     * How far the section-letter bubble is kept clear of the scrollbar it points at.
+     *
+     * A feel value — see {@link #updatePopupX}. 48dp is a typical thumb-contact width and the
+     * Material minimum touch target; tune on hardware.
+     */
+    private static final float ARES_POPUP_THUMB_CLEARANCE_DP = 48f;
+
     private int mMinWidth;
     private int mMaxWidth;
     /** Horizontal shift applied to the track and thumb; non-zero only on the Ares app list. */
     private int mAresThumbInset;
+    /** Gap held between the popup's right edge and the scrollbar; Ares app list only. */
+    private int mAresPopupClearance;
+    /** True only on the Ares app-list pane, which is the one surface these metrics apply to. */
+    private boolean mIsAresAppList;
     private final int mThumbPadding;
 
     /** Keeps the last known scrolling delta/velocity along y-axis. */
@@ -539,9 +551,11 @@ public class RecyclerViewFastScroller extends View {
         // TaskbarOverlayContext) both keep the stock metrics. See ARES_TRACK_MIN_WIDTH_DP.
         if (location == ALL_APPS_SCROLLER && AresAllApps.isAresAppListPane(mActivityContext)) {
             float density = getResources().getDisplayMetrics().density;
+            mIsAresAppList = true;
             mMinWidth = Math.round(ARES_TRACK_MIN_WIDTH_DP * density);
             mMaxWidth = Math.round(ARES_TRACK_MAX_WIDTH_DP * density);
             mAresThumbInset = Math.round(ARES_THUMB_INSET_DP * density);
+            mAresPopupClearance = Math.round(ARES_POPUP_THUMB_CLEARANCE_DP * density);
             setTrackWidth(mMinWidth);
         }
     }
@@ -596,7 +610,62 @@ public class RecyclerViewFastScroller extends View {
         }
     }
 
+    /**
+     * AresLauncher: slides the section-letter bubble inboard, out from under the thumb.
+     *
+     * *"my thumb kinda covers the letter on the drag bar when im holding it, is there any way to
+     * extend it out a bit more so I can see the letter without my thumb covering it?"*
+     *
+     * The bubble does not merely sit near the bar, it **overlaps** it. Measured on the emulator and
+     * on the user's Pixel, folded, both 1080 wide and identical to the pixel:
+     *
+     * <pre>
+     *   fast_scroller_popup    851 .. 1034
+     *   scroll_letter_layout   963 .. 1104
+     *   fast_scroller         1002 .. 1143
+     * </pre>
+     *
+     * So the bubble's right edge is 32px *inside* the scroller and a thumb resting on the bar
+     * covers its right third — which is where the glyph is.
+     *
+     * X comes from layout ({@code layout_alignParentEnd} plus {@code fastscroll_popup_margin}), not
+     * from {@link #updatePopupY}, which only writes {@code translationY}. It is corrected here with
+     * a {@code translationX} rather than by editing the layout or the dimen: both are vendored and
+     * shared with the Taskbar's all-apps sheet, the secondary-display list and the widget picker,
+     * and this is gated to the Ares app list exactly as the track and thumb metrics are.
+     *
+     * Anchored on the **scroller's** left edge, because that is where the thumb physically is and
+     * it is the only one of the three that is drawn. {@code scroll_letter_layout} is also to the
+     * left of it, but in this build it is an empty, permanently-transparent strip
+     * ({@code Flags.letterFastScroller()} is hardcoded false), so anchoring on it would be
+     * anchoring on nothing. If the rail is ever finished and turned on it becomes the live
+     * affordance, and the {@code shouldUseLetterFastScroller()} branch below clears that instead.
+     *
+     * {@link #ARES_POPUP_THUMB_CLEARANCE_DP} is a **feel value the emulator cannot judge**: 48dp is
+     * a typical thumb-contact width and the Material minimum touch target, and erring generous is
+     * right for a complaint that reads "I cannot see it". Expect the user to adjust it.
+     */
+    private void updatePopupX() {
+        if (!mIsAresAppList) {
+            return;
+        }
+        // Siblings under the same parent (all_apps_fast_scroller.xml is a <merge>), so these
+        // left/right edges are directly comparable.
+        int barLeft = getLeft();
+        if (shouldUseLetterFastScroller()) {
+            ConstraintLayout letterList = mRv.getLetterList();
+            if (letterList != null) {
+                barLeft = Math.min(barLeft, letterList.getLeft());
+            }
+        }
+        // Never pushed right of where layout put it -- this only ever moves the bubble further
+        // from the bar, so a narrow screen that already clears the thumb is left alone.
+        mPopupView.setTranslationX(
+                Math.min(0f, (barLeft - mAresPopupClearance) - mPopupView.getRight()));
+    }
+
     private void updatePopupY(int lastTouchY) {
+        updatePopupX();
         int height = mPopupView.getHeight();
         // Aligns the rounded corner of the pop up with the top of the thumb.
         float top = mRv.getScrollBarTop() + lastTouchY + (getScrollThumbRadius() / 2f)
