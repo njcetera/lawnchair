@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.view.View
+import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.folder.Folder
 
@@ -43,6 +44,16 @@ object AresFolderDrag {
     /**
      * Handles a long-press on the icon [v] inside the open [folder].
      *
+     * Not editing yet: the press enters edit mode, here and on the home grid behind — they are one
+     * mode, and §18 has the folder close back into a still-editing grid. [AresFolderEdit] is
+     * attached in the same breath, because the usual attach point is the *tap* on the folder icon
+     * that opened it ([AresHomeListView]'s touch listener) and that tap never happened when the
+     * folder was opened before the mode was.
+     *
+     * Already editing: the press raises the app's popup, which is the only thing a long-press does
+     * once the mode is on. That is where App info, Uninstall and an app's shortcuts live, and it
+     * mirrors the home grid exactly.
+     *
      * @return true when this consumed the gesture, so `Folder.onLongClick` must not fall through to
      *   `Folder.startDrag`.
      */
@@ -50,6 +61,16 @@ object AresFolderDrag {
     fun onFolderItemLongClick(launcher: Launcher, folder: Folder, v: View): Boolean {
         if (!AresWidgetAdd.isAresHome(launcher)) return false
         if (folder.isDestroyed) return false
+        val grid = launcher.workspace?.aresHomeList ?: return false
+
+        if (grid.isEditMode()) {
+            (v as? BubbleTextView)?.startLongPressAction()
+        } else {
+            grid.enterEditMode()
+            folder.folderIcon?.let { AresFolderEdit.attach(launcher, it) }
+        }
+        // Consumed either way. Falling through would arm the drag this whole object exists to
+        // stop, and would raise the popup a second time on the editing branch.
         return true
     }
 }
