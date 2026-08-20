@@ -4,6 +4,8 @@ import android.util.Log
 import android.view.View
 import com.android.launcher3.DropTarget
 import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherSettings.Favorites
+import com.android.launcher3.R
 import com.android.launcher3.Utilities
 import com.android.launcher3.folder.Folder
 import com.android.launcher3.folder.FolderIcon
@@ -12,8 +14,18 @@ import com.android.launcher3.model.data.ItemInfo
 import kotlin.math.hypot
 
 /**
- * **Dwell to drop in** — holding an icon still over a folder makes that folder a drop target (§4,
- * §17, §18).
+ * **Dwell to drop in, and dwell to create** — holding an icon still over another tile makes that
+ * tile a drop target (§4, §17, §18).
+ *
+ * One dwell, two resolutions, decided entirely by what is underneath:
+ *
+ *  - over a **folder** → the icon is filed into it;
+ *  - over another **icon** → a new folder is created holding both.
+ *
+ * §17's rule is that an operation with several outcomes must be *one* implementation. So the target
+ * hit-test, the timer, the highlight and the release are shared verbatim, and only [Kind] differs at
+ * the moment of the write. Building the second as its own dwell is what the audit in
+ * design/strategy-d-dead-paths.md explicitly warned would drift.
  *
  * ## Why a dwell, and not a plain hover
  *
@@ -99,6 +111,9 @@ object AresFolderDrop {
     /** [candidate]'s model item. */
     private var candidateInfo: ItemInfo? = null
 
+    /** What releasing on [candidateInfo] would do. Never [Kind.NONE] while a candidate is held. */
+    private var candidateKind = Kind.NONE
+
     /** Where the drag was when the dwell timer was last armed. */
     private var anchorX = 0f
     private var anchorY = 0f
@@ -129,10 +144,12 @@ object AresFolderDrop {
 
         val view = list.dropCandidateUnder(x, y, item.id)
         val info = view?.let { list.aresAdapter.itemAt(list.getChildAdapterPosition(it)) }
-        if (view == null || info == null || kindOf(info, item) == Kind.NONE) {
+        val kind = if (info == null) Kind.NONE else kindOf(info, item)
+        if (view == null || info == null || kind == Kind.NONE) {
             clearTarget()
             return
         }
+        candidateKind = kind
 
         if (info !== candidateInfo) {
             // Logged on change only -- this runs on every frame of a drag, so per-frame logging is
@@ -149,23 +166,57 @@ object AresFolderDrop {
             return
         }
         // Same tile. Only a real move restarts the count -- see DWELL_SLOP_PX.
-        if (!armed && hypot(x - anchorX, y - anchorY) > DWELL_SLOP_PX) {
+        //
+        // A move restarts the count even when the dwell has already ARMED, and the `!armed` guard
+        // that used to be here was wrong in two directions. The user's own words are "holding one
+        // app over another for a moment", and they asked for the whole thing to stay reversible
+        // "before ever letting go" -- so a finger that moves on is no longer holding, the ring must
+        // drop, and the release must be an ordinary reorder again. Left sticky, an arm survived any
+        // amount of subsequent travel as long as the drag stayed within the same tile, and the only
+        // way to undo it was to leave that tile entirely.
+        //
+        // It also mattered for the harness, which is how it was noticed: synthetic input arrives as
+        // a handful of discrete `input motionevent` calls hundreds of milliseconds apart, so an
+        // automated drag looks like a sequence of half-second holds and can arm on any tile it
+        // passes over. Disarming on movement is what keeps a scripted reorder a reorder.
+        if (hypot(x - anchorX, y - anchorY) > DWELL_SLOP_PX) {
+            if (armed) {
+                armed = false
+                list.setFolderDropTarget(null)
+            }
             restart(list, x, y)
         }
     }
 
     /**
-     * True while the drag is over a tile it could drop **into**, whether or not the dwell has
-     * elapsed yet.
+     * True while the live reflow must stand down, so the tile the drag is aiming at stays put.
      *
-     * This, not [isArmed], is what suspends the reflow. The dwell has to be *reachable* before it
-     * can be satisfied: under live reflow the folder is swapped aside on the very move that brings
-     * the drag onto it, so a freeze that waited for the dwell would be waiting on something that
-     * can never happen. Entering the tile suspends the swap; leaving it resumes, and the grid
-     * catches up in a single step.
+     * The dwell has to be *reachable* before it can be satisfied: under §4's live reflow a tile is
+     * swapped aside by the very drag approaching it, so a target that moves can never be dwelt on
+     * and can never carry a highlight the user can see.
+     *
+     * ## Why the two resolutions freeze differently, and why that is not a second mechanism
+     *
+     * A **folder** freezes the moment the drag enters it. That is the shipped behaviour and it is
+     * cheap because folders are rare — a grid has one or two, so suspending the reflow over them
+     * costs almost nothing.
+     *
+     * An **icon** must not, because *every* tile is a create-a-folder candidate. Freezing on entry
+     * would suspend the reflow over the whole grid and drag-to-reorder would stop working
+     * altogether: [AresHomeReorder.Callback.chooseDropTarget] declines the swap while this is true,
+     * and the drag is always over some tile under masonry, so it would never be false again.
+     *
+     * What holds an icon still instead is
+     * [AresHomeReorder.Callback.SWAP_TRAVEL_FRACTION] — a tile is displaced once the drag *reaches
+     * its centre*, not the instant it touches its edge. That leaves the tile's leading half as a
+     * region where it is under the drag and has not moved, which is exactly the region a dwell
+     * needs, and it costs nothing anywhere else because a drag that keeps going still displaces it.
+     *
+     * Once the dwell has **armed**, the freeze applies to both: the ring is up, the user is being
+     * shown a target, and a stray pixel of drift must not yank it out from under them.
      */
     @JvmStatic
-    fun isFrozen(): Boolean = candidateInfo != null
+    fun isFrozen(): Boolean = candidateInfo != null && (candidateKind == Kind.ADD || armed)
 
     /** True once the dwell has elapsed: the target is highlighted and a release drops into it. */
     @JvmStatic
@@ -196,6 +247,7 @@ object AresFolderDrop {
         armed = false
         candidate = null
         candidateInfo = null
+        candidateKind = Kind.NONE
     }
 
     private fun clear() {
@@ -205,28 +257,37 @@ object AresFolderDrop {
     }
 
     /** What dwelling on [target] with [source] in hand would do. */
-    private enum class Kind { NONE, ADD }
+    private enum class Kind {
+        /** Nothing; the pair is not foldable and the reflow is left alone. */
+        NONE,
+
+        /** [target] is a folder: file the source into it. */
+        ADD,
+
+        /** [target] is an icon: build a new folder holding both. */
+        CREATE,
+    }
 
     /**
      * Whether [target] can take [source], and how.
      *
      * `Folder.willAccept` is stock's own predicate for "may live inside a folder" — apps, deep
      * shortcuts and app pairs, never widgets — so the question is asked with the same rule stock
-     * uses rather than a second one that could disagree with it. It is also what keeps the freeze
-     * out of the way of ordinary reordering: dragging a widget, or a folder, past a folder is
-     * never eligible, so the reflow is never suspended for it.
+     * uses rather than a second one that could disagree with it. It is also what keeps this out of
+     * the way of ordinary reordering: dragging a widget past anything is never eligible, and
+     * nothing can be folded into a widget.
      *
-     * Dwelling one *icon* on another to create a new folder is the third dead behaviour the
-     * Strategy D audit found, and it is deliberately not here yet — it needs a new `FolderInfo`, an
-     * inflated `FolderIcon` and both items re-parented, which is a materially bigger write than
-     * moving one item into a container that already exists. It joins this table when it lands, so
-     * that both resolutions share one dwell rather than growing a second one.
+     * Note the asymmetry is stock's, not ours: a **folder** is not itself foldable
+     * (`willAcceptItemType` excludes `ITEM_TYPE_FOLDER`), so dwelling a folder on an icon does
+     * nothing and dwelling an icon on a folder is [Kind.ADD]. Only two leaves make [Kind.CREATE].
      */
     private fun kindOf(target: ItemInfo, source: ItemInfo): Kind {
         if (target.id == source.id) return Kind.NONE
         if (!Folder.willAccept(source)) return Kind.NONE
-        if (target !is FolderInfo) return Kind.NONE
-        return if (FolderInfo.willAcceptItemType(source.itemType)) Kind.ADD else Kind.NONE
+        if (target is FolderInfo) {
+            return if (FolderInfo.willAcceptItemType(source.itemType)) Kind.ADD else Kind.NONE
+        }
+        return if (Folder.willAccept(target)) Kind.CREATE else Kind.NONE
     }
 
     /**
@@ -268,6 +329,7 @@ object AresFolderDrop {
 
         val done = when (kindOf(info, item)) {
             Kind.ADD -> addToFolder(launcher, list, view, info as FolderInfo, item)
+            Kind.CREATE -> createFolder(launcher, list, info, item)
             Kind.NONE -> false
         }
         clear()
@@ -324,6 +386,120 @@ object AresFolderDrop {
         list.post {
             list.aresAdapter.removeItems { it.id == item.id }
             AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
+        }
+        return true
+    }
+
+    /**
+     * Builds a new folder holding [targetInfo] and [item], and puts it where [targetInfo] was.
+     *
+     * ## The write order is the whole correctness argument
+     *
+     * `ModelDbController.deleteUnparentedApps()` runs on **every** load and permanently deletes any
+     * row whose `container` names an id that is not in the table
+     * (design/model-persistence.md's second ⛔ banner). So the folder's own row has to exist before
+     * either member points at it — not "eventually", but in that order.
+     *
+     * It does, and by construction rather than by timing. `addItemToDatabase` assigns
+     * `folderInfo.id` **synchronously** on the calling thread and then enqueues the INSERT on
+     * `MODEL_EXECUTOR`; every `addFolderContent` below enqueues its UPDATE on the same single
+     * executor afterwards. FIFO on one thread is the ordering guarantee — there is never an instant
+     * at which the table holds a member row naming a folder row that is not there.
+     *
+     * The reverse hazard does not arise either: nothing is deleted here. Both members are *moved*
+     * (`addOrMoveItemInDatabase` on a row that already exists is a move), so no id is ever retired.
+     *
+     * ## Why the folder is inflated at all, when the view is thrown away
+     *
+     * The adapter is data-backed and re-inflates its own `FolderIcon` on bind, so this one is
+     * discarded the moment it has served its purpose. Its purpose is the `Folder` behind it:
+     * [Folder.addFolderContent] is the same call [addToFolder] uses, and it is what assigns a legal
+     * in-folder rank and cell through `FolderGridOrganizer`, persists, re-ranks the rest and
+     * refreshes the preview. Reproducing that by hand is how the two resolutions would drift.
+     *
+     * Everything it touches is folder-internal, where the `CellLayout` is real. In particular
+     * `FolderIcon.onDragEnter` — whose first two lines cast to `CellLayoutLayoutParams` and
+     * `CellLayout` — is never reached, and neither is `Launcher.addFolder`, whose tail calls
+     * `getParentCellLayoutForView(newFolder).getShortcutsAndWidgets()` on a view that
+     * `Workspace.addInScreen` has just discarded.
+     *
+     * `animate = false`, unlike [addToFolder]: this icon is detached and about to be dropped, so a
+     * preview animation on it would run against nothing.
+     *
+     * ## Where it lands
+     *
+     * At the **target's** index, never appended. The target is the tile the user aimed at, so that
+     * is the position the folder inherits; appending would move the result away from the finger.
+     * The freeze in [isFrozen] is what makes that index mean something — the target has not been
+     * reflowed aside, so it is still where it was when the dwell armed.
+     */
+    private fun createFolder(
+        launcher: Launcher,
+        list: AresHomeListView,
+        targetInfo: ItemInfo,
+        item: ItemInfo,
+    ): Boolean {
+        // A legal desktop cell before anything is written. Order under masonry is `rank` alone, but
+        // LoaderCursor.checkItemPlacement validates cells on every load and deletes what it
+        // rejects. Excluding the target guarantees an answer: its own cell is about to be vacated
+        // by the move into the folder, so at worst the folder takes the slot the target had.
+        val cell = IntArray(2)
+        val screenId = AresWidgetAdd.findFreeCell(launcher, 1, 1, cell, targetInfo.id)
+        if (screenId == AresWidgetAdd.NO_SCREEN) {
+            Log.e(TAG, "no free cell for a new folder; drop declined")
+            return false
+        }
+
+        val folderInfo = FolderInfo()
+        // Not final -- persistOrder below renumbers the whole grid densely -- but it means the row
+        // is right on its first pass instead of arriving at 0 and sorting to the top.
+        folderInfo.rank = targetInfo.rank
+        launcher.modelWriter.addItemToDatabase(
+            folderInfo,
+            Favorites.CONTAINER_DESKTOP,
+            screenId,
+            cell[0],
+            cell[1],
+        )
+        if (folderInfo.id == ItemInfo.NO_ID) {
+            Log.e(TAG, "folder row was not given an id; drop declined")
+            return false
+        }
+
+        val folder = FolderIcon
+            .inflateFolderAndIcon(R.layout.folder_icon, launcher, list, folderInfo)
+            .folder
+        if (folder == null) {
+            Log.e(TAG, "new folder ${folderInfo.id} inflated without a Folder; drop declined")
+            return false
+        }
+
+        // Target first, so the tile that was already on the grid keeps the leading position in the
+        // preview -- the same order stock uses in Workspace.createUserFolderIfNecessary.
+        folder.addFolderContent(targetInfo, 0, false)
+        folder.addFolderContent(item, 1, false)
+        Log.i(
+            TAG,
+            "created folder ${folderInfo.id} at screen=$screenId cell=(${cell[0]},${cell[1]}) " +
+                "from items ${targetInfo.id} and ${item.id}",
+        )
+
+        // Posted for the reason spelled out on addToFolder: in the in-grid case this is reached
+        // from ItemTouchHelper's clearView, inside a recover animation's end callback, and
+        // notifying adapter changes there mutates RecyclerView mid-frame. The model write above is
+        // deliberately NOT posted.
+        list.post {
+            val adapter = list.aresAdapter
+            val targetAt = adapter.indexOf(targetInfo)
+            val sourceAt = adapter.indexOf(item)
+            // Both rows leave; the folder takes the target's slot. Dropping the source first
+            // shifts the target up by one when it sat earlier in the order, so account for it
+            // before the removal rather than re-deriving an index from a list that has changed.
+            var at = if (targetAt >= 0) targetAt else adapter.itemCount
+            if (sourceAt in 0 until at) at--
+            adapter.removeItems { it.id == targetInfo.id || it.id == item.id }
+            adapter.addItemAt(folderInfo, at)
+            AresHomeReorder.persistOrder(launcher, adapter.snapshot())
         }
         return true
     }

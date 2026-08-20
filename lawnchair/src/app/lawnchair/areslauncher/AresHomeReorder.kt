@@ -2,6 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.graphics.Canvas
 import android.util.Log
+import android.view.View
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.AbstractFloatingView
@@ -126,6 +127,31 @@ object AresHomeReorder {
         private val list: AresHomeListView,
     ) : ItemTouchHelper.Callback() {
 
+        companion object {
+            /**
+             * How far the drag must travel toward a tile before that tile is reflowed aside.
+             *
+             * `1.0` would be "the drag centre has reached the tile's centre", and it has to be a
+             * little **past** that: aiming at a tile's middle is exactly how a person expresses
+             * "merge with this one", so the displacement must not fire at the point they are
+             * aiming for. `1.10` leaves roughly a tenth of a cell of headroom beyond the centre —
+             * about 26px on the emulator's grid — which is comfortably more than
+             * `AresFolderDrop`'s dwell slop, so a steady finger on the centre dwells rather than
+             * shoves.
+             *
+             * One knob. Lower it and tiles move sooner but the dwell window narrows; raise it and
+             * the reflow feels reluctant. `ItemTouchHelper` will not even ask below `0.5`
+             * (`moveIfNecessary` returns before calling `chooseDropTarget` until the drag has
+             * covered half its own size), so values under that are indistinguishable from `0.5`.
+             *
+             * **Upper bound is set by the harness, not by taste.** `ares-journeys.ps1`'s
+             * `reorder-persists` drags from a point biased 22% left of its tile's centre onto the
+             * next tile's exact centre, which lands the drag centre at `1.22` — so anything at or
+             * above that stops the journey reordering at all, and the script is not ours to edit.
+             */
+            const val SWAP_TRAVEL_FRACTION = 1.10f
+        }
+
         /**
          * False: edit mode starts drags, not long-press.
          *
@@ -194,7 +220,7 @@ object AresHomeReorder {
 
         /**
          * Picks the drop target by **which item contains the dragged view's centre**, rather than
-         * by overlap area.
+         * by overlap area — and only once the drag has travelled far enough to displace it.
          *
          * The stock heuristic scores candidates on how much of the dragged view overlaps each one.
          * That is sound when every item is the same size, and misleading here: a 2x2 widget being
@@ -238,10 +264,57 @@ object AresHomeReorder {
                 if (centreX >= v.left && centreX < v.right &&
                     centreY >= v.top && centreY < v.bottom
                 ) {
-                    return target
+                    // THE OTHER HALF OF THE DWELL, and it is here rather than in AresFolderDrop
+                    // because it is a statement about reordering, not about folders.
+                    //
+                    // Creating a folder needs a moment where the target is under the drag and has
+                    // NOT been reflowed aside -- otherwise there is nothing to dwell on and nothing
+                    // to draw a ring around. The freeze solves that for folder tiles, but it cannot
+                    // be used for icons: every tile is a create-a-folder candidate, so freezing on
+                    // entry would suspend the reflow across the whole grid and reordering would
+                    // stop working (see AresFolderDrop.isFrozen).
+                    //
+                    // So the threshold moves instead. A tile is displaced when the drag *reaches
+                    // its centre*, not the instant it touches its edge, which leaves its leading
+                    // half as exactly that moment. A drag that keeps going still displaces it, so
+                    // nothing about ordinary reordering is given up -- the swap simply fires half a
+                    // tile later than ItemTouchHelper's own 50%-of-travel trigger would have.
+                    return if (hasReached(selected, v, centreX, centreY)) target else null
                 }
             }
             return super.chooseDropTarget(selected, dropTargets, curX, curY)
+        }
+
+        /**
+         * True when the drag centre has covered [SWAP_TRAVEL_FRACTION] of the way from the dragged
+         * tile's own slot to [target]'s centre.
+         *
+         * Measured as a **projection onto the line between the two slot centres**, not as a raw
+         * distance: masonry reorders in two axes, so "past it" has no meaning without a direction,
+         * and the direction that matters is the one the drag is travelling. `selected.itemView`'s
+         * `left`/`top` are its *layout* slot — `ItemTouchHelper` expresses the drag as a
+         * translation on top of that — so the vector is exactly "from where this tile currently
+         * sits to where the tile it is aiming at sits".
+         */
+        private fun hasReached(
+            selected: RecyclerView.ViewHolder,
+            target: View,
+            centreX: Int,
+            centreY: Int,
+        ): Boolean {
+            val from = selected.itemView
+            val fromX = from.left + from.width / 2f
+            val fromY = from.top + from.height / 2f
+            val toX = target.left + target.width / 2f
+            val toY = target.top + target.height / 2f
+            val dx = toX - fromX
+            val dy = toY - fromY
+            val span = dx * dx + dy * dy
+            // Coincident slot centres: nothing to travel, so the swap is always allowed. Reachable
+            // only if a holder is mid-relayout, and declining would wedge the reorder.
+            if (span <= 0f) return true
+            val travelled = (centreX - fromX) * dx + (centreY - fromY) * dy
+            return travelled >= span * SWAP_TRAVEL_FRACTION
         }
 
         override fun onMove(
