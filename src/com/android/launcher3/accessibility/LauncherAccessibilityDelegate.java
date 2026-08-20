@@ -419,6 +419,27 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
      * Find empty space on the workspace and returns the screenId.
      */
     protected int findSpaceOnWorkspace(ItemInfo info, int[] outCoordinates) {
+        // AresLauncher S3 -- DATA LOSS, and reachable by a plain touch gesture.
+        //
+        // Everything below allocates through CellLayout.findCellForSpan, which reads the CellLayout
+        // *view's* occupancy map. Under Strategy D no CONTAINER_DESKTOP item view is ever added to a
+        // CellLayout (Workspace.addInScreen redirects them all into AresHomeListView), so that map
+        // is permanently empty, every call here returns the same first free cell, and
+        // LoaderCursor.checkItemPlacement deletes every arrival after the first on a LATER load
+        // ("Item position overlap"). That is the same failure class that once wiped the whole home
+        // screen, and it hides because the deletion happens hours after the action.
+        //
+        // Four callers reach this and all four were exposed: ADD_TO_WORKSPACE (:203),
+        // MOVE_TO_WORKSPACE (:539), ShortcutMenuAccessibilityDelegate's deep-shortcut add, and
+        // AppPairsController's Save app pair -- the last of which is an ordinary touch, not an
+        // accessibility action. BaseWidgetSheet already routed around this for the widget picker;
+        // this is the same allocator, applied once for all of them.
+        //
+        // Gated so anything that is not the Ares home surface (the Taskbar's contexts) keeps stock
+        // behaviour untouched.
+        if (AresWidgetAdd.isAresHome(mContext)) {
+            return AresWidgetAdd.findSpaceForAdd(mContext, info, outCoordinates);
+        }
         Workspace<?> workspace = mContext.getWorkspace();
         IntArray workspaceScreens = workspace.getScreenOrder();
         int screenId;
@@ -486,6 +507,10 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
         mContext.getStateManager().goToState(NORMAL, true, forSuccessCallback(() -> {
             if (item instanceof WorkspaceItemFactory) {
                 WorkspaceItemInfo info = ((WorkspaceItemFactory) item).makeWorkspaceItem(mContext);
+                // AresLauncher S3: rank is the entire stored ordering under masonry, and nothing on
+                // this path ever set it -- so an added item came in at the default 0 and landed at
+                // the TOP of the grid rather than the end. No-op off the Ares home surface.
+                AresWidgetAdd.applyAppendRank(mContext, info);
                 mContext.getModelWriter().addItemToDatabase(info,
                         LauncherSettings.Favorites.CONTAINER_DESKTOP,
                         screenId, coordinates[0], coordinates[1]);
@@ -510,6 +535,7 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
                 });
             } else if (item instanceof WorkspaceItemInfo) {
                 WorkspaceItemInfo info = ((WorkspaceItemInfo) item).clone();
+                AresWidgetAdd.applyAppendRank(mContext, info);
                 mContext.getModelWriter().addItemToDatabase(info,
                         LauncherSettings.Favorites.CONTAINER_DESKTOP,
                         screenId, coordinates[0], coordinates[1]);
@@ -517,6 +543,10 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
             } else if (item instanceof CollectionInfo ci) {
                 Workspace<?> workspace = mContext.getWorkspace();
                 workspace.snapToPage(workspace.getPageIndexForScreenId(screenId));
+                // The CONTAINER only. Members keep the ranks they arrived with -- for an app pair
+                // those are AppPairsController.encodeRank values that carry the split ratio, and
+                // for a folder they are the in-folder order. Neither is a desktop ordinal.
+                AresWidgetAdd.applyAppendRank(mContext, ci);
                 mContext.getModelWriter().addItemToDatabase(ci,
                         LauncherSettings.Favorites.CONTAINER_DESKTOP, screenId, coordinates[0],
                         coordinates[1]);
@@ -567,6 +597,9 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
         if (screenId == -1) {
             return false;
         }
+        // moveItemInDatabase writes RANK, and the rank this item is carrying is its position
+        // INSIDE the folder it is leaving -- meaningless, and usually a collision, on the desktop.
+        AresWidgetAdd.applyAppendRank(mContext, info);
         mContext.getModelWriter().moveItemInDatabase(info,
                 LauncherSettings.Favorites.CONTAINER_DESKTOP,
                 screenId, coordinates[0], coordinates[1]);

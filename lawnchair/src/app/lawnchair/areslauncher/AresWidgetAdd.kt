@@ -95,6 +95,47 @@ object AresWidgetAdd {
     }
 
     /**
+     * Allocates a legal home-grid position for an item about to be added, cell **and** rank.
+     *
+     * The single entry point for every stock "put this on the home screen" path — the accessibility
+     * `ADD_TO_WORKSPACE` and `MOVE_TO_WORKSPACE` actions, the deep-shortcut menu's add, and Save
+     * app pair from Overview. All four reach it through
+     * `LauncherAccessibilityDelegate.findSpaceOnWorkspace`.
+     *
+     * Those four were writing cells straight out of `CellLayout.findCellForSpan`, which reads the
+     * **CellLayout view's** occupancy. Under Strategy D no desktop item view is ever a CellLayout
+     * child, so that map is permanently empty, every call returns the same first free cell, and
+     * `LoaderCursor.checkItemPlacement` then deletes every arrival after the first with
+     * `Item position overlap` — on a *later* boot, hours after the action, which is why it hides.
+     * Save app pair reaches it by a plain touch: Overview, pick two apps, Save.
+     *
+     * Returns [NO_SCREEN] when the grid is full, which every caller already treats as "abandon".
+     */
+    @JvmStatic
+    fun findSpaceForAdd(launcher: Launcher, info: ItemInfo, outCell: IntArray): Int =
+        findFreeCell(launcher, info.spanX, info.spanY, outCell)
+
+    /**
+     * Gives [info] the rank of an item appended to the end of the home grid.
+     *
+     * A no-op off the Ares home surface, so a call site can be unconditional.
+     *
+     * Called on the object that is actually **written**, never on the caller's input: the add paths
+     * build a fresh `WorkspaceItemInfo` (or clone one) inside their state-transition callback, and a
+     * rank set on the source `AppInfo` would also be mutating a row of the live all-apps model.
+     *
+     * Ordering under masonry is `rank` alone (§4: no stored x/y), so an item written at the default
+     * `0` ties with whatever is already first and lands at the *top* of the grid instead of the end
+     * — settled only by database id. Not data loss, and the next drag renumbers it densely, but it
+     * is the wrong answer to "add to home screen".
+     */
+    @JvmStatic
+    fun applyAppendRank(launcher: Launcher?, info: ItemInfo) {
+        if (!isAresHome(launcher) || launcher == null) return
+        info.rank = nextRank(launcher)
+    }
+
+    /**
      * Finds a free region for [spanX] x [spanY], writing the cell into [outCell].
      *
      * [excludeId] omits one item from the occupancy map. A **resize** re-places an item that is

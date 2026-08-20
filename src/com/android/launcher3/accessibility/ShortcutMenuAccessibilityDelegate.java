@@ -28,6 +28,8 @@ import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.shortcuts.DeepShortcutView;
 
+import app.lawnchair.areslauncher.AresWidgetAdd;
+
 import java.util.List;
 
 /**
@@ -60,6 +62,9 @@ public class ShortcutMenuAccessibilityDelegate extends LauncherAccessibilityDele
                 return false;
             }
             mContext.getStateManager().goToState(NORMAL, true, forSuccessCallback(() -> {
+                // AresLauncher S3: the cell now comes from AresWidgetAdd (findSpaceOnWorkspace is
+                // carved out in the superclass); this supplies the other half, the desktop rank.
+                AresWidgetAdd.applyAppendRank(mContext, info);
                 mContext.getModelWriter().addItemToDatabase(info,
                         LauncherSettings.Favorites.CONTAINER_DESKTOP,
                         screenId, coordinates[0], coordinates[1]);
