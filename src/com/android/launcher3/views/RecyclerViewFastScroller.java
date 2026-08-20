@@ -401,6 +401,25 @@ public class RecyclerViewFastScroller extends View {
         animatePopupVisibility(!TextUtils.isEmpty(sectionName));
         mLastTouchY = boundedY;
         setThumbOffsetY((int) mLastTouchY);
+        // Position the bubble from the CURRENT scrub position, not as a side effect of the thumb
+        // having moved.
+        //
+        // updatePopupY is otherwise only reachable through setThumbOffsetY, which early-returns
+        // when the offset is unchanged. So a scrub that lands on the offset the scroller already
+        // holds shows the bubble without ever positioning it, and it draws at its untranslated
+        // layout position -- y=171, the top of the screen.
+        //
+        // That is not a corner case, because of which section sits there: recents is the FIRST
+        // section, so scrubbing to it means thumb offset 0, which is exactly this field's initial
+        // value. The first scrub to the bolt in a fresh process therefore drew it at the top of
+        // the screen, and it fixed itself as soon as the thumb had been anywhere else once --
+        // "the lightning icon that should render by my thumb renders at the top of the screen",
+        // "only happens after a fresh install". Letters never showed it, since reaching one always
+        // moves the thumb off 0.
+        //
+        // Cheap enough to do unconditionally: it is arithmetic and two setTranslation calls, on a
+        // path that already re-measures text and may fire haptics.
+        updatePopupY((int) mLastTouchY);
         updateFastScrollerLetterList(y);
     }
 
