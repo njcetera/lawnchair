@@ -526,7 +526,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
             // enterEditMode() carries the mid-gesture guard -- edit mode is entered *during* a
             // gesture, so that gesture's own UP would otherwise read as an empty-space tap and
             // exit immediately -- and is a no-op once the mode is on.
-            if (editMode && itemView is BubbleTextView) {
+            // ...and never while a reorder is already in flight. Belt and braces behind
+            // AresHomeListView's cancelPendingInputEvents at drag start: a popup raised on top of a
+            // live drag is stale by construction, nothing closes it once the drag has begun, and it
+            // then eats the first BACK (Launcher.getOnBackAnimationCallback()'s #3 branch runs
+            // before the #5 state handler that leaves edit mode). That was the intermittent
+            // "edit mode refuses to exit" wedge.
+            val reordering = launcher.workspace?.aresHomeList?.isReorderInProgress() == true
+            if (editMode && !reordering && itemView is BubbleTextView) {
                 itemView.startLongPressAction()
             }
             editModeHost?.invoke()

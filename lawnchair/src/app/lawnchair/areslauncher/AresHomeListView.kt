@@ -742,6 +742,27 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                         if (holder != null) {
                             dragStarted = true
                             itemTouchHelper.startDrag(holder)
+                            // THE FIX FOR THE EDIT-MODE WEDGE. Measured, not reasoned: with the
+                            // first MOVE 300ms after the DOWN, PopupContainerWithArrow was attached
+                            // to the DragLayer and open at the moment BACK was pressed, so BACK went
+                            // to Launcher.getOnBackAnimationCallback()'s #3 branch (top open
+                            // floating view) and closed the popup instead of reaching onStateBack --
+                            // which is why the press "did nothing" while dragging=false and
+                            // floating=null when sampled afterwards. A/B on the same build:
+                            // 0ms pre-hold -> no popup, edit mode exits; 300ms -> popup open, edit
+                            // mode STUCK; 900ms -> popup opened *before* the drag, so
+                            // onSelectedChanged's closeAllOpenViews caught it and edit mode exits.
+                            //
+                            // The gap is the 300ms case only: the child's long-press callback was
+                            // posted at ACTION_DOWN and is not removed until RecyclerView actually
+                            // intercepts, which is one motion event after startDrag. If the timer
+                            // (~400ms) expires inside that gap the popup opens *after*
+                            // closeAllOpenViews has already run, and nothing else ever closes it.
+                            //
+                            // cancelPendingInputEvents, not cancelLongPress: the long-click listener
+                            // lives on the item view *inside* the holder container, and only
+                            // ViewGroup.dispatchCancelPendingInputEvents walks down to it.
+                            downOnChild?.cancelPendingInputEvents()
                         }
                     }
                 }
