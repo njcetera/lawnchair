@@ -139,11 +139,18 @@ object AresWidgetResize {
     }
 
     /**
-     * True when [x],[y] (in [container]'s coordinates) fall on the chevron.
+     * True when [x],[y] fall on the chevron.
      *
      * The host's edit-mode touch listener consumes taps on items so tiles stay inert, which would
      * otherwise swallow the chevron's click before it fired. It asks this first and declines to
      * consume when the answer is yes.
+     *
+     * **[x],[y] must be in [container]'s own coordinate space, mapped through the container's
+     * transform** — `AresHomeListView.toChildLocal` is the only correct way to produce them.
+     * Subtracting `container.left` alone is not: edit mode scales the container, so an
+     * untransformed point disagrees with the framework's own dispatch, and this function then
+     * answers a question about a chevron that is not where the finger went. See that function for
+     * what that cost.
      */
     fun isPointOnChevron(container: View, x: Float, y: Float): Boolean {
         val chevron = container.findViewWithTag<View>(CHEVRON_TAG) ?: return false

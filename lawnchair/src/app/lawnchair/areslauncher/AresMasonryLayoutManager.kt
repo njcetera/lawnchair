@@ -65,6 +65,17 @@ class AresMasonryLayoutManager(
     private var scrollOffset = 0
 
     /**
+     * The scale items rest at when nothing is animating; the host keeps it in step with edit mode,
+     * which shrinks every tile slightly.
+     *
+     * Supplied rather than sampled from `child.scaleX` because the sample is only correct when no
+     * animation is in flight. A repack landing mid-animation would read a transient value and treat
+     * it as the resting size, so each quick chevron tap would leave the tile a little smaller than
+     * the last.
+     */
+    var restScale: Float = 1f
+
+    /**
      * Set for one layout pass to animate items from where they were to where packing puts them.
      *
      * Off by default, so scrolling and recycling stay instant — animating those would smear the
@@ -165,16 +176,36 @@ class AresMasonryLayoutManager(
      * Animates each item from its pre-layout box to its new one.
      *
      * Movement is expressed as translation, and a *size* change as a scale that starts at the old
-     * dimensions and relaxes to 1. Animating the measured size instead would mean re-measuring the
-     * child every frame — expensive, and for a widget it would make the provider re-render its
-     * RemoteViews repeatedly mid-animation.
-     *
-     * Scaling is pinned to the top-left pivot so growth reads as the tile extending into the space
-     * its neighbours are vacating, rather than expanding symmetrically from its middle and
-     * appearing to overlap them on the way.
+     * dimensions and relaxes to [restScale]. Animating the measured size instead would mean
+     * re-measuring the child every frame — expensive, and for a widget it would make the provider
+     * re-render its RemoteViews repeatedly mid-animation.
      *
      * Items with no previous box (scrolled in, or newly added) are left alone: fading them in
      * would draw attention to recycling, which is not what the user did.
+     *
+     * ## ⛔ Never move the scale pivot here
+     *
+     * An earlier revision set `pivotX = 0f; pivotY = 0f` so growth would read as the tile extending
+     * into the space its neighbours were vacating. **That silently killed the resize chevron after
+     * its first use**, and it took a runtime bisect to see why:
+     *
+     *  - `View` treats an explicitly-set pivot as sticky, and nothing here put it back — so every
+     *    tile that ever moved or resized kept a top-left pivot for the rest of its life.
+     *  - Edit mode holds a 0.92 scale on the same container, which about a top-left pivot draws the
+     *    tile shifted up and left of its layout box instead of concentrically inside it.
+     *  - `AresHomeListView`'s edit-mode touch listener hit-tested the affordances in *untransformed*
+     *    coordinates while the framework dispatched through the child's matrix, so the two answers
+     *    diverged by that shift. Measured on the emulator: tapping where the chevron was drawn got
+     *    the tap swallowed as a tile tap, and tapping where it was laid out fell through to the
+     *    widget and **launched its app**. On a tall tile the two regions stopped overlapping at all
+     *    and the chevron became unreachable — the "resize gets stuck at the largest size" report.
+     *
+     * Anchoring the start box by its **centre** instead needs no pivot at all, and is exact at both
+     * ends: the tile starts covering precisely the old box and settles on precisely the new one.
+     * (The old top-left version started 4% off, because the resting scale is centred.)
+     * `AresHomeListView` also hit-tests through the child matrix now, so a transform here can no
+     * longer desync the affordances — but leaving no transform state behind is the reason it cannot
+     * come back.
      */
     private fun animateFromPreviousBounds() {
         for (i in 0 until childCount) {
@@ -182,33 +213,34 @@ class AresMasonryLayoutManager(
             val position = getPosition(child)
             val old = previousBounds[position] ?: continue
 
-            val dx = (old.left - child.left).toFloat()
-            val dy = (old.top - child.top).toFloat()
             val newWidth = (child.right - child.left).toFloat()
             val newHeight = (child.bottom - child.top).toFloat()
-            val sx = if (newWidth > 0f) old.width() / newWidth else 1f
-            val sy = if (newHeight > 0f) old.height() / newHeight else 1f
+            if (newWidth <= 0f || newHeight <= 0f) continue
+
+            val sx = old.width() / newWidth
+            val sy = old.height() / newHeight
+            val dx = old.exactCenterX() - (child.left + newWidth / 2f)
+            val dy = old.exactCenterY() - (child.top + newHeight / 2f)
 
             val moved = dx != 0f || dy != 0f
             val resized = sx != 1f || sy != 1f
             if (!moved && !resized) continue
 
-            child.pivotX = 0f
-            child.pivotY = 0f
             child.translationX = dx
             child.translationY = dy
-            // Compose with the edit-mode scale the host may already have applied, rather than
-            // overwriting it -- otherwise a resize would pop the tile back to full size.
-            val restScaleX = child.scaleX
-            val restScaleY = child.scaleY
-            child.scaleX = restScaleX * sx
-            child.scaleY = restScaleY * sy
+            // Compose with the edit-mode scale the host applies, rather than overwriting it --
+            // otherwise a resize would pop the tile back to full size. Read from [restScale] and
+            // never from `child.scaleX`: a second repack landing inside this animation would read a
+            // mid-flight value and adopt it as the resting size, so a run of quick chevron taps
+            // would shrink the tile a little further each time.
+            child.scaleX = restScale * sx
+            child.scaleY = restScale * sy
 
             child.animate()
                 .translationX(0f)
                 .translationY(0f)
-                .scaleX(restScaleX)
-                .scaleY(restScaleY)
+                .scaleX(restScale)
+                .scaleY(restScale)
                 .setDuration(LAYOUT_ANIM_MS)
                 .start()
         }

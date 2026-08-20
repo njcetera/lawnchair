@@ -3,6 +3,8 @@ package app.lawnchair.areslauncher
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Matrix
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -151,12 +153,26 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     private fun cycleWidgetSize(info: ItemInfo) {
+        // Every path out of this function says something. A visible affordance that declines to act
+        // must not do so silently: the last defect here produced a chevron that did nothing at all,
+        // and the absence of any log is what made "the click never arrived" indistinguishable from
+        // "the resize was refused". persistSize logs both of its own refusals for the same reason.
         val allowed = AresWidgetResize.allowedSizes(launcher, info, masonry.columns)
-        if (allowed.isEmpty()) return
+        if (allowed.isEmpty()) {
+            Log.d(
+                TAG,
+                "resize declined: no allowed sizes for id=${info.id} at " +
+                    "${info.spanX}x${info.spanY}, columns=${masonry.columns}",
+            )
+            return
+        }
 
         val current = AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
         val next = AresWidgetResize.nextSize(current, allowed)
-        if (next.w == current.w && next.h == current.h) return
+        if (next.w == current.w && next.h == current.h) {
+            Log.d(TAG, "resize declined: id=${info.id} already the only allowed ${current.w}x${current.h}")
+            return
+        }
 
         if (!AresWidgetResize.persistSize(launcher, info, next)) return
 
@@ -259,6 +275,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private fun applyEditModeVisual() {
         val scale = if (editMode) EDIT_MODE_SCALE else 1f
+        // The layout manager composes its repack animation on top of this, and must not have to
+        // guess it from a child that may be mid-animation.
+        masonry.restScale = scale
         for (i in 0 until childCount) {
             val child = getChildAt(i)
             child.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
@@ -405,6 +424,52 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private fun folderIconOf(child: View?): FolderIcon? =
         (child as? ViewGroup)?.getChildAt(0) as? FolderIcon
 
+    /** Scratch for [toChildLocal]; the caller uses the result before the next call, on one thread. */
+    private val localPoint = FloatArray(2)
+    private val inverseChildMatrix = Matrix()
+
+    /**
+     * Maps a point in this list's coordinates into [child]'s own, **honouring the child's
+     * transform**.
+     *
+     * ## Why this cannot be `x - child.left`
+     *
+     * Edit mode holds a scale (and a wiggle rotation) on every holder container, so a tile is drawn
+     * somewhere other than its layout box. `ViewGroup.dispatchTouchEvent` accounts for that — it
+     * subtracts the child's origin and then maps through the child's **inverse matrix** before
+     * asking which grandchild was hit. This listener has to reach the same answer, because the two
+     * decisions are halves of one behaviour: it declines to swallow the terminal UP precisely when
+     * the framework is about to deliver the tap to an affordance.
+     *
+     * When they disagree, both outcomes are wrong and neither is visible in a log:
+     *
+     *  - Tap where the affordance is **drawn** and this said "not on it", so the UP was swallowed as
+     *    a tile tap and the chevron's click was cancelled. That is the "resize gets stuck" report —
+     *    every tap after the first was inert, with no trace anywhere.
+     *  - Tap where it is **laid out** and this said "on it", so the UP was let through — but the
+     *    framework routed the touch to the widget instead, whose RemoteViews **launched its app**,
+     *    breaking the rule that a tap in edit mode never launches anything.
+     *
+     * Measured on the emulator against build `ca1b933`, both reproduced on the same widget.
+     *
+     * The transform that caused it is gone (see the ⛔ note in [AresMasonryLayoutManager]), but the
+     * edit-mode scale remains and any future one would revive the bug, so the mapping is done
+     * properly rather than assumed away. `scrollX`/`scrollY` are included for the same reason: they
+     * are 0 today because the layout manager offsets children itself, and this stays correct if that
+     * ever changes.
+     */
+    private fun toChildLocal(child: View, x: Float, y: Float): FloatArray {
+        localPoint[0] = x + scrollX - child.left
+        localPoint[1] = y + scrollY - child.top
+        val matrix = child.matrix
+        // A degenerate (non-invertible) matrix means the tile is scaled to nothing and cannot be
+        // hit anyway; leaving the untransformed point is then as good an answer as exists.
+        if (!matrix.isIdentity && matrix.invert(inverseChildMatrix)) {
+            inverseChildMatrix.mapPoints(localPoint)
+        }
+        return localPoint
+    }
+
     /**
      * Routes touches while editing.
      *
@@ -447,10 +512,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // Both affordances get identical treatment: a gesture starting on either is a
                     // tap on a control, never a drag handle and never a tile tap to swallow.
                     downOnChevron = downOnChild?.let { child ->
-                        val localX = e.x - child.left
-                        val localY = e.y - child.top
-                        AresWidgetResize.isPointOnChevron(child, localX, localY) ||
-                            AresRemoveBadge.isPointOnBadge(child, localX, localY)
+                        val local = toChildLocal(child, e.x, e.y)
+                        AresWidgetResize.isPointOnChevron(child, local[0], local[1]) ||
+                            AresRemoveBadge.isPointOnBadge(child, local[0], local[1])
                     } ?: false
                     // Recorded at DOWN like the chevron, and for the same reason: by UP the child
                     // lookup may no longer be reliable. A folder tap must reach the FolderIcon's
@@ -706,6 +770,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     private companion object {
+        const val TAG = "AresHomeGrid"
+
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
 

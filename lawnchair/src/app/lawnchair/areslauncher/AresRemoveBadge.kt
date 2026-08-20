@@ -79,11 +79,16 @@ object AresRemoveBadge {
     }
 
     /**
-     * True when [x],[y] (in [container]'s coordinates) fall on the badge.
+     * True when [x],[y] fall on the badge.
      *
      * The host's edit-mode touch listener consumes taps on items so tiles stay inert, which would
      * otherwise swallow the badge's click before it fired. It asks this first and declines to
      * consume when the answer is yes — the same arrangement the chevron uses.
+     *
+     * **[x],[y] must be in [container]'s own coordinate space, mapped through the container's
+     * transform**, for the reason spelled out on [AresWidgetResize.isPointOnChevron]:
+     * `AresHomeListView.toChildLocal` produces them, and subtracting `container.left` alone does
+     * not, because edit mode scales the container.
      */
     fun isPointOnBadge(container: View, x: Float, y: Float): Boolean {
         val badge = container.findViewWithTag<View>(BADGE_TAG) ?: return false
