@@ -801,6 +801,42 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     /**
+     * True when [x],[y] — in [child]'s own coordinate space — fall in the small disc at the tile's
+     * centre that always belongs to the drag, never to an affordance.
+     *
+     * ## The defect this closes
+     *
+     * The × badge and the resize chevron are each a 48dp touch target, inset 4dp into opposite
+     * corners of the tile. On a **1×1** tile that is most of it: the two targets meet near the
+     * middle and leave roughly 3dp of clearance at the exact centre. `editModeTouchListener`
+     * correctly refuses to start a drag from a gesture that began on an affordance — so aiming at
+     * the middle of a small icon, which is what anyone does to pick something up, frequently grabs
+     * a control instead and the tile will not move. It is worse inside an open folder, where the
+     * one badge's 48dp target on a ~83dp cell reaches the centre outright.
+     *
+     * ## Why a priority region rather than shrinking the targets
+     *
+     * The alternatives were to shrink the affordances' touch footprints on small tiles, or to inset
+     * them further into the corners. Both trade away hit area at the corners, which is where the
+     * user is aiming when they *do* want the control, and both would put the targets below the 44dp
+     * minimum on exactly the tiles where they are hardest to hit. This takes the area back from the
+     * middle instead — where neither glyph is drawn, so nothing visible is being overridden.
+     *
+     * Sized so it never covers a pixel of a **drawn** glyph on a home tile: the 28dp glyph inside
+     * the 48dp target reaches about 10.6dp from a 1×1 tile's centre. Inside a folder the cell is
+     * smaller and the × glyph's far corner does reach the centre, so there the disc clips that
+     * corner — the glyph's own centre is still ~19dp away and fully tappable, and a middle-of-icon
+     * touch meaning "move this" no longer removes the app.
+     *
+     * On a large widget the affordances are nowhere near the centre, so this changes nothing there.
+     *
+     * The radius lives in [AresEditMotion] with the other edit-mode feel constants, because the
+     * same disc has to apply inside an open folder — the two surfaces are one mode.
+     */
+    private fun isInDragPriorityZone(child: View, x: Float, y: Float): Boolean =
+        AresEditMotion.isInDragPriorityZone(child, x, y)
+
+    /**
      * Routes touches while editing.
      *
      * - **Drag**: past the touch slop on an item, hands the gesture to [ItemTouchHelper] via
@@ -863,8 +899,11 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     // tap on a control, never a drag handle and never a tile tap to swallow.
                     downOnChevron = downOnChild?.let { child ->
                         val local = toChildLocal(child, e.x, e.y)
-                        AresWidgetResize.isPointOnChevron(child, local[0], local[1]) ||
-                            AresRemoveBadge.isPointOnBadge(child, local[0], local[1])
+                        !isInDragPriorityZone(child, local[0], local[1]) &&
+                            (
+                                AresWidgetResize.isPointOnChevron(child, local[0], local[1]) ||
+                                    AresRemoveBadge.isPointOnBadge(child, local[0], local[1])
+                                )
                     } ?: false
                     // Recorded at DOWN like the chevron, and for the same reason: by UP the child
                     // lookup may no longer be reliable. A folder tap must reach the FolderIcon's

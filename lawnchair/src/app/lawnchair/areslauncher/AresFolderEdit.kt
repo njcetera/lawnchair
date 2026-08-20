@@ -145,6 +145,9 @@ object AresFolderEdit {
             // behind would keep turning drags into folder drags in a folder that is not editing.
             for (icon in cells.keys) {
                 icon.setOnTouchListener(null)
+                // Cached views: a tap must launch again the moment the mode ends. This is the
+                // same listener FolderPagedView.createNewView installs.
+                icon.setOnClickListener(launcher.itemOnClickListener)
             }
             for ((view, animator) in wiggles) {
                 AresEditWiggle.stop(view, animator)
@@ -211,6 +214,29 @@ object AresFolderEdit {
                 // setOnTouchListener is idempotent for a listener already installed.
                 icon.setOnTouchListener(dragStarter)
 
+                // A tap inside an open folder must not launch anything either (§4/§18: "tapping an
+                // item in edit mode does NOT launch it"). The grid has done this since the mode
+                // shipped; the folder never did, so a tap anywhere on an icon that the × badge did
+                // not happen to cover launched the app while the surface was supposedly inert.
+                // Measured on emulator-5554: a tap at an icon's exact centre in an editing folder
+                // opened Camera.
+                //
+                // **Clearing the listener, not `isClickable`.** The obvious `isClickable = false`
+                // is what the grid uses and it does NOT work here -- also measured, same tap, same
+                // launch. `View.onTouchEvent` computes `clickable` as CLICKABLE **or**
+                // LONG_CLICKABLE, and these icons are long-clickable (that is how the popup is
+                // raised from inside the mode), so the ACTION_UP branch still reaches
+                // `performClickInternal()`. On the grid the flag is belt-and-braces behind
+                // `editModeTouchListener` swallowing the terminal UP; a folder has no such
+                // listener, so the listener itself has to go.
+                //
+                // `setOnLongClickListener` is untouched, so the popup still works. Restored in
+                // [stop] and in the "gone" sweep below from `ActivityContext.getItemOnClickListener`
+                // -- the exact listener `FolderPagedView.createNewView` installs -- because these
+                // icons come from a view cache and a stuck null would leave an app unlaunchable
+                // long after the mode ended.
+                icon.setOnClickListener(null)
+
                 // Icon and badge share a rect and a phase, so the × stays pinned to its corner
                 // instead of drifting across a rotating icon.
                 startWiggle(icon, index)
@@ -224,9 +250,11 @@ object AresFolderEdit {
                 wiggles.remove(view)?.let { AresEditWiggle.stop(view, it) }
                 cells.remove(view)?.let { cell ->
                     (cell.parent as? ViewGroup)?.removeView(cell)
-                    // The icon this cell shadowed has left the folder; take its drag starter with
-                    // it, for the same reason the wiggle is stopped -- the view is pooled.
+                    // The icon this cell shadowed has left the folder; take its drag starter and
+                    // its suppressed click with it, for the same reason the wiggle is stopped --
+                    // the view is pooled and will be bound to some other app.
                     view.setOnTouchListener(null)
+                    view.setOnClickListener(launcher.itemOnClickListener)
                 }
             }
         }
@@ -294,6 +322,33 @@ object AresFolderEdit {
     private class EditCell(context: android.content.Context) : FrameLayout(context) {
         override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
             // Intentionally empty.
+        }
+
+        /**
+         * Declines a touch that starts at the exact centre of the icon, so it reaches the icon
+         * instead of the ×.
+         *
+         * A folder cell is ~83dp and the badge is a 48dp target inset 4dp into its top-start
+         * corner, so **the badge's target covers the icon's centre**. Aiming at the middle of an
+         * icon to drag it therefore lands on Remove, and a tap with no movement removes the app
+         * from the home screen — the most destructive form of the dead-spot defect the home grid
+         * has in a milder version.
+         *
+         * Returning false rather than consuming is what makes this work:
+         * `ViewGroup.dispatchTouchEvent` only records a touch target on ACTION_DOWN and walks
+         * children front-to-back until one accepts, so declining here hands the whole gesture to
+         * the icon underneath — which is exactly where a drag needs it. No later event is routed
+         * back to this cell, so there is nothing to latch.
+         *
+         * Radius and rationale: [AresEditMotion.DRAG_PRIORITY_RADIUS_DP].
+         */
+        override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+            if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN &&
+                AresEditMotion.isInDragPriorityZone(this, ev.x, ev.y)
+            ) {
+                return false
+            }
+            return super.dispatchTouchEvent(ev)
         }
     }
 }
