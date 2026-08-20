@@ -48,12 +48,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
     var editModeHost: (() -> Unit)? = null
 
     /**
-     * Invoked when a widget's resize chevron is tapped, with the item to advance (§6).
+     * Invoked as a widget's resize handle is dragged (§3), with the item and the drag's
+     * displacement in raw screen pixels.
      *
-     * The host owns the resize because it has to repack, persist and re-report the widget's box --
-     * none of which is the adapter's business. Same reasoning as [editModeHost].
+     * The host owns the resize because it has to quantise against the grid's cell metrics, repack
+     * live, persist and re-report the widget's box -- none of which is the adapter's business. Same
+     * reasoning as [editModeHost].
      */
-    var resizeHost: ((ItemInfo) -> Unit)? = null
+    var resizeHost: ((ItemInfo, Float, Float, AresWidgetResize.Phase) -> Unit)? = null
 
     /**
      * Invoked when an item's remove (×) badge is tapped, with the item to take off the home screen.
@@ -149,8 +151,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
         if (target != null && existing == null) {
             container.addView(
-                AresWidgetResize.createChevron(container, spokenNameOf(container, target)) {
-                    resizeHost?.invoke(target)
+                AresWidgetResize.createHandle(container, spokenNameOf(container, target)) { dx, dy, phase ->
+                    resizeHost?.invoke(target, dx, dy, phase)
                 },
             )
         } else if (target == null && existing != null) {

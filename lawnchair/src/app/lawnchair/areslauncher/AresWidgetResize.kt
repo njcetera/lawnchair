@@ -13,21 +13,38 @@ import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import com.android.launcher3.widget.WidgetManagerHelper
 
 /**
- * Widget resize for the masonry home grid: **size-cycling, not edge-dragging** (§6).
+ * Widget resize for the masonry home grid: **edge-dragging** (§3).
  *
- * Windows Phone semantics, per requirements-alignment.md §4. In edit mode a resizable widget shows
- * a small chevron; tapping it advances the widget to the next allowed footprint, the grid repacks
- * around the new size, and the change persists. There are **no drag handles and no resize frame**.
+ * In edit mode a resizable widget shows a handle in its bottom-end corner. Dragging it changes the
+ * footprint continuously, quantised to whole cells, and the grid **repacks live** as each boundary
+ * is crossed — consistent with drag-to-move, and the owner's explicit feel decision. Release
+ * commits; abandoning restores the original footprint.
  *
- * That is not a simplification of a richer design — it is the whole design. Stock's
- * `AppWidgetResizeFrame` was runtime-refuted for our hosting (it casts unconditionally to
- * `CellLayoutLayoutParams` in `setupForWidget` and throws *before* the frame is added to the drag
- * layer, so nothing renders), and under masonry it would have had nothing to do anyway: its
- * `createAreaForResize` validates a new footprint against grid occupancy, and packing cannot fail
- * for want of space — items simply reflow.
+ * ## This replaced tap-to-cycle, and the old rationale is retained only as history
  *
- * Everything a later pass is likely to want to adjust — which sizes are offered, what order they
- * cycle in, and how the affordance looks and sits — is in this one file.
+ * The shipped affordance was a chevron that advanced through the provider's allowed footprints,
+ * Windows Phone style. This file's header used to assert that cycling "is not a simplification of a
+ * richer design — it is the whole design", and a panel review found that sentence being cited as
+ * authority for keeping it. The owner reversed the model:
+ *
+ * > *"instead of the widget resize being tap with auto resize like windows phone, I think I'd
+ * > prefer to manually resize the widget with a drag function. I think android widgets are just too
+ * > inconsistent for the automated resizing approach."*
+ *
+ * [allowedSizes] survives the change with a different job: it enumerated the cycle, and now supplies
+ * the **clamps** a drag is bounded by.
+ *
+ * ## What does NOT change: stock's resize frame is still unusable here
+ *
+ * `AppWidgetResizeFrame` was runtime-refuted for our hosting and that refutation still binds. It
+ * casts unconditionally to `CellLayoutLayoutParams` in `setupForWidget` and throws *before*
+ * `dl.addView(frame)`, so the frame is never added and nothing renders — under Strategy D our
+ * widgets are RecyclerView rows, not `CellLayout` children. Do not attempt to call it. Its
+ * `createAreaForResize` would also have nothing to do here: it validates a footprint against grid
+ * occupancy, and packing cannot fail for want of space — items simply reflow.
+ *
+ * Everything a later pass is likely to want to adjust — the clamps, the quantisation, and how the
+ * handle looks and sits — is in this one file.
  */
 object AresWidgetResize {
 
@@ -101,6 +118,117 @@ object AresWidgetResize {
         if (allowed.isEmpty()) return current
         val index = allowed.indexOfFirst { it.w == current.w && it.h == current.h }
         return if (index < 0) allowed.first() else allowed[(index + 1) % allowed.size]
+    }
+
+    /** Where a resize drag is in its lifecycle. */
+    enum class Phase { BEGIN, MOVE, END, CANCEL }
+
+    /**
+     * Builds the resize **drag handle** for a widget cell (§3).
+     *
+     * The view is deliberately dumb: it reports the drag's displacement from its own DOWN point and
+     * nothing else. Quantising to cells, clamping to the provider's allowed spans and repacking are
+     * the host's business, because only the host has the grid metrics and the adapter — and keeping
+     * the arithmetic there rather than in a view is what lets it be reasoned about in one place.
+     *
+     * Displacement is accumulated in **raw screen coordinates** rather than from `event.getX()`.
+     * The handle is a child of the holder container, edit mode scales that container, and the live
+     * repack moves it mid-gesture — so a local coordinate is measured against a frame that is
+     * itself moving, and the drag would fight its own feedback. `getRawX/Y` is the only frame that
+     * stays still while the thing being dragged changes size underneath it.
+     *
+     * Returns true from every event after DOWN. A handle that let go of the gesture would hand the
+     * rest of the drag to the tile underneath, which starts a reorder.
+     */
+    fun createHandle(
+        container: FrameLayout,
+        label: CharSequence?,
+        onDrag: (dxPx: Float, dyPx: Float, phase: Phase) -> Unit,
+    ): View {
+        val res = container.resources
+        val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+        val glyph = res.getDimensionPixelSize(R.dimen.ares_widget_resize_chevron_size)
+        val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        val inset = ((touch - glyph) / 2).coerceAtLeast(0)
+
+        return ImageView(container.context).apply {
+            tag = CHEVRON_TAG
+            setImageResource(R.drawable.ares_widget_resize_chevron)
+            setPadding(inset, inset, inset, inset)
+            setBackgroundResource(R.drawable.ares_widget_resize_background)
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (label.isNullOrBlank()) {
+                res.getString(R.string.action_resize)
+            } else {
+                res.getString(R.string.ares_resize_item, label)
+            }
+            AresA11y.describeAsButton(this)
+
+            var downX = 0f
+            var downY = 0f
+            setOnTouchListener { v, ev ->
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        downX = ev.rawX
+                        downY = ev.rawY
+                        // The RecyclerView and the folder/drag controllers above it would otherwise
+                        // claim this gesture the moment it looks like a scroll or a reorder.
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                        onDrag(0f, 0f, Phase.BEGIN)
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        onDrag(ev.rawX - downX, ev.rawY - downY, Phase.MOVE)
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        onDrag(ev.rawX - downX, ev.rawY - downY, Phase.END)
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        onDrag(ev.rawX - downX, ev.rawY - downY, Phase.CANCEL)
+                        true
+                    }
+                    else -> false
+                }
+            }
+            layoutParams = FrameLayout.LayoutParams(touch, touch).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                setMargins(margin, margin, margin, margin)
+            }
+        }
+    }
+
+    /**
+     * The footprint a drag of [dxPx],[dyPx] from [from] lands on, quantised and clamped.
+     *
+     * Pure arithmetic, separated from the view so it can be reasoned about (and, unlike the gesture,
+     * checked without a device). Rounding rather than truncating means a boundary is crossed when
+     * the handle passes the **halfway** point of a cell, which is what makes the grid follow the
+     * finger instead of trailing a whole cell behind it.
+     *
+     * The clamps come from [allowedSizes], so an axis the provider declared non-resizable cannot
+     * move: its min and max are both the widget's current span.
+     */
+    fun spanForDrag(
+        from: AresPacker.Span,
+        dxPx: Float,
+        dyPx: Float,
+        cellW: Int,
+        cellH: Int,
+        allowed: List<AresPacker.Span>,
+    ): AresPacker.Span {
+        if (allowed.isEmpty() || cellW <= 0 || cellH <= 0) return from
+        val minW = allowed.minOf { it.w }
+        val maxW = allowed.maxOf { it.w }
+        val minH = allowed.minOf { it.h }
+        val maxH = allowed.maxOf { it.h }
+        val w = (from.w + Math.round(dxPx / cellW)).coerceIn(minW, maxW)
+        val h = (from.h + Math.round(dyPx / cellH)).coerceIn(minH, maxH)
+        return AresPacker.Span(w, h)
     }
 
     /**

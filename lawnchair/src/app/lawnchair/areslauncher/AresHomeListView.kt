@@ -79,7 +79,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
         aresAdapter.gridColumns = { masonry.columns }
-        aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
+        aresAdapter.resizeHost = { info, dx, dy, phase -> onResizeDrag(info, dx, dy, phase) }
         aresAdapter.removeHost = { info -> removeFromHome(info) }
         aresAdapter.boundHost = { info, container -> onRowBound(info, container) }
         aresAdapter.menuHost = { info -> showItemMenu(info) }
@@ -197,43 +197,124 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         )
     }
 
-    private fun cycleWidgetSize(info: ItemInfo) {
-        // Every path out of this function says something. A visible affordance that declines to act
-        // must not do so silently: the last defect here produced a chevron that did nothing at all,
-        // and the absence of any log is what made "the click never arrived" indistinguishable from
-        // "the resize was refused". persistSize logs both of its own refusals for the same reason.
-        val allowed = AresWidgetResize.allowedSizes(launcher, info, masonry.columns)
-        if (allowed.isEmpty()) {
-            Log.d(
-                TAG,
-                "resize declined: no allowed sizes for id=${info.id} at " +
-                    "${info.spanX}x${info.spanY}, columns=${masonry.columns}",
-            )
-            return
+    /** The widget currently being resized by a handle drag, and what it started as. */
+    private var resizeItem: ItemInfo? = null
+    private var resizeFrom: AresPacker.Span? = null
+    private var resizeAllowed: List<AresPacker.Span> = emptyList()
+
+    /**
+     * Drives a widget resize from the handle's drag (§3).
+     *
+     * The grid repacks **live**, on every cell boundary the drag crosses, which is the owner's
+     * explicit feel decision and makes resize consistent with drag-to-move. Only the release
+     * writes: a per-frame `persistSize` would reallocate a cell and hit the database on every
+     * boundary, and an abandoned drag would leave the last intermediate size persisted.
+     *
+     * Every refusal says something. A visible affordance that declines to act must not do so
+     * silently -- an earlier defect here produced a chevron that did nothing at all, and the absence
+     * of any log made "the touch never arrived" indistinguishable from "the resize was refused".
+     */
+    private fun onResizeDrag(info: ItemInfo, dx: Float, dy: Float, phase: AresWidgetResize.Phase) {
+        when (phase) {
+            AresWidgetResize.Phase.BEGIN -> {
+                val allowed = AresWidgetResize.allowedSizes(launcher, info, masonry.columns)
+                if (allowed.isEmpty()) {
+                    Log.d(
+                        TAG,
+                        "resize declined: no allowed sizes for id=${info.id} at " +
+                            "${info.spanX}x${info.spanY}, columns=${masonry.columns}",
+                    )
+                    return
+                }
+                resizeItem = info
+                resizeFrom = AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
+                resizeAllowed = allowed
+                // Same flag a reorder raises. The float animator and the pane swipe both stand down
+                // for it, which is what a resize needs too: a tile that is changing size must not
+                // also be drifting, and a horizontal drag on the handle must not open the app list.
+                setReorderInProgress(true)
+            }
+
+            AresWidgetResize.Phase.MOVE -> {
+                val from = resizeFrom ?: return
+                if (resizeItem !== info) return
+                applyLiveSpan(info, spanFromDrag(from, dx, dy))
+            }
+
+            AresWidgetResize.Phase.END -> {
+                val from = resizeFrom ?: return
+                finishResize(info, from, spanFromDrag(from, dx, dy), commit = true)
+            }
+
+            AresWidgetResize.Phase.CANCEL -> {
+                val from = resizeFrom ?: return
+                finishResize(info, from, from, commit = false)
+            }
         }
+    }
 
-        val current = AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
-        val next = AresWidgetResize.nextSize(current, allowed)
-        if (next.w == current.w && next.h == current.h) {
-            Log.d(TAG, "resize declined: id=${info.id} already the only allowed ${current.w}x${current.h}")
-            return
-        }
+    private fun spanFromDrag(from: AresPacker.Span, dx: Float, dy: Float): AresPacker.Span =
+        AresWidgetResize.spanForDrag(
+            from,
+            dx,
+            dy,
+            masonry.resolvedCellWidthPx(),
+            masonry.resolvedCellHeightPx(),
+            resizeAllowed,
+        )
 
-        if (!AresWidgetResize.persistSize(launcher, info, next)) return
-
+    /**
+     * Shows [span] without writing it.
+     *
+     * The packer derives every position from the adapter's spans, so changing the item's own span
+     * and asking for a re-pack is the whole of "show me this size" -- there is no separate preview
+     * to build. The widget's host view is re-reported at the same time, or the provider keeps
+     * drawing its RemoteViews against the old box inside a tile that has already changed shape.
+     */
+    private fun applyLiveSpan(info: ItemInfo, span: AresPacker.Span) {
+        if (info.spanX == span.w && info.spanY == span.h) return
+        info.spanX = span.w
+        info.spanY = span.h
         val position = aresAdapter.indexOf(info)
         if (position >= 0) {
             (findViewHolderForAdapterPosition(position) as? AresHomeAdapter.ViewHolder)
                 ?.let { aresAdapter.reportSizeAfterResize(info, it.container) }
         }
-        // Animate the repack: the widget grows into the space, and the items it displaces slide
-        // rather than teleport. Without this the whole grid re-lays out in a single frame, which
-        // reads as a glitch rather than as a size change.
         masonry.animateNextLayout()
         masonry.invalidatePacking()
+    }
 
+    /**
+     * Ends a resize: writes [target], or puts the widget back to [from].
+     *
+     * `persistSize` is the only writer, and it reallocates a legal `cellX/cellY` for the new
+     * footprint -- growing a span in place leaves the stored coordinate breaking the loader's
+     * bounds rule, and the loader deletes what it rejects. A refused write restores the original
+     * size rather than leaving the grid showing a footprint the database does not have.
+     */
+    private fun finishResize(
+        info: ItemInfo,
+        from: AresPacker.Span,
+        target: AresPacker.Span,
+        commit: Boolean,
+    ) {
+        resizeItem = null
+        resizeFrom = null
+        resizeAllowed = emptyList()
+        setReorderInProgress(false)
+
+        if (!commit || (target.w == from.w && target.h == from.h)) {
+            applyLiveSpan(info, from)
+            return
+        }
+        if (!AresWidgetResize.persistSize(launcher, info, target)) {
+            Log.d(TAG, "resize refused for id=${info.id}; restoring ${from.w}x${from.h}")
+            applyLiveSpan(info, from)
+            return
+        }
+        applyLiveSpan(info, target)
         announceForAccessibility(
-            context.getString(com.android.launcher3.R.string.widget_resized, next.w, next.h),
+            context.getString(com.android.launcher3.R.string.widget_resized, target.w, target.h),
         )
     }
 
