@@ -202,7 +202,7 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
         }
         int index = Utilities.boundToRange((int) (touchFraction * count), 0, count - 1);
         AlphabeticalAppsList.FastScrollSectionInfo section = fastScrollSections.get(index);
-        mFastScrollHelper.smoothScrollToSection(section);
+        mFastScrollHelper.scrollToSection(section);
         return section.sectionName;
     }
 
