@@ -847,6 +847,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         CellLayout cl = ((CellLayout) child);
         cl.setOnInterceptTouchListener(this);
         cl.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // AresLauncher: a workspace page is never a real occupancy grid here — Strategy D flattens
+        // every desktop item into AresHomeListView, which is itself the page's only child. Stock's
+        // drop outline is computed by findNearestArea against that empty grid, so it renders as a
+        // rectangle unrelated to where the item lands. Suppressed at the single funnel every
+        // workspace page passes through, which covers page 0, the dual-pane panel and any stray.
+        cl.setVisualizeDropLocation(false);
         super.onViewAdded(child);
     }
 

@@ -1192,8 +1192,32 @@ public class CellLayout extends ViewGroup {
         return false;
     }
 
+    /**
+     * AresLauncher: turns stock's drop-location outline (and its accompanying discrete drag
+     * haptic) off for this CellLayout.
+     *
+     * <p>Set false on every {@link Workspace} page. Under Strategy D no desktop item ever occupies
+     * a workspace cell — the whole home surface is one {@code AresHomeListView} pinned at (0,0) —
+     * so {@code findNearestArea} answers from an empty grid and the outline lands nowhere near
+     * where the item will actually go. The real insert index comes from
+     * {@code AresHomeDrop.dropIndex}, which hit-tests the list's own children. An indicator that
+     * disagrees with the destination is worse than none.
+     *
+     * <p>Left true everywhere else: hotseat pages (children of {@code HotseatPagedView}) and
+     * folder pages (children of {@code FolderPagedView}) are real occupancy-tracked grids where
+     * the outline is correct and wanted.
+     */
+    public void setVisualizeDropLocation(boolean visualize) {
+        mVisualizeDropLocation = visualize;
+    }
+
     void visualizeDropLocation(int cellX, int cellY, int spanX, int spanY,
                                DropTarget.DragObject dragObject) {
+        if (!mVisualizeDropLocation) {
+            // Bail before arming the outline animators, so no invalidate churn and no haptic
+            // fires for a cell that is not the destination.
+            return;
+        }
         if (mDragCell[0] != cellX || mDragCell[1] != cellY || mDragCellSpan[0] != spanX
                 || mDragCellSpan[1] != spanY) {
             determineIfDragHapticsPlay();
