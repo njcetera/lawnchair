@@ -150,6 +150,19 @@ object AresHomeReorder {
              * above that stops the journey reordering at all, and the script is not ours to edit.
              */
             const val SWAP_TRAVEL_FRACTION = 1.10f
+
+            /**
+             * How much of an icon a dragged **widget** must cover before that icon is displaced.
+             *
+             * The feel target is *"as soon as the app is covered by the widget, it should move"*.
+             * Half is where "covered" starts to read as covered rather than grazed; going much
+             * lower makes a widget shove a whole row aside while it is still only clipping the
+             * edge of it, and 1.0 would mean an icon stays put until it is completely buried.
+             *
+             * This is the knob for that feel. It has nothing to do with [SWAP_TRAVEL_FRACTION],
+             * which is a *distance* threshold for icon drags; this is an *area* one.
+             */
+            const val WIDGET_COVER_FRACTION = 0.5f
         }
 
         /**
@@ -259,6 +272,42 @@ object AresHomeReorder {
             }
             if (AresFolderDrop.isFrozen()) return null
 
+            // A DRAGGED WIDGET displaces on COVERAGE, not on its centre arriving.
+            //
+            // Everything below tests where the drag's *centre* is, which is right for a 1x1 tile
+            // and wrong for a large one. A 4x4 widget's leading edge covers an icon long before its
+            // centre gets anywhere near that icon's centre, so the icon sat underneath the widget
+            // for most of the drag and only jumped aside at the very end: "imo, I think as soon as
+            // the app is covered by the widget, it should move."
+            //
+            // `curX`/`curY` are the dragged view's current top-left including the drag translation,
+            // so its rectangle is known here without consulting the view's own transform. A target
+            // is displaced once the widget covers [WIDGET_COVER_FRACTION] of it -- an area test, so
+            // a wide widget grazing a tall icon and a tall widget grazing a wide one behave the
+            // same. The most-covered target wins, and the rest follow on subsequent frames as the
+            // reflow settles, which is what makes a sweep push a whole row rather than one tile.
+            val draggedIsWidget = draggedInfo?.itemType == Favorites.ITEM_TYPE_APPWIDGET
+            if (draggedIsWidget) {
+                val dragRight = curX + selected.itemView.width
+                val dragBottom = curY + selected.itemView.height
+                var best: RecyclerView.ViewHolder? = null
+                var bestCover = 0f
+                dropTargets.forEach { target ->
+                    val v = target.itemView
+                    val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
+                    val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
+                    val area = (v.width * v.height).toFloat()
+                    if (overlapW > 0 && overlapH > 0 && area > 0f) {
+                        val cover = (overlapW * overlapH) / area
+                        if (cover >= WIDGET_COVER_FRACTION && cover > bestCover) {
+                            bestCover = cover
+                            best = target
+                        }
+                    }
+                }
+                return best
+            }
+
             // A tile's bounds ARE its cell, which is what makes this containment test sound.
             //
             // Worth stating because it briefly stopped being true: insetting every tile to create
@@ -324,31 +373,11 @@ object AresHomeReorder {
             // only if a holder is mid-relayout, and declining would wedge the reorder.
             if (span <= 0f) return true
             val travelled = (centreX - fromX) * dx + (centreY - fromY) * dy
-            return travelled >= span * travelFractionFor(selected)
-        }
-
-        /**
-         * How far past a target's centre the drag must go before that target is displaced.
-         *
-         * [SWAP_TRAVEL_FRACTION]'s 10% overshoot exists for exactly one reason: it leaves a tile's
-         * leading half as a window where the target has NOT yet been reflowed aside, which is the
-         * moment dwell-to-create-a-folder needs in order to have something to dwell on.
-         *
-         * **A widget cannot go into a folder**, so for a widget drag that window buys nothing and
-         * costs a great deal. The overshoot is 10% *of the distance to the target's centre*, and a
-         * large widget's centre starts far from a small icon's, so the absolute travel it demands
-         * is correspondingly large. Measured dragging a full-width 4x4 widget up one row: the swap
-         * needed the widget's centre to travel 950px, against 853px to simply arrive at the target
-         * centre. Anything short of that displaced nothing at all, which is what the grid not
-         * reacting looked like -- "when moving widgets, they're not moving apps as expected. Apps
-         * shouldn't be behind widgets when moving widgets around."
-         *
-         * Reaching the centre is the natural threshold; only the folder case needs more.
-         */
-        private fun travelFractionFor(selected: RecyclerView.ViewHolder): Float {
-            val info = list.aresAdapter.itemAt(selected.bindingAdapterPosition)
-            val isWidget = info != null && info.itemType == Favorites.ITEM_TYPE_APPWIDGET
-            return if (isWidget) 1f else SWAP_TRAVEL_FRACTION
+            // Icons and folders only: a dragged widget never reaches here, it took the coverage
+            // branch in chooseDropTarget. The 10% overshoot is specifically what leaves a tile's
+            // leading half un-reflowed so dwell-to-create-a-folder has something to dwell on, and
+            // a widget cannot go into a folder, so it was paying for a window it could not use.
+            return travelled >= span * SWAP_TRAVEL_FRACTION
         }
 
         override fun onMove(
