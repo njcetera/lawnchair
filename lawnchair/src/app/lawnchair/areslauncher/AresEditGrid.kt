@@ -62,11 +62,21 @@ object AresEditGrid {
     }
 
     /**
-     * A rounded rectangle marking an item's allocated cells: a faint outline with a **frosted
-     * fill** inside it.
+     * A rounded **frosted pane** filling an item's allocated cells. No outline.
      *
      * > *"when in edit mode theres an outline for the widget border. Can we fill that in with a
-     * > frost/blur effect?"*
+     * > frost/blur effect?"* — then, after seeing it: *"I really like the frost background on
+     * > widgets. but can we remove the harsh outline and just keep the blur effect?"*
+     *
+     * ## §21 has now been reversed twice, and both reversals were deliberate
+     *
+     * §21 originally specified *outline only, no fill*, on the reasoning that a filled box would
+     * compete with the content sitting inside it. The frost request inverted that. This second
+     * request drops the stroke as well, so nothing of the original specification survives except
+     * the *footprint* it was describing — which is the part that was always the point. Recorded
+     * rather than quietly deleted, so the next reader does not restore the stroke believing §21
+     * still asks for it. **It does not.** The restraint that produced the original wording lives on
+     * in [FROST_FILL_ALPHA]'s deliberately low value.
      *
      * ## Why a scrim and not a blur
      *
@@ -87,13 +97,27 @@ object AresEditGrid {
      * - **A gradient, not a flat wash.** Brighter at the top, thinner at the bottom, which is how a
      *   real frosted panel catches light. Two multiples of one alpha, so there is still one number
      *   to tune.
-     * - **Deliberately weak.** [FROST_FILL_ALPHA] is a fraction of the outline's own alpha: the job
-     *   is to make the footprint read as a *pane* the widget sits behind, not to obscure the widget.
+     * - **Deliberately weak.** [FROST_FILL_ALPHA] is low enough that the job is to make the
+     *   footprint read as a *pane* the item sits behind, not to obscure the item.
+     * - **No border.** With the stroke gone the edge is defined by the frost's own falloff against
+     *   the wallpaper, which is what "frost, not a box" means. The rounded corner stays: it is what
+     *   keeps the pane reading as a tile rather than as a rectangle of haze.
      *
-     * The colour is the same `?attr/workspaceTextColor` the outline and the grid dots use, so the
-     * three flip together against the wallpaper and read as one system. **On a dark wallpaper that
-     * is a white haze, which is frost; on a light wallpaper it is a dark haze, which is a scrim.**
-     * The colour flip has only ever been exercised against a dark wallpaper — see the report.
+     * The colour is the same `?attr/workspaceTextColor` the grid dots use, so the two flip together
+     * against the wallpaper and read as one system. **On a dark wallpaper that is a white haze,
+     * which is frost; on a light wallpaper it is a dark haze, which is a scrim.** The colour flip
+     * has only ever been exercised against a dark wallpaper — see the report.
+     *
+     * ## Applied to every editable tile, home grid only
+     *
+     * > *"I also like this so much, I think we should expand it to app icons and folders when I
+     * > edit mode? makes sense for it to just be on the home screen edit and not inside folders
+     * > when editing."*
+     *
+     * So the caller ([AresHomeAdapter.syncCellOutlineFor]) no longer restricts it to widgets. It is
+     * confined to the home grid by construction rather than by a condition: that adapter serves
+     * [AresHomeListView] and nothing else, and an open folder's edit mode is `AresFolderEdit`,
+     * which does not go through here at all.
      */
     fun cellOutline(context: Context): Drawable {
         val res = context.resources
@@ -108,10 +132,6 @@ object AresEditGrid {
         ).apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = res.getDimension(R.dimen.ares_edit_cell_outline_radius)
-            setStroke(
-                res.getDimensionPixelSize(R.dimen.ares_edit_cell_outline_width).coerceAtLeast(1),
-                withAlpha(colour, OUTLINE_ALPHA),
-            )
         }
     }
 
@@ -202,7 +222,7 @@ object AresEditGrid {
      * same dwell (§17 — one folder behaviour regardless of where the icon came from), and the grid
      * is not wiggling then. Nothing here depends on the mode being on.
      *
-     * Filled as well as stroked, unlike [cellOutline]. The outline is a passive hint about what a
+     * Stroked as well as filled, unlike [cellOutline]. The frost is a passive hint about what a
      * cell occupies and must not obscure it; this is an active answer to *"will releasing now put
      * it in here?"*, and at 500ms of held finger the user is waiting for exactly that answer.
      */
@@ -271,17 +291,19 @@ object AresEditGrid {
         }
     }
 
-    /** Matching restraint for the outline; it sits over a widget's own content. */
-    private const val OUTLINE_ALPHA = 0.35f
-
     /**
-     * Strength of the frosted fill inside the outline. **The one number to tune for §V4.**
+     * Strength of the frosted pane. **The one number to tune for the frost.**
      *
-     * This is a foreground, so it sits over the widget's own content — which is what makes it read
-     * as glass in front of the widget rather than a colour behind it, and also why it must stay
-     * low. At 0.10 a dense widget stays legible through it; raising it toward 0.2 makes the pane
-     * obvious and starts to wash out what is inside. It also veils the × and the chevron by the
-     * same amount, which at this strength is not perceptible.
+     * This is a foreground, so it sits over the tile's own content — which is what makes it read as
+     * glass in front of the item rather than a colour behind it, and also why it must stay low. At
+     * 0.10 a dense widget stays legible through it; raising it toward 0.2 makes the pane obvious
+     * and starts to wash out what is inside. It also veils the × and the chevron by the same
+     * amount, which at this strength is not perceptible.
+     *
+     * Now that every tile carries one, not just widgets, this value is doing more work than before:
+     * an app icon is mostly empty cell, so the pane is far more visible behind one than behind a
+     * widget that fills its footprint. If the grid reads as busy, lower this rather than
+     * reintroducing a per-type condition.
      */
     private const val FROST_FILL_ALPHA = 0.10f
 

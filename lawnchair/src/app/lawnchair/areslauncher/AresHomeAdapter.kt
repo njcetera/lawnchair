@@ -162,16 +162,29 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * usefully, shows how much grid the widget actually occupies, which is what you need to know
      * while cycling its size.
      *
-     * **Widgets only.** An app icon roughly fills its 1×1 cell already, so outlining every tile
-     * would add a box per icon for no information — noise competing with §14's dots rather than
-     * complementing them.
+     * **Every editable tile, not just widgets** — apps, folders, app pairs and widgets alike:
      *
-     * The outline goes in the container's *foreground* so it draws above the widget's own content
-     * and, being a property of the container, wiggles and scales with the tile exactly as the two
-     * badges do. It is a drawable, so it takes no touches.
+     * > *"I also like this so much, I think we should expand it to app icons and folders when I
+     * > edit mode? makes sense for it to just be on the home screen edit and not inside folders
+     * > when editing."*
+     *
+     * That supersedes the widgets-only rule this function shipped with, whose reasoning was that an
+     * icon roughly fills its own 1×1 cell so a box round it adds no information. True of a *box*;
+     * the frost is not one. It now says "this tile is editable", which is information every tile
+     * has, and it is what makes the whole grid read as one surface in edit mode instead of the
+     * widgets looking singled out.
+     *
+     * **Home grid only, by construction.** The user drew that line themselves, and it needs no
+     * condition here: this adapter serves [AresHomeListView] and nothing else, and an open folder's
+     * edit mode is `AresFolderEdit`, which never calls this.
+     *
+     * The frost goes in the container's *foreground* so it draws above the item's own content and,
+     * being a property of the container, wiggles and scales with the tile exactly as the badges do
+     * — including the pick-up swell, which is applied to the same view. It is a drawable, so it
+     * takes no touches and cannot affect the affordance hit-testing or the centre drag disc.
      */
     private fun syncCellOutlineFor(container: FrameLayout, info: ItemInfo?) {
-        val wanted = info != null && editMode && isWidget(info)
+        val wanted = info != null && editMode
         val has = container.foreground != null
         if (wanted == has) return
         container.foreground = if (wanted) AresEditGrid.cellOutline(container.context) else null
