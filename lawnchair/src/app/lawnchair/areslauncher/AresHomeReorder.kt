@@ -259,10 +259,26 @@ object AresHomeReorder {
             }
             if (AresFolderDrop.isFrozen()) return null
 
+            // Hit-test the CELL, not the drawn tile.
+            //
+            // §23 insets every tile by half a gutter on each side, so `v.left`/`v.right` are inset
+            // from the cell the tile occupies and the gutters became dead zones for targeting.
+            // That is not a rare miss for a wide item: a full-width widget's centre sits exactly at
+            // the grid's horizontal midpoint, which for an even column count is always a tile
+            // boundary -- and once a gutter exists, a gap. Measured on a 4-column grid, tiles at
+            // 10-250 / 270-510 / 530-770 / 790-1030, a full-width widget's centre is x=520, which
+            // is inside NO tile. So dragging a widget over the icons chose no target, fired no
+            // onMove, and nothing reflowed: "when moving widgets, they're not moving apps as
+            // expected. Apps shouldn't be behind widgets when moving widgets around."
+            //
+            // Adding the slack back restores the pre-gutter behaviour exactly (flush tiles made
+            // x=520 land on a boundary that the >= test already accepted) without widening the
+            // target beyond the cell it stands for.
+            val slack = list.tileGutterPx() / 2
             dropTargets.forEach { target ->
                 val v = target.itemView
-                if (centreX >= v.left && centreX < v.right &&
-                    centreY >= v.top && centreY < v.bottom
+                if (centreX >= v.left - slack && centreX < v.right + slack &&
+                    centreY >= v.top - slack && centreY < v.bottom + slack
                 ) {
                     // THE OTHER HALF OF THE DWELL, and it is here rather than in AresFolderDrop
                     // because it is a statement about reordering, not about folders.
@@ -314,7 +330,31 @@ object AresHomeReorder {
             // only if a holder is mid-relayout, and declining would wedge the reorder.
             if (span <= 0f) return true
             val travelled = (centreX - fromX) * dx + (centreY - fromY) * dy
-            return travelled >= span * SWAP_TRAVEL_FRACTION
+            return travelled >= span * travelFractionFor(selected)
+        }
+
+        /**
+         * How far past a target's centre the drag must go before that target is displaced.
+         *
+         * [SWAP_TRAVEL_FRACTION]'s 10% overshoot exists for exactly one reason: it leaves a tile's
+         * leading half as a window where the target has NOT yet been reflowed aside, which is the
+         * moment dwell-to-create-a-folder needs in order to have something to dwell on.
+         *
+         * **A widget cannot go into a folder**, so for a widget drag that window buys nothing and
+         * costs a great deal. The overshoot is 10% *of the distance to the target's centre*, and a
+         * large widget's centre starts far from a small icon's, so the absolute travel it demands
+         * is correspondingly large. Measured dragging a full-width 4x4 widget up one row: the swap
+         * needed the widget's centre to travel 950px, against 853px to simply arrive at the target
+         * centre. Anything short of that displaced nothing at all, which is what the grid not
+         * reacting looked like -- "when moving widgets, they're not moving apps as expected. Apps
+         * shouldn't be behind widgets when moving widgets around."
+         *
+         * Reaching the centre is the natural threshold; only the folder case needs more.
+         */
+        private fun travelFractionFor(selected: RecyclerView.ViewHolder): Float {
+            val info = list.aresAdapter.itemAt(selected.bindingAdapterPosition)
+            val isWidget = info != null && info.itemType == Favorites.ITEM_TYPE_APPWIDGET
+            return if (isWidget) 1f else SWAP_TRAVEL_FRACTION
         }
 
         override fun onMove(

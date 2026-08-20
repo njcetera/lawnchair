@@ -1118,6 +1118,16 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * height likewise reuses the profile's cell height, which keeps icons and widgets at the
      * proportions their providers and icon packs were designed against.
      */
+    /**
+     * The gutter between tiles, in px, for callers that must hit-test against the **cell** rather
+     * than the drawn tile.
+     *
+     * §23 shrank each tile by half a gutter on every side without changing cell arithmetic, so a
+     * view's `left`/`right` are now inset from the cell it occupies. Anything deciding "which cell
+     * is this point in" has to add the slack back, or the gutters become dead zones.
+     */
+    fun tileGutterPx(): Int = masonry.gutterPx
+
     private fun applyGridMetrics() {
         val dp = launcher.deviceProfile
         masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
