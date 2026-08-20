@@ -166,8 +166,15 @@ public class HotseatPredictionController implements DragController.DragListener,
 
     /** Visible-page slot count (columns × rows). Predictions only fill the current page. */
     private int getVisiblePageStartRank() {
-        int page = mHotseat.getPagedView().getNextPage();
-        return Math.max(0, page) * mHotSeatItemsCount;
+        int page = Math.max(0, mHotseat.getPagedView().getNextPage());
+        // AresLauncher: clamp to a page that actually exists. Ranks are derived from this start,
+        // and every rank on a non-existent page resolves to a null CellLayout in
+        // WorkspaceLayoutManager.addInScreen -- which returns having set no CellLayoutLayoutParams.
+        int pageCount = mHotseat.getPagedView().getPageCount();
+        if (pageCount > 0 && page > pageCount - 1) {
+            page = pageCount - 1;
+        }
+        return page * mHotSeatItemsCount;
     }
 
     @Override
@@ -286,6 +293,16 @@ public class HotseatPredictionController implements DragController.DragListener,
         for (WorkspaceItemInfo item : itemsToAdd) {
             View icon = mLauncher.getItemInflater().inflateItem(item, mHotseat);
             mLauncher.getWorkspace().addInScreenFromBind(icon, item);
+            // AresLauncher: addInScreen can decline the add and return without ever handing the
+            // child a CellLayoutLayoutParams -- the hotseat page can be missing (§10 leaves the
+            // dock a zero-height surface, so this branch is live for us, not theoretical) and
+            // CellLayout.addViewToCellLayout returns false for an out-of-grid cell. In both cases
+            // the view keeps the FrameLayout.LayoutParams the inflater gave it, is not attached to
+            // anything, and must not be treated as a placed icon. Animating a detached view is
+            // pointless and finishBinding would throw.
+            if (icon.getParent() == null) {
+                continue;
+            }
             finishBinding(icon);
             if (animate) {
                 animationSet.play(ObjectAnimator.ofFloat(icon, SCALE_PROPERTY, 0.2f, 1));
@@ -302,7 +319,13 @@ public class HotseatPredictionController implements DragController.DragListener,
 
     private void finishBinding(View view) {
         view.setOnLongClickListener(mPredictionLongClickListener);
-        ((CellLayoutLayoutParams) view.getLayoutParams()).canReorder = false;
+        // AresLauncher: second line of defence for the same reason as the guard in bindItems.
+        // The other caller (fillGapsWithPrediction, re-using an existing CellLayout child) always
+        // satisfies this cast; the bind path does not, and an unconditional cast there took the
+        // whole launcher down from QuickstepLauncher.onResume.
+        if (view.getLayoutParams() instanceof CellLayoutLayoutParams lp) {
+            lp.canReorder = false;
+        }
     }
 
     private void removeOutlineDrawings() {
@@ -337,8 +360,11 @@ public class HotseatPredictionController implements DragController.DragListener,
      * Pins a predicted app icon into place.
      */
     public void pinPrediction(ItemInfo info) {
-        PredictedAppIcon icon = (PredictedAppIcon) getChildAtRank(info.rank);
-        if (icon == null) {
+        // AresLauncher: the cell that held this prediction when the popup was built can hold a
+        // different view (or nothing) by the time the shortcut is tapped -- the dock is a
+        // zero-height surface that still binds real CONTAINER_HOTSEAT rows, so the two can collide.
+        // An instanceof check covers the null case as well.
+        if (!(getChildAtRank(info.rank) instanceof PredictedAppIcon icon)) {
             return;
         }
         WorkspaceItemInfo workspaceItemInfo = new WorkspaceItemInfo((WorkspaceItemInfo) info);
