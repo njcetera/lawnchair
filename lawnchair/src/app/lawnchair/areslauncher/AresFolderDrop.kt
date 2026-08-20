@@ -286,7 +286,24 @@ object AresFolderDrop {
      * The desktop half is ours: drop the row from the adapter and renumber what is left, so the
      * grid packs closed over the gap exactly as it does for any other removal.
      *
-     * Posted rather than run inline. In the in-grid case this is reached from
+     * ## The model write is INLINE; only the adapter mutation is posted
+     *
+     * The split is load-bearing, and getting it wrong is silent data loss.
+     *
+     * This returns `true`, and `AresHomeDrop.handleExternalDrop` returns `true`, and
+     * `DragController.drop` then calls `Folder.onDropCompleted(success = true)` on the *source*
+     * folder **synchronously**. If that folder is now down to one item, that runs
+     * `replaceFolderWithFinalItem` → `deleteCollectionAndContentsFromDatabase`, whose first
+     * statement is `DELETE FROM favorites WHERE container = <source folder id>`. Meanwhile
+     * `Folder.onDragStart` removed the item from `getContents()` **in memory only** — its row still
+     * names the source folder as its container until something writes it. So a deferred write means
+     * the row is deleted first and the write then updates zero rows, with no error anywhere.
+     *
+     * It happens to survive today only because `LauncherDelegate` takes an asynchronous branch
+     * while the source folder still has bound views; the synchronous branch is one `unbindItems()`
+     * away. So the write goes first, inline, and only the adapter half is posted.
+     *
+     * That half is posted because in the in-grid case this is reached from
      * [AresHomeReorder.Callback.clearView], which `ItemTouchHelper` calls from inside a recover
      * animation's end callback — notifying a removal there risks mutating the adapter while
      * RecyclerView is mid-frame, and the cost of waiting a frame is invisible.
@@ -302,11 +319,11 @@ object AresFolderDrop {
             Log.e(TAG, "folder icon ${folderInfo.id} has no Folder view; drop declined")
             return false
         }
+        folder.addFolderContent(item, folderInfo.getContents().size, true)
+        Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id}")
         list.post {
-            folder.addFolderContent(item, folderInfo.getContents().size, true)
             list.aresAdapter.removeItems { it.id == item.id }
             AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
-            Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id}")
         }
         return true
     }
