@@ -81,4 +81,10 @@
     <!-- Matches the corner softness of the icon and widget shapes it traces, so the outline reads
          as the cell's edge rather than as a box drawn on top of one. -->
     <dimen name="ares_edit_cell_outline_radius">16dp</dimen>
+
+    <!-- The dwell drop-target ring (AresFolderDrop). Heavier than the cell outline on purpose:
+         the outline is a passive hint, this is the launcher answering "release now and it goes in
+         here" after the user has deliberately held still for half a second. Shares the outline's
+         corner radius so the two read as the same shape at different weights. -->
+    <dimen name="ares_drop_ring_width">3dp</dimen>
 </resources>

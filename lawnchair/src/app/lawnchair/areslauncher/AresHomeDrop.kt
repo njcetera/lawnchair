@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.util.Log
+import android.view.View
 import com.android.launcher3.DropTarget
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherAnimUtils
@@ -111,41 +112,73 @@ object AresHomeDrop {
         if (!AresWidgetAdd.isAresHome(launcher)) return false
         val dragged = d.dragInfo ?: return false
 
-        val added = when (dragged) {
+        // Converted up front because both destinations need the same object: an All Apps drag
+        // carries an AppInfo, and only ItemInflater's type dispatch turns one into the
+        // WorkspaceItemInfo the model -- and a FolderInfo's contents -- can actually hold.
+        val converted = if (dragged is PendingAddItemInfo) null else toModelItem(launcher, dragged)
+        val convertedInfo = converted?.tag as? ItemInfo
+
+        // A dwell that armed over a folder takes precedence over the grid (§17: the folder behaves
+        // the same whichever surface the icon came from). A picker selection can never get here:
+        // Folder.willAccept refuses widgets, so the dwell never arms with one in hand.
+        if (convertedInfo != null && AresFolderDrop.commitDrop(launcher, convertedInfo)) {
+            finishDrop(launcher, d)
+            return true
+        }
+
+        val added = when {
             // Picker selections (widgets, and legacy ACTION_CREATE_SHORTCUT items) still have to go
             // through Launcher.addPendingItem so binding and the configure activity happen -- the
             // item is not ready to persist yet. That is exactly what addToHomeList wraps.
-            is PendingAddItemInfo -> AresWidgetAdd.addToHomeList(launcher, dragged)
-            else -> addDraggedItem(launcher, dragged)
+            dragged is PendingAddItemInfo -> AresWidgetAdd.addToHomeList(launcher, dragged)
+            converted != null -> addDraggedItem(launcher, converted)
+            else -> false
         }
         if (!added) {
             Log.e(TAG, "no room on the home grid for $dragged")
             launcher.workspace.onNoCellFound(launcher.workspace, dragged, d.logInstanceId)
         }
 
-        // Stock disposes of the drag view as a side effect of animating it into the dropped item's
-        // final position. There is no such view here, so nothing would ever remove it and the
-        // dragged icon would be left frozen over the launcher. Clearing the defer flag is the same
-        // hand-back Workspace.onDrop uses when it declines to animate (see its `foundCell` else).
+        finishDrop(launcher, d)
+        return true
+    }
+
+    /**
+     * Disposes of the drag view and leaves the drag state.
+     *
+     * Stock disposes of the drag view as a side effect of animating it into the dropped item's
+     * final position. There is no such view here, so nothing would ever remove it and the dragged
+     * icon would be left frozen over the launcher. Clearing the defer flag is the same hand-back
+     * `Workspace.onDrop` uses when it declines to animate (see its `foundCell` else).
+     */
+    private fun finishDrop(launcher: Launcher, d: DropTarget.DragObject) {
         d.deferDragViewCleanupPostAnimation = false
         launcher.stateManager.goToState(
             LauncherState.NORMAL,
             LauncherAnimUtils.SPRING_LOADED_EXIT_DELAY.toLong(),
         )
-        return true
     }
 
     /**
-     * Persists an item dragged in from the app list or out of a folder, and shows it.
+     * Turns a drag payload into the model item that can be persisted, or null if it cannot be.
      *
      * The inflate is not wasted work even though [com.android.launcher3.Workspace.addInScreen]
-     * discards the view: `ItemInflater` is what **converts** the drag payload into the model item.
-     * An All Apps drag carries an `AppInfo`, and `makeWorkspaceItem()` — reached only through the
-     * inflater's own type dispatch — is the correct way to turn one into the `WorkspaceItemInfo`
-     * that gets written. Stock does the same thing and then reads the view's tag back, which is why
-     * this reads the tag rather than the value it passed in. An item dragged out of a folder is
-     * already a `WorkspaceItemInfo`, so the inflater hands back the very same object and the write
-     * below relocates the row it already has.
+     * discards the view: `ItemInflater` is what **converts** the payload. An All Apps drag carries
+     * an `AppInfo`, and `makeWorkspaceItem()` — reached only through the inflater's own type
+     * dispatch — is the correct way to turn one into a `WorkspaceItemInfo`. Stock does the same
+     * thing and then reads the view's tag back, which is why this reads the tag rather than the
+     * value it passed in. An item dragged out of a folder is already a `WorkspaceItemInfo`, so the
+     * inflater hands back the very same object and any write relocates the row it already has.
+     */
+    private fun toModelItem(launcher: Launcher, dragged: ItemInfo): View? =
+        launcher.itemInflater.inflateItem(
+            dragged,
+            launcher.workspace.aresHomeList,
+            Favorites.CONTAINER_DESKTOP,
+        )
+
+    /**
+     * Persists an item dragged in from the app list or out of a folder, and shows it.
      *
      * ## The new item is APPENDED, not inserted where it was dropped
      *
@@ -159,12 +192,7 @@ object AresHomeDrop {
      * after the drop (nothing in this path leaves it), so the icon lands on the grid ready to be
      * dragged straight to where it belongs. Worth closing as its own increment, for both sources.
      */
-    private fun addDraggedItem(launcher: Launcher, dragged: ItemInfo): Boolean {
-        val view = launcher.itemInflater.inflateItem(
-            dragged,
-            launcher.workspace.aresHomeList,
-            Favorites.CONTAINER_DESKTOP,
-        ) ?: return false
+    private fun addDraggedItem(launcher: Launcher, view: View): Boolean {
         val info = view.tag as? ItemInfo ?: return false
 
         // A legal cell before anything is written: position is pure bookkeeping for us -- order

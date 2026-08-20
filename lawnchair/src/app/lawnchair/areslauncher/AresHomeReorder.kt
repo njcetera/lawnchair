@@ -1,5 +1,6 @@
 package app.lawnchair.areslauncher
 
+import android.graphics.Canvas
 import android.util.Log
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
@@ -141,6 +142,51 @@ object AresHomeReorder {
             0,
         )
 
+        /** The item being dragged, for the dwell's hit-test exclusion and its drop resolution. */
+        private var draggedInfo: ItemInfo? = null
+
+        /**
+         * Feeds the dragged tile's position to [AresFolderDrop] on every frame of the drag.
+         *
+         * ## Why this hook and not the obvious ones
+         *
+         * `ItemTouchHelper` only calls [chooseDropTarget] from `moveIfNecessary`, which runs on
+         * `ACTION_MOVE` and bails before ever reaching the callback if the drag has not travelled
+         * far enough. So the one thing a dwell needs to observe — the finger holding **still** — is
+         * precisely the case those hooks never report. `onChildDraw` runs every frame the list
+         * draws, which during edit mode is continuous because the wiggle is a never-ending
+         * animator, so the position is sampled whether or not it changed. [AresFolderDrop] decides
+         * what counts as movement; this only reports.
+         *
+         * `left + translationX` rather than the raw touch point: `ItemTouchHelper` keeps
+         * `left + translationX == mSelectedStartX + mDx`, so this is the drag position in the
+         * list's own coordinates and stays correct across the reflow moving the holder underneath
+         * it. It is also the same quantity [chooseDropTarget] scores against, so "what will I swap
+         * with" and "what will I drop into" cannot disagree.
+         */
+        override fun onChildDraw(
+            c: android.graphics.Canvas,
+            recyclerView: RecyclerView,
+            viewHolder: RecyclerView.ViewHolder,
+            dX: Float,
+            dY: Float,
+            actionState: Int,
+            isCurrentlyActive: Boolean,
+        ) {
+            super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+            // Recover animations for other rows, and the settle after the drop, come through here
+            // too; neither is the finger.
+            if (actionState != ItemTouchHelper.ACTION_STATE_DRAG || !isCurrentlyActive) return
+            val item = draggedInfo ?: return
+            val view = viewHolder.itemView
+            AresFolderDrop.onDragPoint(
+                list,
+                item,
+                view.left + view.translationX + view.width / 2f,
+                view.top + view.translationY + view.height / 2f,
+            )
+        }
+
         /**
          * Picks the drop target by **which item contains the dragged view's centre**, rather than
          * by overlap area.
@@ -162,6 +208,26 @@ object AresHomeReorder {
         ): RecyclerView.ViewHolder? {
             val centreX = curX + selected.itemView.width / 2
             val centreY = curY + selected.itemView.height / 2
+
+            // THE FREEZE, and it has to happen HERE rather than anywhere else in the callback.
+            //
+            // `moveIfNecessary` calls this and then immediately acts on the answer, all within the
+            // ACTION_MOVE that produced it -- before the next draw. So by the time any later hook
+            // could look, the reflow has already swapped the folder out from under the finger and
+            // there is nothing left to dwell on. Measured as a design consequence rather than a
+            // bug: §4's live reflow means a folder is pushed aside by the very drag approaching
+            // it, which is the whole reason the interaction needs a dwell at all.
+            //
+            // So the dwell is fed first and the swap is declined while it is tracking one.
+            // Answering "no target" is sufficient -- moveIfNecessary abandons on a null and never
+            // reaches onMove. The freeze lasts only while the drag is actually over an eligible
+            // tile: move on without stopping and the reflow resumes and catches up in one step, so
+            // nothing about ordinary reordering is given up.
+            draggedInfo?.let {
+                AresFolderDrop.onDragPoint(list, it, centreX.toFloat(), centreY.toFloat())
+            }
+            if (AresFolderDrop.isFrozen()) return null
+
             dropTargets.forEach { target ->
                 val v = target.itemView
                 if (centreX >= v.left && centreX < v.right &&
@@ -190,6 +256,7 @@ object AresHomeReorder {
             super.onSelectedChanged(viewHolder, actionState)
             if (actionState != ItemTouchHelper.ACTION_STATE_DRAG) return
 
+            draggedInfo = viewHolder?.let { list.aresAdapter.itemAt(it.bindingAdapterPosition) }
             list.setReorderInProgress(true)
 
             // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
@@ -209,7 +276,15 @@ object AresHomeReorder {
             super.clearView(recyclerView, viewHolder)
             list.setFloatSuspendedFor(null)
             list.setReorderInProgress(false)
-            persistOrder(launcher, list.aresAdapter.snapshot())
+
+            // A dwell that armed resolves as a folder drop instead of a reorder, and it renumbers
+            // the grid itself once the item has left it -- so persisting the current order here as
+            // well would write ranks that are about to change again.
+            val item = draggedInfo
+            draggedInfo = null
+            val consumed = item != null && AresFolderDrop.commitDrop(launcher, item)
+            list.setFolderDropTarget(null)
+            if (!consumed) persistOrder(launcher, list.aresAdapter.snapshot())
         }
     }
 }

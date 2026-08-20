@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
+import android.view.View
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.R
 
@@ -134,6 +135,92 @@ object AresEditGrid {
         private companion object {
             /** Faint on purpose — the dots are a hint about structure, not content. */
             const val DOT_ALPHA = 0.30f
+        }
+    }
+
+    /**
+     * The **drop-target ring**: what a folder (or, for §17's create case, an icon) looks like once
+     * [AresFolderDrop]'s dwell has elapsed and releasing would drop into it.
+     *
+     * ## Why this is drawn rather than animated on the tile
+     *
+     * Every other edit-mode affordance rides on the holder container, deliberately, so it wiggles
+     * with its item. This one must not: the tile it marks is already carrying edit mode's scale and
+     * [AresEditWiggle]'s float, and a third writer on the same view properties fights them
+     * frame-by-frame — the exact failure the float already had to stand down from during a drag.
+     * A decoration reads the target's bounds and owns nothing, so there is nothing to fight over
+     * and nothing to restore when the drag ends.
+     *
+     * It also has to work **outside** edit mode: a drag from the app list onto a folder gets the
+     * same dwell (§17 — one folder behaviour regardless of where the icon came from), and the grid
+     * is not wiggling then. Nothing here depends on the mode being on.
+     *
+     * Filled as well as stroked, unlike [cellOutline]. The outline is a passive hint about what a
+     * cell occupies and must not obscure it; this is an active answer to *"will releasing now put
+     * it in here?"*, and at 500ms of held finger the user is waiting for exactly that answer.
+     */
+    class DropRing(context: Context) : RecyclerView.ItemDecoration() {
+
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = editColor(context)
+            style = Paint.Style.STROKE
+            strokeWidth = context.resources
+                .getDimension(R.dimen.ares_drop_ring_width)
+                .coerceAtLeast(1f)
+        }
+
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = editColor(context)
+            style = Paint.Style.FILL
+        }
+
+        private val radius = context.resources.getDimension(R.dimen.ares_edit_cell_outline_radius)
+
+        /** The holder container to mark, or null. Set by [AresFolderDrop] through the host. */
+        var target: View? = null
+
+        /** 0 = invisible, 1 = fully drawn. Animated by the host so the ring fades in. */
+        var progress: Float = 0f
+
+        /**
+         * Drawn **over** the items rather than under them, unlike [Dots].
+         *
+         * The dots describe the grid, so they belong behind its contents. This describes one tile's
+         * state and has to be legible against whatever that tile draws — a folder preview is a
+         * dense cluster of small icons, and a ring behind it would be almost entirely hidden.
+         */
+        override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+            val view = target ?: return
+            if (progress <= 0f) return
+            // Layout bounds, not the drawn ones: the tile is wiggling, and a ring that wobbled with
+            // it would read as another moving object rather than as a target that has locked on.
+            val inset = stroke.strokeWidth
+            fill.alpha = (progress * FILL_ALPHA * 255).toInt()
+            stroke.alpha = (progress * STROKE_ALPHA * 255).toInt()
+            c.drawRoundRect(
+                view.left + inset,
+                view.top + inset,
+                view.right - inset,
+                view.bottom - inset,
+                radius,
+                radius,
+                fill,
+            )
+            c.drawRoundRect(
+                view.left + inset,
+                view.top + inset,
+                view.right - inset,
+                view.bottom - inset,
+                radius,
+                radius,
+                stroke,
+            )
+        }
+
+        private companion object {
+            /** Enough to read as "this one", faint enough to leave the folder's preview visible. */
+            const val FILL_ALPHA = 0.18f
+            const val STROKE_ALPHA = 0.85f
         }
     }
 

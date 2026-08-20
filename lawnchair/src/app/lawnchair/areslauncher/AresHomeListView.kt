@@ -477,6 +477,83 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private fun folderIconOf(child: View?): FolderIcon? =
         (child as? ViewGroup)?.getChildAt(0) as? FolderIcon
 
+    /**
+     * The tile at [x],[y] that a drag could be dropped **into**, ignoring the one being dragged.
+     *
+     * Not `findChildViewUnder`, for two reasons that both matter here:
+     *
+     *  - **The dragged tile is in the way.** `ItemTouchHelper` translates it to follow the finger,
+     *    so it is always the topmost view under the drag point and the stock lookup would answer
+     *    with the item being dragged, every time.
+     *  - **Translation must be ignored, not honoured.** `findChildViewUnder` adds each child's
+     *    `translationX/Y`, which in edit mode is [AresEditWiggle]'s float — a few pixels of
+     *    continuous motion. Hit-testing against a moving rectangle makes the dwell's "held still"
+     *    test depend on where in the wiggle cycle the frame landed. Layout bounds are what the user
+     *    is aiming at.
+     *
+     * @param excludeId the dragged item's id, or [ItemInfo.NO_ID] to consider every tile.
+     */
+    fun dropCandidateUnder(x: Float, y: Float, excludeId: Int): View? {
+        for (i in childCount - 1 downTo 0) {
+            val child = getChildAt(i) ?: continue
+            if (x < child.left || x >= child.right || y < child.top || y >= child.bottom) continue
+            val info = aresAdapter.itemAt(getChildAdapterPosition(child))
+            if (info == null || (excludeId != ItemInfo.NO_ID && info.id == excludeId)) continue
+            return child
+        }
+        return null
+    }
+
+    /**
+     * The ring marking the tile a dwelling drag would drop into ([AresFolderDrop]).
+     *
+     * Added once and left in place, like [editDots]: it draws nothing while its progress is zero,
+     * so there is no decoration to attach and detach around a drag.
+     */
+    private val dropRing = AresEditGrid.DropRing(context)
+
+    private var dropRingAnimator: ValueAnimator? = null
+
+    /**
+     * Marks [child] as the armed drop target, or clears the mark when passed null.
+     *
+     * Faded rather than switched, for the same reason the grid dots are: it appears mid-drag beside
+     * a wiggling grid, and a hard edge snapping on there reads as a rendering glitch rather than as
+     * feedback. The list is invalidated per frame because an `ItemDecoration` is not otherwise
+     * re-drawn when nothing scrolls — and during an external drag nothing else is animating at all.
+     */
+    fun setFolderDropTarget(child: View?) {
+        if (child != null) dropRing.target = child
+        dropRingAnimator?.cancel()
+        val target = if (child != null) 1f else 0f
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            dropRing.progress = target
+            if (target == 0f) dropRing.target = null
+            invalidate()
+            return
+        }
+        val clearing = child == null
+        dropRingAnimator = ValueAnimator.ofFloat(dropRing.progress, target).apply {
+            duration = DROP_RING_FADE_MS
+            // The reference is dropped from the update listener rather than an end listener:
+            // cancelling an animator still runs its end listener, so a fade-out cancelled by a new
+            // fade-in would clear the target that had just been set.
+            //
+            // `clearing` is not redundant with the progress check, and leaving it out cost a whole
+            // verification pass: ValueAnimator delivers its FIRST update with the start value, so a
+            // fade-IN from 0 reported progress 0 and immediately nulled the target it had just been
+            // given. Every later frame then had a progress to draw at and nothing to draw around,
+            // and the ring never appeared once -- with no error, and the drop itself working
+            // perfectly, so the only symptom was an affordance that was simply absent.
+            addUpdateListener {
+                dropRing.progress = it.animatedValue as Float
+                if (clearing && dropRing.progress <= 0f) dropRing.target = null
+                invalidate()
+            }
+            start()
+        }
+    }
+
     /** Scratch for [toChildLocal]; the caller uses the result before the next call, on one thread. */
     private val localPoint = FloatArray(2)
     private val inverseChildMatrix = Matrix()
@@ -656,9 +733,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     // Declared after the listener because Kotlin runs initialisers in declaration order, and the
-    // listener has to exist before it can be attached.
+    // listener has to exist before it can be attached. The drop ring is here for the same reason.
     init {
         addOnItemTouchListener(editModeTouchListener)
+        addItemDecoration(dropRing)
     }
 
     /**
@@ -830,5 +908,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L
+
+        /** Same as the dots: fast enough to feel like a response, slow enough not to snap. */
+        const val DROP_RING_FADE_MS = 120L
     }
 }

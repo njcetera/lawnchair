@@ -148,6 +148,7 @@ import java.util.stream.Collectors;
 
 import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
 import app.lawnchair.areslauncher.AresFolderDrag;
+import app.lawnchair.areslauncher.AresFolderDrop;
 import app.lawnchair.areslauncher.AresHomeDrop;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
@@ -783,6 +784,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (mAccessibilityDragListener != null) {
             mAccessibilityDragListener.onDragEnd();
         }
+        // AresLauncher: the dwell that arms a folder as a drop target (AresFolderDrop) cannot be
+        // torn down in onDragExit -- DragController.drop calls that BEFORE onDrop, so the arm has
+        // to survive it. This is the one hook that always runs and always runs last.
+        AresFolderDrop.cancel();
         mDragInfo = null;
         mDragSourceInternal = null;
     }
@@ -3132,6 +3137,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // Ensure that we have proper spans for the item that we are dropping
         if (item.spanX < 0 || item.spanY < 0) throw new RuntimeException("Improper spans found");
         mDragViewVisualCenter = d.getVisualCenter(mDragViewVisualCenter);
+
+        // AresLauncher: dwell-to-drop-in (§17). Observation only -- it starts no state machine of
+        // stock's and changes nothing below it. This is the only per-move hook a DragController drag
+        // offers, and the dwell needs the drag's position even (especially) when it is not moving.
+        // It deliberately does NOT use mDragViewVisualCenter, which on this launcher lands 228px
+        // above the finger; see AresFolderDrop#onExternalDragOver for the measurement.
+        AresFolderDrop.onExternalDragOver(mLauncher, d);
 
         final View child = (mDragInfo == null) ? null : mDragInfo.cell;
         if (setDropLayoutForDragObject(d, mDragViewVisualCenter[0], mDragViewVisualCenter[1])) {

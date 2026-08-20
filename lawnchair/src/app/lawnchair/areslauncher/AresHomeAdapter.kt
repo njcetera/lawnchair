@@ -408,6 +408,18 @@ class AresHomeAdapter(private val launcher: Launcher) :
     /** Current visual order, for persisting `rank`. */
     fun snapshot(): List<ItemInfo> = items.toList()
 
+    /**
+     * The item at [index], or null when [index] is out of range.
+     *
+     * Exists so hit-testing can go from a child view to its model item without reading a tag off
+     * the view tree. The tag is set by [com.android.launcher3.util.ItemInflater] on the *item* view
+     * rather than the holder container, and for a widget that view is an `AppWidgetHostView` whose
+     * children the provider replaces at will — asking the adapter is both shorter and immune to
+     * that. `RecyclerView.NO_POSITION` is a normal answer here (a detached or animating holder), so
+     * it is handled rather than guarded against at every call site.
+     */
+    fun itemAt(index: Int): ItemInfo? = items.getOrNull(index)
+
     override fun getItemCount(): Int = items.size
 
     override fun getItemId(position: Int): Long = items[position].id.toLong()
