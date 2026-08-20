@@ -58,6 +58,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import app.lawnchair.areslauncher.AresAllApps;
+import app.lawnchair.areslauncher.AresRecents;
 import app.lawnchair.areslauncher.AresSectionHeaderItem;
 
 /**
@@ -321,6 +322,12 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
                                     R.string.work_profile_edu_section), 0));
                     Log.d(TAG, "Adding FastScrollSection for work edu card.");
                 }
+                // AresLauncher §11b: the five most recent apps, as ordinary list rows, above the
+                // alphabet. `position` is threaded through so every FastScrollSectionInfo recorded
+                // by addAppsWithSections() below still names the adapter index it actually sits at
+                // -- getting that wrong would leave scrubbing off-target by exactly the number of
+                // recents, on every letter.
+                position = addAresRecents(position);
                 position = addAppsWithSections(mApps, position);
             }
             if (Flags.enablePrivateSpace()) {
@@ -374,6 +381,37 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
             DiffUtil.calculateDiff(new MyDiffCallback(oldItems, mAdapterItems), false)
                     .dispatchUpdatesTo(mAdapter);
         }
+    }
+
+    /**
+     * AresLauncher §11b: prepends the five most recently used apps as ordinary icon rows.
+     *
+     * <p>Deliberately {@code VIEW_TYPE_ICON} and not a new view type. What the user rejected in §18
+     * was {@code PredictionRowView} -- a horizontal strip of four icons sitting on top of a
+     * one-per-line list, which read as a foreign element. The request now is for the same
+     * information "in list form so it blends into the design", so these are the same rows,
+     * inflated from the same {@code ares_all_apps_icon.xml}, with nothing to distinguish them but
+     * their position. No header and no divider above them for the same reason: any chrome here
+     * would recreate the visual seam that got the old row removed.
+     *
+     * <p>Gated on {@link AresAllApps#isAresAppListPane}, so the Taskbar's all-apps sheet and the
+     * secondary-display host -- which share this class -- are unchanged. That gate is also what
+     * keeps {@code ares-smoke.ps1}'s {@code predictions-row-absent} check meaningful: no
+     * {@code PredictionRowView} is reinstated anywhere by this.
+     *
+     * @return the adapter position after the rows that were added.
+     */
+    private int addAresRecents(int position) {
+        if (!AresAllApps.isAresAppListPane(mActivityContext)) {
+            return position;
+        }
+        List<AppInfo> recents = AresRecents.recentApps(
+                (Context) mActivityContext, mApps, AresRecents.COUNT);
+        for (AppInfo info : recents) {
+            mAdapterItems.add(AdapterItem.asApp(info));
+            position++;
+        }
+        return position;
     }
 
     int addPrivateSpaceItems(int position) {
