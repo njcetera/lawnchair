@@ -46,7 +46,7 @@ import com.android.launcher3.widget.LauncherAppWidgetHostView
  * every touch before PagedView saw it -- killing the Discover feed swipe. See
  * design/architecture-reassessment.md §0.
  */
-class AresHomeListView(context: Context, private val launcher: Launcher) : RecyclerView(context) {
+class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(context) {
 
     val aresAdapter = AresHomeAdapter(launcher)
 
@@ -80,6 +80,38 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         aresAdapter.gridColumns = { masonry.columns }
         aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
         aresAdapter.removeHost = { info -> removeFromHome(info) }
+        aresAdapter.menuHost = { info -> showItemMenu(info) }
+    }
+
+    /**
+     * Raises the context menu for [info] (§E4), anchored to the tile that is currently showing it.
+     *
+     * The view is looked up here rather than passed from the adapter because only the host knows
+     * what an item is *currently drawn as*: holders are recycled, and for an icon the popup anchors
+     * to the `BubbleTextView` itself, not to the holder container the badge lives on.
+     *
+     * Edit mode is left first. The popup and edit mode are two floating states, and leaving both up
+     * together is the exact incoherence that made long-press stop raising the popup in the first
+     * place — each dismissal gesture clears only one of them, so the user has to dismiss twice. See
+     * the long note in [AresHomeAdapter]'s long-click handler.
+     */
+    private fun showItemMenu(info: ItemInfo) {
+        val container = childForItem(info)
+        val itemView = (container as? ViewGroup)?.getChildAt(0)
+        exitEditMode()
+        if (!AresInfoBadge.showMenu(launcher, itemView, info)) {
+            Log.w(TAG, "no menu could be shown for ${info.targetComponent}")
+        }
+    }
+
+    /** The attached holder container currently bound to [info], or null if it is not on screen. */
+    private fun childForItem(info: ItemInfo): View? {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val position = getChildAdapterPosition(child)
+            if (position != NO_POSITION && aresAdapter.itemAt(position) === info) return child
+        }
+        return null
     }
 
     /**
@@ -294,6 +326,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         // it closes before edit mode can be left -- but HOME closes floating views and exits the
         // mode in one pass, so the two orders must both end clean.
         AresFolderEdit.detach()
+        // Same reasoning for a folder that a dwell opened mid-drag: HOME and BACK can end the mode
+        // while a drag is still live, and an abandoned preview must not commit anything, must not
+        // leave a phantom slot in the folder, and must not leave the reflow frozen.
+        AresFolderDrop.cancel()
         // Set before the visual walk, for the same reason as enterEditMode (§6).
         aresAdapter.setEditMode(false)
         // Cancel every animator up front rather than relying on the per-child walk: children that
@@ -934,7 +970,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                         !isInDragPriorityZone(child, local[0], local[1]) &&
                             (
                                 AresWidgetResize.isPointOnChevron(child, local[0], local[1]) ||
-                                    AresRemoveBadge.isPointOnBadge(child, local[0], local[1])
+                                    AresRemoveBadge.isPointOnBadge(child, local[0], local[1]) ||
+                                    AresInfoBadge.isPointOnBadge(child, local[0], local[1])
                                 )
                     } ?: false
                     // Recorded at DOWN like the chevron, and for the same reason: by UP the child

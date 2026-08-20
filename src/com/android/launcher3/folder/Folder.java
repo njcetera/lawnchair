@@ -836,6 +836,154 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         animateOpen(items, mEmptyCellRank / mContent.itemsPerPage());
     }
 
+    // ------------------------------------------------------ AresLauncher (§18, dwell-to-open)
+    //
+    // Four methods, and they are here rather than in the areslauncher package for one reason:
+    // every piece of state they touch -- mEmptyCellRank, mPrevTargetRank, mRearrangeOnClose,
+    // mItemsInvalidated -- is private to this class, and animateOpen(items, page) is what puts an
+    // empty slot in the arrangement. The *policy* (the dwell, the timers, the hit-testing, when to
+    // open and when to close) deliberately lives in AresFolderPreview; these only expose the
+    // mechanism. See design/strategy-d-dead-paths.md.
+    //
+    // Why not beginExternalDrag(), which looks like exactly this:
+    //
+    //  - It assumes a live DragController drag. The gesture this serves is an ItemTouchHelper
+    //    reorder inside AresHomeListView, which never enters DragController at all, so
+    //    addDragListener() would register a listener that onDragEnd() never removes -- and the next
+    //    unrelated drag would then run this folder's onDragEnd against state that was never set up.
+    //  - It sets mIsExternalDrag, which routes Folder#onDrop down the branch that creates a view
+    //    for the dropped item. Our drop is completed by AresFolderDrop through addFolderContent
+    //    instead, because the item also has to leave the home grid's adapter in the same breath.
+
+    /**
+     * AresLauncher: opens this folder mid-drag with an empty slot at the end, which
+     * {@link #aresMovePreviewSlot(int)} can then slide to wherever the finger is.
+     *
+     * <p>Nothing is written and nothing is added to {@link #mInfo}: this is a *preview* of where a
+     * release would put the item, and the user's rule is that only the release commits.
+     *
+     * <p>The folder also stops being a stock {@link com.android.launcher3.DropTarget} for as long
+     * as it is previewing. That is load-bearing for the drag that comes from the app list rather
+     * than from the grid: {@link #animateOpen(List, int)} registers this folder with
+     * DragController, which would then hand it the drop -- and {@link #onDrop} would run with
+     * {@link #mIsExternalDrag} false and {@link #mCurrentDragView} null. One preview path serves
+     * both drag pipelines instead, which is §17's rule that an interaction has one implementation.
+     *
+     * @return true when the folder actually opened.
+     */
+    public boolean aresBeginPreviewDrag() {
+        if (isInAppDrawer() || mIsOpen || mInfo.getContents().isEmpty()) {
+            return false;
+        }
+        mPrevTargetRank = -1;
+        ArrayList<ItemInfo> items = new ArrayList<>(mInfo.getContents());
+        mEmptyCellRank = items.size();
+        mTargetRank = mEmptyCellRank;
+        items.add(null);    // The empty spot the preview moves around.
+
+        animateOpen(items, mEmptyCellRank / mContent.itemsPerPage());
+        if (!mIsOpen) {
+            return false;
+        }
+        mActivityContext.getDragController().removeDropTarget(this);
+        return true;
+    }
+
+    /** AresLauncher: the rank the previewed empty slot currently sits at. */
+    public int aresPreviewRank() {
+        return mEmptyCellRank;
+    }
+
+    /**
+     * AresLauncher: the rank nearest to ({@code x}, {@code y}), given in this folder's own
+     * coordinate space. Mirrors {@link #getTargetRank} without needing a DragObject -- the visual
+     * centre a DragObject reports is not usable on this launcher (see AresFolderDrop).
+     *
+     * <p><b>The offset is not the one {@link #getTargetRank} uses, deliberately.</b> That method
+     * subtracts this folder's own padding and hands the result to
+     * {@link FolderPagedView#findNearestArea}, which passes it straight through to the *page*'s
+     * {@link CellLayout#findNearestAreaIgnoreOccupied} -- and the page is not at the folder's
+     * origin. Measured on emulator-5554 with a five-icon folder: the page sits at (20, 59) inside
+     * a content view that sits at (0, 0) inside the folder, so stock's answer is biased by 59px
+     * vertically against a 231px cell, a quarter of a row. It shows up as the gap opening one row
+     * below where the finger is, near a boundary. Taking the page's own offset out is four lines
+     * and removes the bias entirely.
+     */
+    public int aresRankNear(float x, float y) {
+        int px = (int) x - getPaddingLeft();
+        int py = (int) y - getPaddingTop();
+        CellLayout page = mContent.getCurrentCellLayout();
+        if (page != null) {
+            px = (int) x - mContent.getLeft() - page.getLeft() + mContent.getScrollX();
+            py = (int) y - mContent.getTop() - page.getTop() + mContent.getScrollY();
+        }
+        return mContent.findNearestArea(px, py);
+    }
+
+    /**
+     * AresLauncher: slides the previewed empty slot to {@code rank}, animating the icons it
+     * displaces -- stock's own {@link FolderPagedView#realTimeReorder} does the work.
+     *
+     * <p>Declines a rank on another page: {@code realTimeReorder} logs "Cannot animate when the
+     * target cell is invisible" and leaves the arrangement inconsistent. {@link #aresRankNear}
+     * only ever answers on the current page, so this is a guard, not a code path.
+     */
+    public void aresMovePreviewSlot(int rank) {
+        if (rank == mEmptyCellRank || !mContent.rankOnCurrentPage(rank)) {
+            return;
+        }
+        mContent.realTimeReorder(mEmptyCellRank, rank);
+        mEmptyCellRank = rank;
+        // The cached reading order is now describing the previous arrangement. Stock gets away
+        // without this because a hole shifts every later icon by one and so preserves their
+        // relative order -- but the drop reads that cache to decide where the new icon goes, and
+        // relying on an accident there is how a wrong-position bug would be invisible in source.
+        mItemsInvalidated = true;
+    }
+
+    /**
+     * AresLauncher: closes a preview that was not committed, taking the empty slot with it.
+     *
+     * <p>{@link #mRearrangeOnClose} is what removes the slot: {@link #closeComplete} re-arranges
+     * from {@link #getIconsInReadingOrder()}, which never contained the phantom. Same two lines
+     * stock uses in {@link #completeDragExit()}, and in the same order.
+     */
+    public void aresEndPreviewDrag() {
+        mEmptyCellRank = mInfo.getContents().size();
+        mPrevTargetRank = -1;
+        if (mIsOpen) {
+            close(true);
+            mRearrangeOnClose = true;
+        } else {
+            rearrangeChildren();
+        }
+    }
+
+    /**
+     * AresLauncher: writes every content row's {@code rank} as its index, unconditionally.
+     *
+     * <p>{@link #updateItemLocationsInDatabaseBatch} only writes the rows whose *in-memory* rank
+     * changed, and in-memory ranks are not always what the database holds -- measured on
+     * emulator-5554, a folder whose rows carried ranks 5 and 6 had contents bound at 0 and 1, so
+     * inserting "at the end" wrote rank 2 and the item came back **first** after a reload. That is
+     * invisible until the next load, which is the worst shape of bug this project keeps hitting.
+     *
+     * <p>Called after a drop whose whole point was the position the user chose, so the position has
+     * to survive a reload rather than merely look right until one.
+     */
+    public void aresPersistContentRanks() {
+        if (isInAppDrawer()) {
+            return;
+        }
+        ArrayList<ItemInfo> items = new ArrayList<>(mInfo.getContents());
+        for (int i = 0; i < items.size(); i++) {
+            items.get(i).rank = i;
+        }
+        if (!items.isEmpty()) {
+            mActivityContext.getModelWriter().moveItemsInDatabase(items, mInfo.id, 0);
+        }
+    }
+
     /**
      * Opens the user folder described by the specified tag. The opening of the folder
      * is animated relative to the specified View. If the View is null, no animation

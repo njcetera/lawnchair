@@ -65,6 +65,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
     var removeHost: ((ItemInfo) -> Unit)? = null
 
     /**
+     * Invoked when an item's ! badge is tapped, with the item whose menu to raise (§E4).
+     *
+     * Host-owned for the same reason as [removeHost]: raising the popup needs the item's *view* to
+     * anchor to, and the host is what holds the attached children. The adapter knows which item was
+     * tapped; only the host can find what it is currently drawn as.
+     */
+    var menuHost: ((ItemInfo) -> Unit)? = null
+
+    /**
      * Whether the surface is currently in edit mode.
      *
      * Consulted by **every** edit-mode affordance this adapter owns — the resize chevron, the ×
@@ -148,7 +157,33 @@ class AresHomeAdapter(private val launcher: Launcher) :
             container.removeView(existing)
         }
         syncRemoveBadgeFor(container, info)
+        syncInfoBadgeFor(container, info)
         syncCellOutlineFor(container, info)
+    }
+
+    /**
+     * The single place the ! context-menu badge is added or removed.
+     *
+     * Mirrors [syncRemoveBadgeFor] exactly, including why it funnels through one function: widget
+     * holders are `setIsRecyclable(false)`, so a holder can be bound again while still carrying last
+     * time's badge and a blind `addView` would stack a second one on it.
+     *
+     * Which items get one is [AresInfoBadge.hasMenu]'s decision rather than a condition written out
+     * here, so the badge and its hit-test cannot drift apart about it. Folders are excluded there:
+     * no popup exists for a folder, and an affordance with nothing behind it is worse than none.
+     */
+    private fun syncInfoBadgeFor(container: FrameLayout, info: ItemInfo?) {
+        val existing = container.findViewWithTag<View>(AresInfoBadge.BADGE_TAG)
+        val target = info?.takeIf { editMode && AresInfoBadge.hasMenu(it) }
+        if (target != null && existing == null) {
+            container.addView(
+                AresInfoBadge.createBadge(container, spokenNameOf(container, target)) {
+                    menuHost?.invoke(target)
+                },
+            )
+        } else if (target == null && existing != null) {
+            container.removeView(existing)
+        }
     }
 
     /**

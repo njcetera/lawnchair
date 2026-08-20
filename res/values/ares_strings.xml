@@ -19,6 +19,15 @@
          needs stated. -->
     <string name="ares_remove_from_home">Remove <xliff:g id="item_name" example="Chrome">%1$s</xliff:g> from home screen</string>
 
+    <!-- Spoken label for the ! badge, which raises the context menu a long-press used to raise.
+         %1$s is the item's own name, e.g. "Chrome". "More options" rather than "App info": for an
+         icon the control opens the whole menu (shortcuts, App info, Uninstall, Widgets), so naming
+         a single entry inside it would describe the control by one of its outcomes. -->
+    <string name="ares_open_item_menu">More options for <xliff:g id="item_name" example="Chrome">%1$s</xliff:g></string>
+
+    <!-- Fallback for the same badge when the item has no readable name. -->
+    <string name="ares_open_item_menu_generic">More options</string>
+
     <!-- Spoken label for the resize chevron. %1$s is the widget's own name, e.g. "Analog". -->
     <string name="ares_resize_item">Resize <xliff:g id="item_name" example="Analog">%1$s</xliff:g></string>
 

@@ -19,7 +19,8 @@ import kotlin.math.hypot
  *
  * One dwell, two resolutions, decided entirely by what is underneath:
  *
- *  - over a **folder** → the icon is filed into it;
+ *  - over a **folder** → the folder **opens**, mid-drag, so the position inside it can be chosen
+ *    ([AresFolderPreview]); a release then files the icon in at that position;
  *  - over another **icon** → a new folder is created holding both.
  *
  * §17's rule is that an operation with several outcomes must be *one* implementation. So the target
@@ -121,7 +122,12 @@ object AresFolderDrop {
     /** True once the dwell has elapsed: the reflow is frozen and the target is highlighted. */
     private var armed = false
 
+    /** True while the drag is outside an open folder and the close countdown is running. */
+    private var previewExiting = false
+
     private val dwellElapsed = Runnable { arm() }
+
+    private val previewExitElapsed = Runnable { closePreview() }
 
     /**
      * Reports where the drag currently is, in [list]'s own coordinate space.
@@ -140,6 +146,26 @@ object AresFolderDrop {
             clear()
             grid = list
             dragged = item
+        }
+
+        // AN OPEN FOLDER OWNS THE POINTER, and the grid underneath must not be consulted at all.
+        //
+        // The folder is drawn over the grid, so a point inside it is also inside whatever tile
+        // happens to sit behind it. Asking the grid what is under the finger would answer with some
+        // unrelated icon, retarget the dwell onto it, and offer to build a folder out of two items
+        // the user cannot even see. The only question that matters while a folder is open is where
+        // the finger is *relative to that folder*.
+        if (AresFolderPreview.isOpen()) {
+            if (AresFolderPreview.onDragPoint(x, y)) {
+                cancelPreviewExit()
+            } else if (!previewExiting) {
+                // Out of the folder, but not for long enough yet. The wait is what makes the
+                // interaction reversible without being twitchy -- a finger that clips the edge on
+                // its way to a slot must not close the folder out from under it.
+                previewExiting = true
+                list.postDelayed(previewExitElapsed, AresFolderPreview.EXIT_CLOSE_MS)
+            }
+            return
         }
 
         val view = list.dropCandidateUnder(x, y, item.id)
@@ -214,9 +240,18 @@ object AresFolderDrop {
      *
      * Once the dwell has **armed**, the freeze applies to both: the ring is up, the user is being
      * shown a target, and a stray pixel of drift must not yank it out from under them.
+     *
+     * ## And it holds for the whole life of an open folder
+     *
+     * While [AresFolderPreview] has a folder open, the grid behind it is not being looked at — see
+     * [onDragPoint] — so nothing would retarget the reflow, but nothing would *stop* it either. It
+     * has to stay frozen: the drag point wanders freely inside the folder, and letting the grid
+     * repack around a finger the user is aiming at a folder slot would rearrange the home screen
+     * behind their back, and then show them the result the moment the folder closed.
      */
     @JvmStatic
-    fun isFrozen(): Boolean = candidateInfo != null && (candidateKind == Kind.ADD || armed)
+    fun isFrozen(): Boolean = AresFolderPreview.isOpen() ||
+        (candidateInfo != null && (candidateKind == Kind.ADD || armed))
 
     /** True once the dwell has elapsed: the target is highlighted and a release drops into it. */
     @JvmStatic
@@ -233,12 +268,54 @@ object AresFolderDrop {
         list.postDelayed(dwellElapsed, DWELL_MS)
     }
 
+    /**
+     * The dwell has elapsed. What that *means* depends on what is underneath, and this is the only
+     * place the two resolutions diverge before the drop.
+     *
+     *  - Over a **folder**, the folder OPENS ([AresFolderPreview]) so the position inside it can be
+     *    chosen. The open folder is the feedback, so no ring is raised — a highlight around a tile
+     *    that has just expanded to fill the screen would be describing something that is no longer
+     *    there.
+     *  - Over an **icon**, the ring is raised and a release builds a folder of the two.
+     *
+     * The ring is the fallback when a folder declines to open — an app-drawer folder, or one whose
+     * contents have gone. Declining silently would leave the drag with an armed target the user
+     * cannot see, and a release would then do something they were never shown.
+     */
     private fun arm() {
         val list = grid ?: return
         val view = candidate ?: return
         armed = true
+        if (candidateKind == Kind.ADD) {
+            val icon = folderIconOf(view)
+            if (icon != null && AresFolderPreview.open(list.launcher, list, icon)) {
+                list.setFolderDropTarget(null)
+                Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; folder opened for placement")
+                return
+            }
+        }
         list.setFolderDropTarget(view)
         Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; reflow frozen, target armed")
+    }
+
+    /**
+     * The drag has been outside the open folder long enough: close it, and disarm.
+     *
+     * Disarming is the half that makes the interaction *repeat*. The user asked to be able to pull
+     * an icon back out "before ever letting go" and then place it on the grid — or dwell again and
+     * reopen. Leaving the folder armed after closing it would mean the next release still filed the
+     * icon away, which is the opposite of what pulling out expresses.
+     */
+    private fun closePreview() {
+        previewExiting = false
+        AresFolderPreview.close()
+        clearTarget()
+    }
+
+    private fun cancelPreviewExit() {
+        if (!previewExiting) return
+        previewExiting = false
+        grid?.removeCallbacks(previewExitElapsed)
     }
 
     private fun clearTarget() {
@@ -251,6 +328,11 @@ object AresFolderDrop {
     }
 
     private fun clear() {
+        cancelPreviewExit()
+        // Abandons an open preview without committing, which is the correct reading of every path
+        // that reaches here: a CANCEL, a new drag, or the end of one. The user's rule is that only
+        // a manual release adds an item to a folder.
+        AresFolderPreview.close()
         clearTarget()
         grid = null
         dragged = null
@@ -312,6 +394,15 @@ object AresFolderDrop {
      */
     @JvmStatic
     fun commitDrop(launcher: Launcher, item: ItemInfo): Boolean {
+        // An open folder resolves against the slot the user positioned, not against the tile the
+        // dwell originally locked onto -- the folder covers the grid by then, so there is no
+        // meaningful tile any more.
+        if (AresFolderPreview.isOpen()) {
+            cancelPreviewExit()
+            val done = AresFolderPreview.commit(launcher, item)
+            clear()
+            return done
+        }
         if (!armed) return false
         val list = grid
         val view = candidate
@@ -337,7 +428,13 @@ object AresFolderDrop {
     }
 
     /**
-     * Files [item] into the existing folder [folderInfo].
+     * Files [item] into the existing folder [folderInfo], at the end.
+     *
+     * **This is now the fallback, not the normal path.** A dwell over a folder opens it
+     * ([AresFolderPreview]) and the release lands at the position the user chose inside it. This
+     * runs only when the folder *declined* to open — an app-drawer folder, or one whose contents
+     * have gone — where appending is the best answer available and is still better than refusing
+     * a drop the ring told the user would work.
      *
      * [Folder.addFolderContent] is the whole write: it inserts into the `FolderInfo`, has
      * `FolderGridOrganizer` assign a legal rank and in-folder cell, persists with
@@ -382,6 +479,10 @@ object AresFolderDrop {
             return false
         }
         folder.addFolderContent(item, folderInfo.getContents().size, true)
+        // Force-write the ranks for the reason given on Folder#aresPersistContentRanks: stock's
+        // batch skips rows whose in-memory rank already matches their index, and that is not always
+        // what the database holds, so an append can read back as a prepend after a reload.
+        folder.aresPersistContentRanks()
         Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id}")
         list.post {
             list.aresAdapter.removeItems { it.id == item.id }
@@ -504,9 +605,12 @@ object AresFolderDrop {
         return true
     }
 
+    /** The [FolderIcon] a holder container hosts, or null when it hosts anything else. */
+    private fun folderIconOf(container: View): FolderIcon? =
+        (container as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon
+
     /** The [Folder] behind a holder container hosting a [FolderIcon], or null. */
-    private fun folderOf(container: View): Folder? =
-        ((container as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon)?.folder
+    private fun folderOf(container: View): Folder? = folderIconOf(container)?.folder
 
     /**
      * Feeds a `DragController` drag (app list, widget picker, or an app leaving an open folder)

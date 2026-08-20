@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher - the exclamation mark itself. Composed into a backdrop by ares_info_badge.xml;
+     that file is what callers reference, this one is only its top layer.
+
+     An exclamation mark because the owner asked for one by name - "add another option in the top
+     right with a ! icon". The obvious alternatives were considered and are worse here: a lowercase
+     "i" in a circle is the Android convention for App info specifically, but this control opens the
+     whole context menu (shortcuts, App info, Uninstall, Widgets) and naming only one of those
+     entries would under-promise; a vertical ellipsis reads as "more of this list" rather than
+     "more about this item", and would sit oddly beside the x, which is a glyph rather than a menu
+     affordance.
+
+     Drawn as a rounded bar over a separate dot, matching the x's stroke weight, so the two badges
+     read as one family at a glance on opposite corners of the same tile.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/textColorPrimary">
+
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,4.5c-0.83,0 -1.5,0.67 -1.5,1.5v7.5c0,0.83 0.67,1.5 1.5,1.5s1.5,-0.67 1.5,-1.5V6c0,-0.83 -0.67,-1.5 -1.5,-1.5z" />
+
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,17.2c-0.88,0 -1.6,0.72 -1.6,1.6s0.72,1.6 1.6,1.6 1.6,-0.72 1.6,-1.6 -0.72,-1.6 -1.6,-1.6z" />
+</vector>

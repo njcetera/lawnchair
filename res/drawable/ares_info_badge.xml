@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher - the context-menu affordance shown on icons and widgets while the grid is in
+     edit mode. Tapping it raises the menu that a long-press used to raise.
+
+     It exists because edit mode took that gesture over. Long-press on the home grid now enters
+     edit mode and deliberately does NOT also show the popup - two floating states raised by one
+     gesture read as incoherent, and each dismissal gesture cleared only one of them. That left
+     App info, Uninstall and an app's shortcuts with no route in from a tile. This is that route:
+     "for icons and widgets, add another option in the top right with a ! icon and when clicked, it
+     pulls up the app menu... this will allow us to maintain that menu functionality".
+
+     Deliberately identical in construction to ares_remove_badge.xml - same backdrop, same sizes,
+     same centred composition - because the two are a pair on opposite top corners of one tile and
+     any difference in weight between them would read as an accident. See that file for why the
+     drawn badge is smaller than the touch target that hosts it.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:width="@dimen/ares_remove_badge_size"
+        android:height="@dimen/ares_remove_badge_size"
+        android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="?attr/popupColorPrimary" />
+        </shape>
+    </item>
+
+    <item
+        android:width="@dimen/ares_remove_badge_glyph_size"
+        android:height="@dimen/ares_remove_badge_glyph_size"
+        android:drawable="@drawable/ares_info_badge_glyph"
+        android:gravity="center" />
+</layer-list>
