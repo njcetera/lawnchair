@@ -61,28 +61,6 @@ class AresMasonryLayoutManager(
             }
         }
 
-    /**
-     * Space between adjacent tiles, in px. Half is taken from each side of every cell, so a tile
-     * is inset by `gutterPx / 2` all round and neighbours end up a full gutter apart.
-     *
-     * Cell *arithmetic* deliberately ignores this: [cellWidth], [cellHeight] and the packer all
-     * keep working in whole cells, so drag targeting, the drop outline and the edit-mode dot grid
-     * continue to address the full cell. Only the drawn tile shrinks.
-     *
-     * Without it every tile is laid out edge-to-edge with its neighbour. Icons hide that, because
-     * they draw centred inside their cell with their own padding; widgets fill their tile, so
-     * adjacent widgets touch, and any widget that draws a shadow, a rounded background or a
-     * floating button slightly outside its own bounds reads as *overlapping* the one next to it.
-     */
-    var gutterPx: Int = 0
-        set(value) {
-            val clamped = value.coerceAtLeast(0)
-            if (field != clamped) {
-                field = clamped
-                requestLayout()
-            }
-        }
-
     private var layout: AresPacker.Layout? = null
     private var scrollOffset = 0
 
@@ -451,13 +429,18 @@ class AresMasonryLayoutManager(
             val view = attached[position]
                 ?: recycler.getViewForPosition(position).also { addView(it) }
 
-            // Half the gutter comes off each edge, so the space BETWEEN two tiles is a full
-            // gutter while the outer edge of the grid only loses half of one. The measured size
-            // has to lose the whole gutter to stay consistent with the laid-out rect below.
-            val inset = gutterPx / 2
+            // Each tile occupies its WHOLE cell. Separation between tiles is applied inside the
+            // widget holders instead (AresHomeAdapter) rather than by shrinking the cell here.
+            //
+            // Shrinking the cell was the first attempt and it was wrong twice over. The profile
+            // sizes an icon's content against the full cell -- 158px icon + 11px padding + 39px
+            // label in a 241px cell, about 13px of slack -- so taking 20px out of the cell left
+            // the icon hard against the top of its tile, where the edit-mode float carried it into
+            // the frost box's edge. And an inset tile is no longer the cell it stands for, which
+            // turned every gutter into a dead zone for drop targeting.
             val lp = view.layoutParams as RecyclerView.LayoutParams
-            val w = span.w.coerceIn(1, columns) * cw - lp.leftMargin - lp.rightMargin - 2 * inset
-            val h = span.h.coerceAtLeast(1) * ch - lp.topMargin - lp.bottomMargin - 2 * inset
+            val w = span.w.coerceIn(1, columns) * cw - lp.leftMargin - lp.rightMargin
+            val h = span.h.coerceAtLeast(1) * ch - lp.topMargin - lp.bottomMargin
             view.measure(
                 View.MeasureSpec.makeMeasureSpec(w.coerceAtLeast(0), View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(h.coerceAtLeast(0), View.MeasureSpec.EXACTLY),
@@ -466,10 +449,10 @@ class AresMasonryLayoutManager(
             val left = paddingLeft + cell.x * cw
             layoutDecoratedWithMargins(
                 view,
-                left + inset,
-                paddingTop + top - scrollOffset + inset,
-                left + span.w.coerceIn(1, columns) * cw - inset,
-                paddingTop + bottom - scrollOffset - inset,
+                left,
+                paddingTop + top - scrollOffset,
+                left + span.w.coerceIn(1, columns) * cw,
+                paddingTop + bottom - scrollOffset,
             )
         }
     }

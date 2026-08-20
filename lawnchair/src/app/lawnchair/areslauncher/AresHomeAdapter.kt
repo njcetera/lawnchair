@@ -565,6 +565,19 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // Every item fills its cell; the layout manager has already sized the holder to the item's
         // footprint. Folders keep their stock arrangement (preview above label) like any other
         // icon -- the bespoke icon-left folder row belonged to the one-per-line list.
+        //
+        // §23: a WIDGET is inset inside that cell so neighbouring widgets do not touch. Icons and
+        // folders are not, because they already draw centred with their own padding and the
+        // profile sizes their content against the whole cell -- insetting them clips the label.
+        // The inset goes on the CONTAINER's padding rather than the item's margins so the frost
+        // box, which is the container's foreground and is drawn over its full bounds regardless of
+        // padding, keeps describing the entire cell the widget occupies (§21).
+        val widgetInset = if (itemView is AppWidgetHostView) {
+            holder.container.resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset) / 2
+        } else {
+            0
+        }
+        holder.container.setPadding(widgetInset, widgetInset, widgetInset, widgetInset)
         holder.container.addView(
             itemView,
             FrameLayout.LayoutParams(

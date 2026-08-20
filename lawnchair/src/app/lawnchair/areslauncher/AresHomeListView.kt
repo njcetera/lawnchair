@@ -358,13 +358,13 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         // three columns still gets the full bump; only the tiles that would overflow are reduced,
         // and they are reduced to exactly the largest lift that stays inside the viewport rather
         // than being denied one.
-        // Keep the gutter's worth of margin while lifted, rather than letting the bump run right
-        // out to the physical edge: a full-width tile clamps to exactly the list width otherwise,
-        // which is not clipped but reads as though it is about to be.
+        // Keep a little margin while lifted, rather than letting the bump run right out to the
+        // physical edge: a full-width tile clamps to exactly the list width otherwise, which is
+        // not clipped but reads as though it is about to be.
         val desired = rest * AresEditMotion.PICKUP_SCALE_FACTOR
-        val gutter = masonry.gutterPx.toFloat()
-        val availW = (width - paddingLeft - paddingRight).toFloat() - gutter
-        val availH = (height - paddingTop - paddingBottom).toFloat() - gutter
+        val margin = resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset).toFloat()
+        val availW = (width - paddingLeft - paddingRight).toFloat() - margin
+        val availH = (height - paddingTop - paddingBottom).toFloat() - margin
         val fitW = if (child.width > 0 && availW > 0f) availW / child.width else desired
         val fitH = if (child.height > 0 && availH > 0f) availH / child.height else desired
         // Never below the resting scale: a tile taller than the viewport would otherwise be told to
@@ -1118,25 +1118,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      * height likewise reuses the profile's cell height, which keeps icons and widgets at the
      * proportions their providers and icon packs were designed against.
      */
-    /**
-     * The gutter between tiles, in px, for callers that must hit-test against the **cell** rather
-     * than the drawn tile.
-     *
-     * §23 shrank each tile by half a gutter on every side without changing cell arithmetic, so a
-     * view's `left`/`right` are now inset from the cell it occupies. Anything deciding "which cell
-     * is this point in" has to add the slack back, or the gutters become dead zones.
-     */
-    fun tileGutterPx(): Int = masonry.gutterPx
-
     private fun applyGridMetrics() {
         val dp = launcher.deviceProfile
         masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
         masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
-        // §23. The obvious source is the profile's own cell spacing, and it does not work:
-        // `dp.cellLayoutBorderSpacePx` measures 0.0px on both axes here (the profile folds its
-        // spacing into cellWidthPx instead — 169px against our 260px masonry cell), so inheriting
-        // it is indistinguishable from having no gutter. Measured before relying on it.
-        masonry.gutterPx = resources.getDimensionPixelSize(R.dimen.ares_home_tile_gutter)
     }
 
     /**

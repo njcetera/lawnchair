@@ -150,17 +150,28 @@
          corner radius so the two read as the same shape at different weights. -->
     <dimen name="ares_drop_ring_width">3dp</dimen>
 
-    <!-- §23 Space between adjacent home tiles. Half is taken from each side of every cell, so
-         neighbours end up a full gutter apart and the grid's outer edge loses only half of one.
+    <!-- §23 Inset applied INSIDE a widget's holder, so adjacent widgets do not touch.
 
-         Deliberately OUR OWN value rather than the device profile's cell spacing, which is the
-         obvious thing to reuse and does not work: DeviceProfile.cellLayoutBorderSpacePx measures
-         0.0px on both axes for this grid (verified on the Pixel 10 Pro Fold, 4x6 - the profile
-         puts its spacing inside cellWidthPx instead, 169px against our 260px masonry cell). A
-         gutter inherited from it would silently be no gutter at all.
+         Half comes off each side, so two neighbouring widgets end up a full inset apart while the
+         grid's outer edge loses only half of one.
 
-         Small on purpose. Without any, adjacent widgets touch and any widget drawing a shadow or
-         a floating button past its own bounds reads as overlapping its neighbour; much more than
-         this and a 1x1 tile has too little room left for an icon and its label. -->
-    <dimen name="ares_home_tile_gutter">8dp</dimen>
+         Applied to widgets ONLY, and inside the holder rather than by shrinking the cell. Both
+         parts were learned by getting them wrong:
+
+         - Icons need no inset. They already draw centred inside their cell with their own padding
+           (measured: a 158px icon in a 240px-wide cell leaves 41px a side), so the reported
+           touching was always widget-to-widget - "widgets not apps are touching".
+         - Shrinking the CELL to make the gap breaks two other things. The profile sizes icon
+           content against the full cell (158px icon + 11px drawable padding + 39px label in a
+           241px cell, ~13px of slack), so taking 20px out left the icon hard against the top of
+           its tile and the edit-mode float carried it into the frost box edge. And an inset tile
+           is no longer the cell it represents, which turned every gap into a dead zone for drop
+           targeting - a full-width widget's centre landed in one, so dragging a widget chose no
+           target and nothing reflowed.
+
+         Not inherited from DeviceProfile.cellLayoutBorderSpacePx, which is the obvious source and
+         measures 0.0px on both axes for this grid (the profile folds its spacing into cellWidthPx
+         instead - 169px against our 260px masonry cell), so inheriting it would be silently
+         indistinguishable from no inset at all. -->
+    <dimen name="ares_home_widget_inset">8dp</dimen>
 </resources>

@@ -259,26 +259,20 @@ object AresHomeReorder {
             }
             if (AresFolderDrop.isFrozen()) return null
 
-            // Hit-test the CELL, not the drawn tile.
+            // A tile's bounds ARE its cell, which is what makes this containment test sound.
             //
-            // §23 insets every tile by half a gutter on each side, so `v.left`/`v.right` are inset
-            // from the cell the tile occupies and the gutters became dead zones for targeting.
-            // That is not a rare miss for a wide item: a full-width widget's centre sits exactly at
-            // the grid's horizontal midpoint, which for an even column count is always a tile
-            // boundary -- and once a gutter exists, a gap. Measured on a 4-column grid, tiles at
-            // 10-250 / 270-510 / 530-770 / 790-1030, a full-width widget's centre is x=520, which
-            // is inside NO tile. So dragging a widget over the icons chose no target, fired no
-            // onMove, and nothing reflowed: "when moving widgets, they're not moving apps as
-            // expected. Apps shouldn't be behind widgets when moving widgets around."
-            //
-            // Adding the slack back restores the pre-gutter behaviour exactly (flush tiles made
-            // x=520 land on a boundary that the >= test already accepted) without widening the
-            // target beyond the cell it stands for.
-            val slack = list.tileGutterPx() / 2
+            // Worth stating because it briefly stopped being true: insetting every tile to create
+            // a gutter left `v.left`/`v.right` narrower than the cell, and the gaps became dead
+            // zones. For a wide item that is a certainty rather than a rare miss -- a full-width
+            // widget's centre sits at the grid's horizontal midpoint, which for an even column
+            // count is a tile boundary, and once inset, a gap. Measured then: tiles at 10-250 /
+            // 270-510 / 530-770 / 790-1030 against a widget centre of x=520, inside no tile at
+            // all, so nothing was ever chosen and nothing reflowed. Separation now lives inside
+            // the widget holders instead, leaving every tile the full cell it stands for.
             dropTargets.forEach { target ->
                 val v = target.itemView
-                if (centreX >= v.left - slack && centreX < v.right + slack &&
-                    centreY >= v.top - slack && centreY < v.bottom + slack
+                if (centreX >= v.left && centreX < v.right &&
+                    centreY >= v.top && centreY < v.bottom
                 ) {
                     // THE OTHER HALF OF THE DWELL, and it is here rather than in AresFolderDrop
                     // because it is a statement about reordering, not about folders.
