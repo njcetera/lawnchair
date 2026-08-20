@@ -46,6 +46,52 @@ import kotlin.math.hypot
 object AresFolderDrag {
 
     /**
+     * True when [dragSource] is a **home-screen folder on the Ares home surface** — i.e. this drag
+     * came out of one of our open folders.
+     *
+     * ## What it is for: suppressing stock's drag *presentation*
+     *
+     * Un-muzzling the `DragController` gave us the drag we needed and, with it, the workspace-level
+     * chrome we did not. `Workspace.onDragStart` is a `DragListener`, so any drag — including one
+     * confined to a folder — drove the launcher into `SPRING_LOADED`. Captured from the user's
+     * Pixel while it was on screen:
+     *
+     * ```
+     * mState:        SpringLoaded
+     * DropTargetBar  VISIBLE at 10,239-1070,376
+     * Folder         open     26,324-672,1000
+     * ```
+     *
+     * They described it as *"it pops the screen out"* — `SPRING_LOADED` scales the workspace down
+     * and raises the drop-target bar behind the still-open folder.
+     *
+     * Neither belongs here. Edit mode (§4) is this launcher's own model and `SPRING_LOADED` is
+     * stock's competing one; the home grid's own reorder ([AresHomeReorder]) never enters it
+     * either, so *not* entering it is the consistent behaviour rather than a special case. And the
+     * drop-target bar offers stock's Remove / App-info targets, which are not part of the
+     * interaction model and route through grid-native paths Strategy D does not support.
+     *
+     * Dropping `SPRING_LOADED` costs nothing downstream: `NORMAL` also carries
+     * `FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED`, so `Workspace.transitionStateShouldAllowDrop` still
+     * lets the drag out of a folder land (see [AresHomeDrop.handleExternalDrop]).
+     *
+     * ## Not the same question as "is this drag intentional"
+     *
+     * That distinction — the one that separates the old data-loss defect from the drag-out feature
+     * — is settled at the *start* of the gesture, not by where it lands: a press with no movement
+     * can no longer begin a drag at all. This predicate is about presentation only, and it is true
+     * for the whole life of a folder-sourced drag, inside the folder and after it has left.
+     */
+    @JvmStatic
+    fun isFolderDrag(launcher: Launcher?, dragSource: Any?): Boolean {
+        if (launcher == null || !AresWidgetAdd.isAresHome(launcher)) return false
+        val folder = dragSource as? Folder ?: return false
+        // App-drawer folders are Lawnchair's own and live outside the launcher model; they keep
+        // stock behaviour here as everywhere else in this file.
+        return !folder.isInAppDrawer
+    }
+
+    /**
      * Handles a long-press on the icon [v] inside the open [folder].
      *
      * Not editing yet: the press enters edit mode, here and on the home grid behind — they are one

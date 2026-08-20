@@ -147,6 +147,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
+import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.areslauncher.AresHomeDrop;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
@@ -710,7 +711,14 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // action for move/add to homescreen.
         // When a accessible drag is started by the folder, we only allow rearranging withing the
         // folder.
-        boolean addNewPage = !(options.isAccessibleDrag && dragObject.dragSource != this);
+        // AresLauncher: a drag that came out of one of our open folders must not bring stock's
+        // workspace-level drag presentation with it -- no SPRING_LOADED zoom-out, no drop-target
+        // bar, and no extra empty page. See AresFolderDrag#isFolderDrag for the measurement and
+        // the reasoning; the same predicate gates DropTargetBar.
+        boolean aresFolderDrag = AresFolderDrag.isFolderDrag(mLauncher, dragObject.dragSource);
+
+        boolean addNewPage = !(options.isAccessibleDrag && dragObject.dragSource != this)
+                && !aresFolderDrag;
         if (addNewPage) {
             mDeferRemoveExtraEmptyScreen = false;
             addExtraEmptyScreenOnDrag(dragObject);
@@ -736,7 +744,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (mAccessibilityDragListener != null) {
             mAccessibilityDragListener.onDragStart(dragObject, options);
         }
-        if (!mLauncher.isInState(EDIT_MODE)) {
+        if (!mLauncher.isInState(EDIT_MODE) && !aresFolderDrag) {
             mLauncher.getStateManager().goToState(SPRING_LOADED);
         }
         mStatsLogManager.logger().withItemInfo(dragObject.dragInfo)
@@ -2434,16 +2442,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             if (dropTargetLayout == null) {
                 return false;
             }
-            // AresLauncher: a drag that started inside an open folder must not land on the masonry
-            // home grid. onDrop would route it to AresHomeDrop, whose write is a MOVE for an item
-            // that already has a row -- the app left the folder for good. Refusing here rather than
-            // in onDrop is what makes it recoverable: DragController reports accepted=false and
-            // Folder.onDropCompleted's failure branch puts the icon back. The hotseat is excluded
-            // for the same reason AresHomeDrop excludes it -- it is still a real CellLayout.
-            if (!mLauncher.isHotseatLayout(dropTargetLayout)
-                    && AresHomeDrop.isDragOutOfFolder(mLauncher, d)) {
-                return false;
-            }
+            // AresLauncher: a drag that started inside an open folder used to be REFUSED here
+            // (529276c113), because a long-press alone armed one and a release without any movement
+            // still resolved a drop against this workspace -- silently relocating the app. The
+            // interim refusal is now removed, and the defect it closed is closed at the source
+            // instead: Folder.onLongClick no longer starts a drag at all, and the only touch path
+            // that does (AresFolderDrag.DragStarter) requires the finger to pass the touch slop
+            // first. A press with no movement can no longer produce a drop, so there is nothing
+            // left here to refuse -- and a release inside the folder's own bounds never reaches
+            // this method, because the open Folder is itself the drop target for that point.
+            // AresHomeDrop.handleExternalDrop now completes the move; see addDraggedItem.
             if (!transitionStateShouldAllowDrop()) return false;
 
             mDragViewVisualCenter = d.getVisualCenter(mDragViewVisualCenter);

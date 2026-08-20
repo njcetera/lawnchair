@@ -7,7 +7,6 @@ import com.android.launcher3.LauncherAnimUtils
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.LauncherState
 import com.android.launcher3.PendingAddItemInfo
-import com.android.launcher3.folder.Folder
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -59,53 +58,43 @@ object AresHomeDrop {
     private const val TAG = "AresHomeDrop"
 
     /**
-     * True when this drag started **inside an open folder**, which the home grid must refuse
-     * outright rather than consume.
-     *
-     * ## The defect this closes
-     *
-     * Long-pressing an app inside an open folder shows its popup menu *and* arms a drag
-     * (`ItemLongClickListener.beginDrag` routes to `Folder.startDrag` for any item whose container
-     * is a folder). If that drag then resolves against the workspace, [handleExternalDrop] used to
-     * consume it and [addDraggedItem] wrote it to the desktop — and because the item already
-     * carries a database id and a folder container, `addOrMoveItemInDatabase` is a **move**, not a
-     * copy. The app silently left the folder for good.
-     *
-     * Measured on the user's Pixel: after the gesture, `favorites` held id 11 ("Drive") as a
-     * `container = -100` row, and the folder's `container = 6` contents went 7, 8, 9, 10, 12, 13,
-     * 14 — with 11 missing from the sequence. Persisted, not a view-level orphan.
-     *
-     * ## Why this refuses at `acceptDrop` rather than inside [handleExternalDrop]
-     *
-     * Declining *there* is not available: returning false from [handleExternalDrop] falls through
-     * to `Workspace.onDropExternal`, which is the grid-native path Strategy D cannot survive (§15).
-     * Refusing one step earlier, at `Workspace.acceptDrop`, uses stock's own recovery instead:
-     * `DragController` reports `accepted = false`, and `Folder.onDropCompleted`'s failure branch
-     * puts the icon back where it came from. Nothing is written, and the folder keeps its app.
-     *
-     * ## What this deliberately gives up
-     *
-     * Dragging an app *out* of a folder onto the home grid now does nothing — it snaps back. That
-     * is a real behaviour, but it was never part of the interaction model: §18 gives folders the ×
-     * badge for removing apps, and emptying a folder is what disposes of it. Composing folders by
-     * drag is scoped out in the other direction too (design/strategy-d-dead-paths.md), and doing
-     * this one properly means removing from the `FolderInfo`, re-ranking on the desktop and
-     * handling the auto-collapse — separate work. Until then, refusing is strictly better than
-     * moving the user's app without being asked.
-     */
-    @JvmStatic
-    fun isDragOutOfFolder(launcher: Launcher, d: DropTarget.DragObject): Boolean {
-        if (!AresWidgetAdd.isAresHome(launcher)) return false
-        return d.dragSource is Folder
-    }
-
-    /**
      * Handles a drop that originated outside the home grid.
      *
-     * The sources this serves are the app list (§15) and the widget picker's drag-to-place; both
-     * arrive with no database row of their own, so writing one is an *add*. A drag out of an open
-     * folder is the case that must never reach here — it carries an existing row, so the same write
-     * would relocate it — and is refused earlier by [isDragOutOfFolder]; see that doc.
+     * Three sources reach here, and they divide into two kinds of write:
+     *
+     *  - **The app list (§15) and the widget picker's drag-to-place** arrive with no database row
+     *    of their own, so `addOrMoveItemInDatabase` writes a new one. An *add*.
+     *  - **A drag out of an open folder** arrives carrying an existing row whose `container` is the
+     *    folder, so the same call is a *move* — which is now exactly what is wanted.
+     *
+     * ## The folder case was refused until this commit, and why it is safe now
+     *
+     * `529276c113` refused it at `Workspace.acceptDrop`, because the drag could be armed by a
+     * long-press **with no movement at all** (`ItemLongClickListener.beginDrag` routed any
+     * folder-contained item to `Folder.startDrag`), and releasing still resolved a drop here. The
+     * app left the folder without the user asking. Measured on the user's Pixel: `favorites` held
+     * id 11 ("Drive") as a `container = -100` row while the folder's contents ran 7, 8, 9, 10, 12,
+     * 13, 14 — persisted, not a view-level orphan.
+     *
+     * The user then overrode the scope decision: *"we absolutely need to be able to drag apps back
+     * out of folders. Thats a very common action"*.
+     *
+     * The defect and the feature are the same code path with different intent, so the distinction
+     * is drawn **where the drag starts** rather than where it lands. `Folder.onLongClick` no longer
+     * begins a drag at all (it enters edit mode, see [AresFolderDrag]), and the only touch path
+     * that does — `AresFolderDrag.DragStarter` — requires the finger to pass the touch slop first.
+     * A press with no movement can no longer reach a drop, so the accidental case is gone by
+     * construction rather than by veto. A release *inside* the folder's own bounds never arrives
+     * here either: the open `Folder` is itself the drop target for that point, and handles it as an
+     * in-folder reorder.
+     *
+     * ## What completes the move, and what stock already does
+     *
+     * Only the desktop half is written here. The folder half is already done by the time this runs:
+     * `Folder.onDragStart` removes the item from the `FolderInfo` the moment the drag begins, and
+     * `Folder.onDropCompleted` — which `DragController` calls immediately after this returns —
+     * re-ranks the survivors and performs the **below-two auto-collapse** through
+     * `replaceFolderWithFinalItem`. Both were verified running under Strategy D rather than assumed.
      *
      * @param isHotseatTarget true when the drop landed on the hotseat, which is still a real
      *   `CellLayout` and keeps stock behaviour entirely.
@@ -154,7 +143,21 @@ object AresHomeDrop {
      * An All Apps drag carries an `AppInfo`, and `makeWorkspaceItem()` — reached only through the
      * inflater's own type dispatch — is the correct way to turn one into the `WorkspaceItemInfo`
      * that gets written. Stock does the same thing and then reads the view's tag back, which is why
-     * this reads the tag rather than the value it passed in.
+     * this reads the tag rather than the value it passed in. An item dragged out of a folder is
+     * already a `WorkspaceItemInfo`, so the inflater hands back the very same object and the write
+     * below relocates the row it already has.
+     *
+     * ## The new item is APPENDED, not inserted where it was dropped
+     *
+     * True for both sources, and deliberately the same for both — §17's rule is that the add paths
+     * are one operation and must not drift. It is a real gap against the user's description of the
+     * drag-out flow (*"place it on the home page in the location of their desire"*), and the reason
+     * it is not closed here is that mapping a drop point to a rank means mapping DragLayer
+     * coordinates through a possibly-scaled Workspace and page scroll into the list's own space —
+     * a piece of geometry that fails silently when it is wrong, which is the worst way for this
+     * project to be wrong. It costs little in the hand today because **edit mode is still active**
+     * after the drop (nothing in this path leaves it), so the icon lands on the grid ready to be
+     * dragged straight to where it belongs. Worth closing as its own increment, for both sources.
      */
     private fun addDraggedItem(launcher: Launcher, dragged: ItemInfo): Boolean {
         val view = launcher.itemInflater.inflateItem(
