@@ -527,6 +527,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * time this restarts the float, so the tile resumes from rest rather than from wherever the
      * drop settled.
      */
+    /**
+     * The tile [ItemTouchHelper] is currently dragging, or null.
+     *
+     * Read by [AresFolderPreview] so it can stand a ghost in for the row while an open folder is
+     * covering it. [floatSuspendedFor] is exactly that row and nothing else: it is set from
+     * `onSelectedChanged(ACTION_STATE_DRAG)` and cleared in `clearView`, which are the two moments
+     * `ItemTouchHelper` takes and releases the view.
+     */
+    fun draggedTile(): View? = floatSuspendedFor
+
     fun setFloatSuspendedFor(child: View?) {
         val previous = floatSuspendedFor
         if (previous === child) return

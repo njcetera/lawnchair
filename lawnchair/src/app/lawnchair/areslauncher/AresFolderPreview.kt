@@ -131,16 +131,31 @@ object AresFolderPreview {
             forget()
             return false
         }
-        if (!f.aresBeginPreviewDrag()) {
-            Log.i(TAG, "folder ${f.info.id} declined to open for the drag")
-            forget()
-            return false
-        }
+        // CLAIMED BEFORE THE FOLDER IS ACTUALLY OPENED, and the order is load-bearing.
+        //
+        // `aresBeginPreviewDrag` adds the folder to the DragLayer, which lays the DragLayer out,
+        // which makes `DragController.forceTouchMove()` re-deliver the current drag position --
+        // synchronously, from inside this call. That re-entrant `Workspace.onDragOver` reaches
+        // `AresFolderDrop.onDragPoint` again, and if this object still says "no folder open" it
+        // takes the *grid* branch: measured on emulator-5554, it retargeted the dwell onto the tile
+        // that happened to be under the finger, armed a drop ring on it while the folder was open
+        // in front of it, and left `candidate` and `candidateInfo` describing different items.
+        //
+        // Claiming first makes the re-entrant call take the preview branch, where it finds a folder
+        // with no bounds yet and holds -- which is exactly the right answer.
         this.folder = f
         this.folderIcon = icon
         pendingRank = -1
         entered = false
         wasOn = true
+        if (!f.aresBeginPreviewDrag()) {
+            Log.i(TAG, "folder ${f.info.id} declined to open for the drag")
+            forget()
+            return false
+        }
+        // AFTER the folder is in the DragLayer, so the ghost is added over it. Its elevation makes
+        // that independent of add order, but there is no reason to rely on both.
+        AresDragGhost.show(launcher, list.draggedTile())
         Log.i(TAG, "opened folder ${f.info.id} mid-drag; slot at rank ${f.aresPreviewRank()}")
         return true
     }
@@ -193,6 +208,11 @@ object AresFolderPreview {
         val point = toDragLayerSpace(x, y) ?: return false
         val px = point[0]
         val py = point[1]
+
+        // Before any of the decisions below, and deliberately: the tile the finger is holding has
+        // to keep up with it whatever the folder is or is not doing, including on the frames where
+        // this method has nothing else to say.
+        AresDragGhost.moveTo(px, py)
 
         // NOT YET LAID OUT. `animateOpen` adds the folder to the DragLayer and sets its layout
         // params, but its left/top/right/bottom stay at zero until the next layout pass -- measured
@@ -323,6 +343,10 @@ object AresFolderPreview {
     }
 
     private fun forget() {
+        // Every exit runs through here -- commit, abandon, and a failed open -- so this is the one
+        // place that can guarantee the ghost never outlives the preview. A ghost left behind is a
+        // frozen icon over the launcher and a home row stuck invisible.
+        AresDragGhost.hide()
         folder = null
         folderIcon = null
         list = null

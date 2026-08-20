@@ -125,6 +125,15 @@ object AresFolderDrop {
     /** True while the drag is outside an open folder and the close countdown is running. */
     private var previewExiting = false
 
+    /**
+     * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
+     * `DragController` drag from the app list, the widget picker or another folder.
+     *
+     * Only one thing branches on it — whether a dwell over a folder **opens** it — and the reason
+     * is measured rather than tidy. See [arm].
+     */
+    private var fromGrid = true
+
     private val dwellElapsed = Runnable { arm() }
 
     private val previewExitElapsed = Runnable { closePreview() }
@@ -137,7 +146,14 @@ object AresFolderDrop {
      * makes "held still" mean what it says.
      */
     @JvmStatic
-    fun onDragPoint(list: AresHomeListView, item: ItemInfo?, x: Float, y: Float) {
+    @JvmOverloads
+    fun onDragPoint(
+        list: AresHomeListView,
+        item: ItemInfo?,
+        x: Float,
+        y: Float,
+        fromGrid: Boolean = true,
+    ) {
         if (item == null) {
             clear()
             return
@@ -147,6 +163,7 @@ object AresFolderDrop {
             grid = list
             dragged = item
         }
+        this.fromGrid = fromGrid
 
         // AN OPEN FOLDER OWNS THE POINTER, and the grid underneath must not be consulted at all.
         //
@@ -178,6 +195,8 @@ object AresFolderDrop {
         candidateKind = kind
 
         if (info !== candidateInfo) {
+            // NOTE candidateKind is re-asserted below, after clearTarget(). It is set here too
+            // because the same-tile path falls through to the slop check and needs it.
             // Logged on change only -- this runs on every frame of a drag, so per-frame logging is
             // not free. It earns its place because the failure it exposes is otherwise invisible: a
             // drop point mapped into the wrong coordinate space does not throw, it just never finds
@@ -188,6 +207,11 @@ object AresFolderDrop {
             clearTarget()
             candidate = view
             candidateInfo = info
+            // AFTER clearTarget, which resets it to NONE. Without this the kind stayed NONE for
+            // the whole frame a target changed on -- so the reflow was not frozen over a folder
+            // the drag had just entered, and an arm landing in that frame would have raised the
+            // ring instead of opening the folder.
+            candidateKind = kind
             restart(list, x, y)
             return
         }
@@ -281,12 +305,36 @@ object AresFolderDrop {
      * The ring is the fallback when a folder declines to open — an app-drawer folder, or one whose
      * contents have gone. Declining silently would leave the drag with an armed target the user
      * cannot see, and a release would then do something they were never shown.
+     *
+     * ## Why only an IN-GRID drag opens the folder
+     *
+     * §17's rule is that one interaction has one implementation, and this is a deliberate,
+     * measured exception rather than drift. A `DragController` drag runs the launcher in
+     * `SPRING_LOADED`; opening a folder on top of that and then **closing it again** — which
+     * reversibility requires — leaves the workspace behind it invisible. Measured on
+     * emulator-5554 with an app-list drag: after the preview closed, the page outline was still
+     * drawn, every tile was still in the view tree at its right bounds, and not one of them was
+     * visible; `Workspace.onDragOver` stopped arriving, so the dwell could not even re-arm. The
+     * launcher recovered the moment the finger lifted, so it is transient — and it is transient
+     * for exactly the span in which the user is trying to place something.
+     *
+     * The cause is on the shared surface, not in this file: Lawnchair's folder close restores the
+     * workspace scale and scrim to their *resting* values (`restoreLauncherAfterFolderDismissed`),
+     * which is right in `NORMAL` and wrong under `SPRING_LOADED`. Making that state-aware is a
+     * change to the folder open/close animation for every surface that uses it — a much wider
+     * blast radius than this feature earns, and precisely the kind of shared-surface edit
+     * design/change-practices.md says not to make without sweeping its consumers first.
+     *
+     * So an app-list drag keeps the behaviour it already shipped with: the dwell arms, the tile
+     * highlights, and a release files the icon into the folder at the end ([addToFolder]). What it
+     * does not get is the choice of position. That gap is deliberate and recorded rather than
+     * quietly papered over.
      */
     private fun arm() {
         val list = grid ?: return
         val view = candidate ?: return
         armed = true
-        if (candidateKind == Kind.ADD) {
+        if (candidateKind == Kind.ADD && fromGrid) {
             val icon = folderIconOf(view)
             if (icon != null && AresFolderPreview.open(list.launcher, list, icon)) {
                 list.setFolderDropTarget(null)
@@ -654,7 +702,7 @@ object AresFolderDrop {
     fun onExternalDragOver(launcher: Launcher, d: DropTarget.DragObject) {
         val list = launcher.workspace?.aresHomeList ?: return
         val local = toListSpace(launcher, list, d.x.toFloat(), d.y.toFloat())
-        onDragPoint(list, d.dragInfo, local[0], local[1])
+        onDragPoint(list, d.dragInfo, local[0], local[1], fromGrid = false)
     }
 
     /**
