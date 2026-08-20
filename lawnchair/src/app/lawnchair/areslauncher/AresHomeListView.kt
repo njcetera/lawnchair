@@ -3,6 +3,7 @@ package app.lawnchair.areslauncher
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -666,7 +667,10 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      *
      * - **Drag**: past the touch slop on an item, hands the gesture to [ItemTouchHelper] via
      *   `startDrag`. Edit mode replaces its built-in long-press trigger, which is the Android
-     *   one-shot model rather than a persistent mode.
+     *   one-shot model rather than a persistent mode. A **fresh** touch must additionally have been
+     *   held for [PICKUP_HOLD_MS] first (§G5); the long-press that *entered* the mode is exempt.
+     * - **Drag on an item before that hold has elapsed**: declined, so the grid scrolls. The
+     *   gesture forfeits the pick-up for its whole life, not just until the hold time passes.
      * - **Tap on an item**: consumed at `ACTION_UP` so the child's click never fires — WP behaviour,
      *   where you leave edit mode before launching anything.
      * - **Tap on a folder**: *not* consumed, so the folder opens (§18). Folders are the documented
@@ -688,6 +692,23 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         private var downY = 0f
         private var movedPastSlop = false
         private var dragStarted = false
+
+        /**
+         * True once this gesture has given up its right to pick an item up.
+         *
+         * Latched, and that is the point. A gesture that moves *before* the hold has elapsed is a
+         * scroll, and it must stay one for its whole life — without the latch it would become a
+         * scroll for the first 200ms and then grab a tile out from under the finger mid-fling,
+         * because by the second batch of moves the hold test reads true.
+         */
+        private var pickUpForfeited = false
+
+        /**
+         * When this gesture's ACTION_DOWN was observed, on the uptime clock.
+         *
+         * Deliberately **not** `MotionEvent.getDownTime()`. See [heldLongEnough].
+         */
+        private var downAt = 0L
 
         override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
             when (e.actionMasked) {
@@ -715,6 +736,8 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     downY = e.y
                     movedPastSlop = false
                     dragStarted = false
+                    pickUpForfeited = false
+                    downAt = SystemClock.uptimeMillis()
                     enteredEditModeDuringGesture = false
                     // Claim the gesture for the grid from the outset, while editing and on an item.
                     //
@@ -734,11 +757,43 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
                     return false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (!movedPastSlop && exceededSlop(e)) movedPastSlop = true
+                    // TWO GESTURES, TWO RULES, and the difference is which touch this is (§G5).
+                    //
+                    // The long-press that ENTERS edit mode may continue straight into a drag with
+                    // no second hold -- 5a4944a054, which the user confirmed is right: "when we
+                    // hold down an app to go into edit mode, the correct behavior which youre
+                    // already doing is to allow the app to immediately be able to move."
+                    //
+                    // A FRESH touch, made while the mode is already on, must be HELD first: "you
+                    // currently allow items to be moved by immediately touching them which causes
+                    // issues if we end up need to scroll on the homepage... we should force the
+                    // user to hold the app, widget, or folder for a short moment before its
+                    // selected and can move." The grid is one continuous tall scroller (§4), so an
+                    // immediate grab on every touch leaves no gesture to scroll with.
+                    //
+                    // The scroll itself needs nothing built. This listener never intercepts a MOVE,
+                    // so RecyclerView's own scrolling was already wired and was simply being
+                    // pre-empted by startDrag at the touch slop. Declining to start the drag is the
+                    // whole change.
+                    if (!movedPastSlop && exceededSlop(e)) {
+                        movedPastSlop = true
+                        // Moved before the hold elapsed, so this gesture is a scroll -- for good.
+                        if (!enteredEditModeDuringGesture && !heldLongEnough()) {
+                            pickUpForfeited = true
+                        }
+                    }
                     // A gesture that began on the chevron is a resize tap, not a drag handle --
                     // otherwise the smallest wobble while tapping would pick the widget up.
-                    if (editMode && !dragStarted && movedPastSlop && !downOnChevron) {
-                        val holder = downOnChild?.let { getChildViewHolder(it) }
+                    if (editMode && !dragStarted && movedPastSlop && !downOnChevron &&
+                        !pickUpForfeited && (enteredEditModeDuringGesture || heldLongEnough())
+                    ) {
+                        // getChildViewHolder THROWS IllegalArgumentException for a view that is no
+                        // longer a direct child, and downOnChild was captured at ACTION_DOWN -- a
+                        // rebind or a fling can retire it under the finger. Ask the safe question
+                        // first. (The panel flagged exactly this shape in the reverted G5.)
+                        val holder = downOnChild
+                            ?.takeIf { getChildAdapterPosition(it) != NO_POSITION }
+                            ?.let { getChildViewHolder(it) }
                         if (holder != null) {
                             dragStarted = true
                             itemTouchHelper.startDrag(holder)
@@ -812,6 +867,31 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
         private fun exceededSlop(e: MotionEvent): Boolean =
             kotlin.math.hypot(e.x - downX, e.y - downY) > touchSlop
+
+        /**
+         * Whether this gesture has been down long enough to be allowed to pick an item up (§G5).
+         *
+         * Two things this deliberately is not:
+         *
+         * **Not a posted timer.** A timer has to be armed at DOWN, cancelled on movement and on
+         * every terminal action, and it fires against a `downOnChild` that may have been recycled
+         * in the meantime — which is exactly the `getChildViewHolder` `IllegalArgumentException`
+         * the panel found in the reverted implementation. Asking the question when a MOVE arrives
+         * needs no callback and leaves no window in which the view can go stale.
+         *
+         * **Not `MotionEvent.getDownTime()`**, which looks like the obvious source and is wrong
+         * here. Measured on emulator-5554: every synthetic MOVE reports
+         * `downTime == eventTime`, i.e. `eventTime - downTime == 0`, because each
+         * `adb shell input motionevent` runs as its own process and stamps a fresh down time.
+         * Reading the hold off the event therefore forfeits the pick-up on *every* injected drag,
+         * which is not just a harness problem — it would have made this feature, the reorder
+         * journeys and the stress soak all unverifiable, and the failure looks exactly like the
+         * feature being broken. Our own [SystemClock.uptimeMillis] stamp at ACTION_DOWN reads
+         * correctly for both real and injected input (129ms for an immediate move, 367ms for a
+         * 300ms pre-hold).
+         */
+        private fun heldLongEnough(): Boolean =
+            (SystemClock.uptimeMillis() - downAt) >= PICKUP_HOLD_MS
     }
 
     // Declared after the listener because Kotlin runs initialisers in declaration order, and the
@@ -1022,5 +1102,15 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
         /** Same as the dots: fast enough to feel like a response, slow enough not to snap. */
         const val DROP_RING_FADE_MS = 120L
+
+        /**
+         * How long a **fresh** touch in edit mode must be held before it may pick an item up (§G5).
+         *
+         * Distinctly shorter than the system long-press (~400–500ms) that enters the mode and that
+         * raises the context popup from inside it, or the gestures would be indistinguishable in
+         * the hand. Long enough that a flick meant to scroll never grabs anything. One constant,
+         * expected to be tuned on the user's device.
+         */
+        const val PICKUP_HOLD_MS = 200L
     }
 }
