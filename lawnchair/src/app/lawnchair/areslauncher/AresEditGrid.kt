@@ -35,6 +35,14 @@ import com.android.launcher3.R
  * scales with it exactly like the × badge and the resize chevron do. Drawn from a decoration it
  * would sit still while the tile moved underneath it, which is the very complaint (§21) that asked
  * for it: affordances that look detached from the thing they belong to.
+ *
+ * ## Note: §21's "outline only, no fill" is superseded
+ *
+ * That line was written when the outline was specified. The user has since asked for the opposite —
+ * *"when in edit mode theres an outline for the widget border. Can we fill that in with a
+ * frost/blur effect?"* — so [cellOutline] now carries a frosted fill. The later instruction wins;
+ * the reasoning behind the original restraint survives in [cellOutline]'s own documentation, which
+ * is why the fill is as weak as it is.
  */
 object AresEditGrid {
 
@@ -54,26 +62,65 @@ object AresEditGrid {
     }
 
     /**
-     * A stroke-only rounded rectangle marking an item's allocated cells.
+     * A rounded rectangle marking an item's allocated cells: a faint outline with a **frosted
+     * fill** inside it.
      *
-     * No fill, deliberately: this sits *over* the item (a widget's own content, most of the time),
-     * so anything but an outline would obscure what it is describing. The stroke is faint for the
-     * same reason the wiggle is small — it is a hint about the grid, not a selection highlight.
+     * > *"when in edit mode theres an outline for the widget border. Can we fill that in with a
+     * > frost/blur effect?"*
+     *
+     * ## Why a scrim and not a blur
+     *
+     * The obvious reading of "blur" is `View.setRenderEffect(RenderEffect.createBlurEffect(...))`,
+     * and it is the wrong tool: that blurs **the view's own content**, so it would make the widget
+     * unreadable rather than frosting the surface in front of it. Frost is a *backdrop* effect, and
+     * a view has no access to what is painted behind it.
+     *
+     * What actually reads as frost in a UI is a translucent, slightly graduated veil — which this
+     * is. It costs one drawable, works on every device and in every theme, and cannot fail. The
+     * expensive alternatives were considered and are not needed for this: reusing Launcher3's
+     * `BaseDepthController` blurs the *wallpaper*, which is behind the widget rather than behind
+     * the outline; and a genuine window backdrop blur means capturing and re-rendering the surface
+     * below, which is both fragile and the most GPU-sensitive thing this design could do.
+     *
+     * ## The details that make it read as frost rather than as a dim
+     *
+     * - **A gradient, not a flat wash.** Brighter at the top, thinner at the bottom, which is how a
+     *   real frosted panel catches light. Two multiples of one alpha, so there is still one number
+     *   to tune.
+     * - **Deliberately weak.** [FROST_FILL_ALPHA] is a fraction of the outline's own alpha: the job
+     *   is to make the footprint read as a *pane* the widget sits behind, not to obscure the widget.
+     *
+     * The colour is the same `?attr/workspaceTextColor` the outline and the grid dots use, so the
+     * three flip together against the wallpaper and read as one system. **On a dark wallpaper that
+     * is a white haze, which is frost; on a light wallpaper it is a dark haze, which is a scrim.**
+     * The colour flip has only ever been exercised against a dark wallpaper — see the report.
      */
     fun cellOutline(context: Context): Drawable {
         val res = context.resources
-        return GradientDrawable().apply {
+        val colour = editColor(context)
+        // Top-to-bottom so the pane is brightest where light would strike it.
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                withAlpha(colour, FROST_FILL_ALPHA * FROST_TOP_MULTIPLIER),
+                withAlpha(colour, FROST_FILL_ALPHA * FROST_BOTTOM_MULTIPLIER),
+            ),
+        ).apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = res.getDimension(R.dimen.ares_edit_cell_outline_radius)
             setStroke(
                 res.getDimensionPixelSize(R.dimen.ares_edit_cell_outline_width).coerceAtLeast(1),
-                withAlpha(editColor(context), OUTLINE_ALPHA),
+                withAlpha(colour, OUTLINE_ALPHA),
             )
         }
     }
 
-    private fun withAlpha(color: Int, alpha: Float): Int =
-        Color.argb((alpha * 255).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+    private fun withAlpha(color: Int, alpha: Float): Int = Color.argb(
+        (alpha * 255).toInt().coerceIn(0, 255),
+        Color.red(color),
+        Color.green(color),
+        Color.blue(color),
+    )
 
     /**
      * Draws a dot at every cell corner of the packed grid, beneath the items.
@@ -226,4 +273,19 @@ object AresEditGrid {
 
     /** Matching restraint for the outline; it sits over a widget's own content. */
     private const val OUTLINE_ALPHA = 0.35f
+
+    /**
+     * Strength of the frosted fill inside the outline. **The one number to tune for §V4.**
+     *
+     * This is a foreground, so it sits over the widget's own content — which is what makes it read
+     * as glass in front of the widget rather than a colour behind it, and also why it must stay
+     * low. At 0.10 a dense widget stays legible through it; raising it toward 0.2 makes the pane
+     * obvious and starts to wash out what is inside. It also veils the × and the chevron by the
+     * same amount, which at this strength is not perceptible.
+     */
+    private const val FROST_FILL_ALPHA = 0.10f
+
+    /** The gradient: brighter at the top, thinner at the bottom, like light across real glass. */
+    private const val FROST_TOP_MULTIPLIER = 1.5f
+    private const val FROST_BOTTOM_MULTIPLIER = 0.6f
 }
