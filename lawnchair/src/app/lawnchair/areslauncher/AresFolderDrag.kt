@@ -67,9 +67,25 @@ object AresFolderDrag {
      *
      * Neither belongs here. Edit mode (§4) is this launcher's own model and `SPRING_LOADED` is
      * stock's competing one; the home grid's own reorder ([AresHomeReorder]) never enters it
-     * either, so *not* entering it is the consistent behaviour rather than a special case. And the
-     * drop-target bar offers stock's Remove / App-info targets, which are not part of the
-     * interaction model and route through grid-native paths Strategy D does not support.
+     * either, so *not* entering it is the consistent behaviour rather than a special case.
+     *
+     * ## The bar is suppressed for **this** drag, and the reasoning is not general
+     *
+     * An earlier version of this comment said the drop-target bar's Remove / App-info targets "are
+     * not part of the interaction model" — a claim broad enough to describe every drag in the
+     * launcher, while this predicate only ever gates folder-sourced ones. It read as a decision
+     * about the product and is actually a decision about one gesture, and that gap is a trap: the
+     * **app-list and widget-picker drags still raise the bar with live targets** (panel finding
+     * R7), so anyone reading the general claim would conclude something about those paths that is
+     * false.
+     *
+     * The narrow reason this drag suppresses it: the folder is *open* on top of the workspace while
+     * the drag runs, and the bar's measured hit rect reaches into the top of it (`10,239-1070,376`
+     * against a folder at `26,324-672,1000`). A Remove target live behind an open folder is how an
+     * app dragged upward out of one silently disappeared — the defect `529276c113` and `e9bfe85edf`
+     * were written to close. Whether the bar is right for a *drag that starts on the app list* is a
+     * separate, still-open question; R7 records that its geometry is wrong there too, and nothing
+     * here decides it.
      *
      * Dropping `SPRING_LOADED` costs nothing downstream: `NORMAL` also carries
      * `FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED`, so `Workspace.transitionStateShouldAllowDrop` still

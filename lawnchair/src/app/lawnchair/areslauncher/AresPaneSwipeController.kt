@@ -48,8 +48,16 @@ import com.android.launcher3.touch.SingleAxisSwipeDetector
  *   `Workspace`, so that gesture is never intercepted here. This matters: the feed has already been
  *   broken silently once (see design/change-practices.md) and is not visibly testable while the
  *   feed provider is disabled.
- * - **Swipe-up to open the drawer** — stock `AllAppsSwipeController` is vertical and is registered
- *   separately; axis dominance keeps the two from competing.
+ * - **Swipe-up to open the drawer** — *there is no such gesture on home any more*, so there is
+ *   nothing here to coexist with. This bullet used to claim the two merely stayed out of each
+ *   other's way via axis dominance, which contradicted [AresHomeScrollGuard]'s own comment.
+ *   **Settled at runtime on 2026-08-20**, folded emulator, launcher focused and `mState:Normal`:
+ *   two upward swipes starting inside the grid (`540,1400 → 540,500` and `540,1900 → 540,900`)
+ *   both left `mState:Normal`, while a leftward drag on the same screen reached `mState:AllApps`.
+ *   The guard's version is the correct one — vertical scrolls home, horizontal switches panes
+ *   (§4/§SWIPE-UP IS DROPPED), and this controller is the *only* route to the app list from home.
+ *   Anything reasoning about residual risk here (e.g. `2d83117925`) must not assume a vertical
+ *   fallback exists.
  *
  * The drag axis and the animation axis are independent: [AbstractStateChangeTouchController.onDrag]
  * feeds an abstract 0..1 progress to `setPlayFraction`, so this horizontal gesture drives the

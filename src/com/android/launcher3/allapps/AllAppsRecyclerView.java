@@ -328,11 +328,15 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
      * <ul>
      *   <li>less thumb travel covers the same list, so scrubbing is quicker;
      *   <li>the thumb's lowest point clears the collapsed search circle in the bottom-right corner,
-     *       which the end of the alphabet used to land on top of;
-     *   <li>the track's top end leaves the notification-shade pull-down zone at the top edge, which
-     *       was claiming the gesture before the launcher saw it ("trying to scroll the app bar with
-     *       the quick handle will keep trigger the notification trey pulldown").
+     *       which the end of the alphabet used to land on top of.
      * </ul>
+     *
+     * <p><b>This does not fix the notification-shade hijack.</b> A third bullet here used to claim
+     * it did — that pulling the track's top end out of the status-bar pull-down zone stopped the
+     * shade claiming the scrub. The shade bug (§11a) is <em>still open</em>, and §11a lists the
+     * status-bar touch path among its <em>eliminated</em> candidates. The claim is removed rather
+     * than softened because this is a vendored file, where a confident sentence about a fix reads
+     * with authority it has not earned and would send the next investigation down a closed road.
      */
     private static final float ARES_TRACK_HEIGHT_FRACTION = 1f / 2f;
 
