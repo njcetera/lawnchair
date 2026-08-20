@@ -217,7 +217,33 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             val live = mutableSetOf<View>()
 
             icons.forEachIndexed { index, icon ->
-                val parent = icon.parent as? ShortcutAndWidgetContainer ?: return@forEachIndexed
+                // LIFTED FOR A DRAG, not gone.
+                //
+                // Stock pulls the icon out of the container and into a DragView the moment a drag
+                // starts, so its parent stops being the container while the folder still lists it
+                // as content. Falling through to the sweep below then treats it as having left the
+                // folder, which is destructive three ways at once: it drops the badge cell (the
+                // reported symptom -- the app being held shows no editing chrome), it stops the
+                // wiggle, and it RESTORES the launch click listener, so a tap on that app inside an
+                // editing folder opens it again. That last one is the very defect the
+                // `setOnClickListener(null)` further down exists to prevent, undone by a drag.
+                //
+                // Keeping it in `live` preserves all three across the drag. The cell is only
+                // hidden, because a frosted box left hanging at the vacated slot reads as a second
+                // item rather than as an absence.
+                //
+                // Measured on the owner's device mid-drag: a two-app folder whose container held
+                // one icon and one EditCell, with a DragView carrying the other.
+                val held = icon.parent as? ShortcutAndWidgetContainer
+                if (held == null) {
+                    live.add(icon)
+                    cells[icon]?.let {
+                        live.add(it)
+                        it.visibility = View.INVISIBLE
+                    }
+                    return@forEachIndexed
+                }
+                val parent = held
                 val iconLp = icon.layoutParams as? CellLayoutLayoutParams ?: return@forEachIndexed
                 val info = icon.tag as? ItemInfo ?: return@forEachIndexed
                 live.add(icon)
@@ -230,6 +256,8 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                     parent.addView(cell, newCellParams())
                 }
                 live.add(cell)
+                // Back in the container after a drag, if it was ever lifted.
+                if (cell.visibility != View.VISIBLE) cell.visibility = View.VISIBLE
 
                 val lp = cell.layoutParams as CellLayoutLayoutParams
                 if (lp.x != iconLp.x || lp.y != iconLp.y ||
