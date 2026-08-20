@@ -62,6 +62,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import app.lawnchair.areslauncher.AresAllApps;
+
 /**
  * A RecyclerView with custom fast scroll support for the all apps view.
  */
@@ -313,13 +315,56 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
         super.onChildAttachedToWindow(child);
     }
 
+    /**
+     * Fraction of the scroller's height the fast-scroll track spans on the Ares app-list pane
+     * (AresLauncher §13).
+     *
+     * The stock track runs the full side of the screen, which the user asked to shorten: <i>"in the
+     * app list the scroll bar takes the entire side of the screen. can we shrink that down to the
+     * middle 2/3 so that its easier to quickly scroll and it also doesn't overlap with the search
+     * icon."</i> Three things fall out of one change:
+     *
+     * <ul>
+     *   <li>less thumb travel covers the same list, so scrubbing is quicker;
+     *   <li>the thumb's lowest point clears the collapsed search circle in the bottom-right corner,
+     *       which the end of the alphabet used to land on top of;
+     *   <li>the track's top end leaves the notification-shade pull-down zone at the top edge, which
+     *       was claiming the gesture before the launcher saw it ("trying to scroll the app bar with
+     *       the quick handle will keep trigger the notification trey pulldown").
+     * </ul>
+     */
+    private static final float ARES_TRACK_HEIGHT_FRACTION = 2f / 3f;
+
+    /**
+     * True when this is the launcher's own app-list pane rather than the Taskbar's all-apps sheet.
+     *
+     * The all-apps stack is shared between the two, and forcing a value here without gating is
+     * exactly how the Taskbar's sheet was silently collapsed to one column once already. See
+     * {@link AresAllApps}.
+     */
+    private boolean hasAresTrack() {
+        return mScrollbar != null
+                && AresAllApps.isAresAppListPane(ActivityContext.lookupContext(getContext()));
+    }
+
     @Override
     public int getScrollBarTop() {
+        if (hasAresTrack()) {
+            // Centred in the scroller, so the inset is the same at both ends and the track's
+            // midpoint stays on the list's midpoint.
+            return Math.round(mScrollbar.getHeight() * (1f - ARES_TRACK_HEIGHT_FRACTION) / 2f);
+        }
         return getResources().getDimensionPixelOffset(R.dimen.all_apps_header_top_padding);
     }
 
     @Override
     public int getScrollBarMarginBottom() {
+        if (hasAresTrack()) {
+            // Symmetric with the top. This is far larger than the navigation inset it replaces, so
+            // the bottom of the track clears the gesture area by a wide margin rather than sitting
+            // just above it.
+            return getScrollBarTop();
+        }
         return getRootWindowInsets() == null ? 0
                 : getRootWindowInsets().getSystemWindowInsetBottom();
     }
