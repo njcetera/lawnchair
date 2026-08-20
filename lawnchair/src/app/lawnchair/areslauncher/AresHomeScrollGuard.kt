@@ -43,12 +43,36 @@ private const val ARES_PROBE_TAG = "AresTouchProbe"
  *
  * Edge gestures -- quick switch, nav-bar-to-home, overview -- start in the system gesture zone at
  * the very bottom of the screen, outside the grid. Only gestures starting **inside** the grid are
- * declined, so those keep working. The guard is also limited to [LauncherState.NORMAL]: once the
- * app-list pane is open, the home grid is not the surface being touched.
+ * declined, so those keep working.
  *
  * Swipe-up-to-open-drawer is *deliberately* lost on home as a result. That is the decision, not a
  * side effect: vertical scrolls home, horizontal switches panes, matching Windows Phone. The
  * right-edge pane swipe remains the way to the app list. See requirements-alignment.md §4.
+ *
+ * ## Why the FOLDED app-list sheet is declined too (§C2)
+ *
+ * > *"when I do swipe up and get the top of the app list where the recents are, it doesn't stop
+ * > again but it slides me over to the primary home page"*
+ *
+ * The guard used to be limited to [LauncherState.NORMAL], on the reasoning that once the app list
+ * is open the home grid is not the surface being touched. True of the *grid* -- but it left every
+ * wrapped controller free to claim a vertical drag on the list itself, and one of them treats a
+ * downward drag as dismiss-to-home. That is stock's behaviour for a *vertical* all-apps sheet, and
+ * §9 makes ours a **horizontal** pane, so the dismiss is vestigial: it collides with an ordinary
+ * scroll, and at the top of the list an ordinary scroll is exactly what a downward pull is.
+ *
+ * So in [LauncherState.ALL_APPS] a gesture starting over `launcher.appsView` is declined as well,
+ * and the list keeps the whole vertical axis -- a downward pull at the top now stops on the
+ * RecyclerView's own overscroll instead of closing the surface.
+ *
+ * **Dismissal is unaffected**, because it never came through here: it is
+ * [AresPaneSwipeController]'s horizontal gesture (and BACK), and that controller is registered
+ * *unwrapped* precisely because it claims only horizontal drags. Nothing this guard declines can
+ * reach it.
+ *
+ * `launcher.appsView` is read live rather than taken as a constructor provider like the other two:
+ * it is stock's own container, it exists for the whole activity, and adding a fourth parameter to
+ * every construction site would be ceremony around a field this class already has the launcher for.
  */
 class AresHomeScrollGuard(
     private val launcher: Launcher,
@@ -80,9 +104,11 @@ class AresHomeScrollGuard(
      */
     private fun shouldDecline(ev: MotionEvent): Boolean {
         val normal = launcher.isInState(LauncherState.NORMAL)
+        val allApps = launcher.isInState(LauncherState.ALL_APPS)
         val overGrid = normal && startedOver(ev, gridProvider())
         val overPane = normal && !overGrid && startedOver(ev, paneProvider())
-        val decline = overGrid || overPane
+        val overSheet = allApps && startedOver(ev, launcher.appsView)
+        val decline = overGrid || overPane || overSheet
         if (ARES_TOUCH_PROBE) {
             // §11a instrumentation. This is the *other* half of the probe in
             // BaseDragLayer.findControllerToHandleTouch: that one records which controller claimed
@@ -91,7 +117,8 @@ class AresHomeScrollGuard(
             Log.i(
                 ARES_PROBE_TAG,
                 "  guard[${delegate.javaClass.simpleName}] decline=$decline" +
-                    " normalState=$normal overGrid=$overGrid overPane=$overPane",
+                    " normalState=$normal overGrid=$overGrid overPane=$overPane" +
+                    " allAppsState=$allApps overSheet=$overSheet",
             )
         }
         return decline
