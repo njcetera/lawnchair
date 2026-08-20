@@ -130,8 +130,9 @@ object AresHomeDrop {
             // Picker selections (widgets, and legacy ACTION_CREATE_SHORTCUT items) still have to go
             // through Launcher.addPendingItem so binding and the configure activity happen -- the
             // item is not ready to persist yet. That is exactly what addToHomeList wraps.
-            dragged is PendingAddItemInfo -> AresWidgetAdd.addToHomeList(launcher, dragged)
-            converted != null -> addDraggedItem(launcher, converted)
+            dragged is PendingAddItemInfo ->
+                AresWidgetAdd.addToHomeList(launcher, dragged, dropIndex(launcher, d))
+            converted != null -> addDraggedItem(launcher, converted, dropIndex(launcher, d))
             else -> false
         }
         if (!added) {
@@ -141,6 +142,40 @@ object AresHomeDrop {
 
         finishDrop(launcher, d)
         return true
+    }
+
+    /**
+     * The grid position the drop landed on, as an adapter index.
+     *
+     * ## Why this exists, and why it was left out the first time
+     *
+     * `8d1b546a4c` stated the gap plainly rather than hiding it: an item dropped on the grid was
+     * **appended**, not placed where it was released, which misses the user's own description of
+     * the flow — *"so the user can then place it on the home page in the location of their desire"*.
+     * The reason given was that mapping a drop point through a scaled `Workspace` and a page scroll
+     * *"fails silently when wrong, which is the worst way for this project to be wrong"*.
+     *
+     * That was the right call at the time and it was vindicated twice over: building
+     * [AresFolderDrop] hit exactly that failure, in two independent ways, and neither threw. The
+     * two facts it cost are what make this safe to write now, and both are measured rather than
+     * reasoned:
+     *
+     *  - **Not `getVisualCenter()`.** On this launcher it answers ~228px above the finger, because
+     *    `DragPreviewProvider` computes its registration point for a stock icon-above-label cell
+     *    and our app-list rows are Niagara rows.
+     *  - **`DragObject.x`/`y` is already in the drop target's space**, not the DragLayer's —
+     *    `DragController.findDropTarget` maps it before storing it. `Workspace` is the target
+     *    whenever this runs, so the remaining hop is Workspace → list, through the same
+     *    `Utilities.mapCoordInSelfToDescendant` stock's own `mapPointFromDropLayout` uses.
+     *
+     * Both are documented at length on [AresFolderDrop.onExternalDragOver], with the measurements.
+     */
+    private fun dropIndex(launcher: Launcher, d: DropTarget.DragObject): Int {
+        val list = launcher.workspace?.aresHomeList ?: return Int.MAX_VALUE
+        val local = AresFolderDrop.toListSpace(launcher, list, d.x.toFloat(), d.y.toFloat())
+        val index = list.dropIndexAt(local[0], local[1])
+        Log.i(TAG, "drop at list (${local[0].toInt()},${local[1].toInt()}) -> index $index")
+        return index
     }
 
     /**
@@ -178,22 +213,26 @@ object AresHomeDrop {
         )
 
     /**
-     * Persists an item dragged in from the app list or out of a folder, and shows it.
+     * Persists an item dragged in from the app list or out of a folder at [index], and shows it.
      *
-     * ## The new item is APPENDED, not inserted where it was dropped
+     * ## The insert, and why it does not go through `Workspace.addInScreen`
      *
-     * True for both sources, and deliberately the same for both — §17's rule is that the add paths
-     * are one operation and must not drift. It is a real gap against the user's description of the
-     * drag-out flow (*"place it on the home page in the location of their desire"*), and the reason
-     * it is not closed here is that mapping a drop point to a rank means mapping DragLayer
-     * coordinates through a possibly-scaled Workspace and page scroll into the list's own space —
-     * a piece of geometry that fails silently when it is wrong, which is the worst way for this
-     * project to be wrong. It costs little in the hand today because **edit mode is still active**
-     * after the drop (nothing in this path leaves it), so the icon lands on the grid ready to be
-     * dragged straight to where it belongs. Worth closing as its own increment, for both sources.
+     * That method's `CONTAINER_DESKTOP` branch is exactly `getAresAdapter().addItem(info)` — it
+     * discards the view and hands the model item to the adapter, which places it by `rank`. Rank is
+     * the right authority for an item arriving from the *model*, and the wrong one here: a drop
+     * expresses an index, and ranks on this grid are dense after any drag, so an incoming item at
+     * rank *k* ties with the item already there and [AresHomeAdapter.sortsAfter] settles it on
+     * database `id`. For a freshly created row that is arbitrarily large, so the item would land
+     * *after* the tile it was dropped on rather than at it, and not reproducibly.
+     *
+     * So the adapter is asked directly for a positioned insert and then the whole grid is
+     * renumbered. The renumber is what makes the position durable — `rank` is the *entire* stored
+     * position model under masonry — and it is the same call a drag-reorder already ends with, so
+     * a drop and a drag persist through one code path rather than two.
      */
-    private fun addDraggedItem(launcher: Launcher, view: View): Boolean {
+    private fun addDraggedItem(launcher: Launcher, view: View, index: Int): Boolean {
         val info = view.tag as? ItemInfo ?: return false
+        val list = launcher.workspace?.aresHomeList ?: return false
 
         // A legal cell before anything is written: position is pure bookkeeping for us -- order
         // comes from `rank` alone -- but LoaderCursor.checkItemPlacement validates it on every load
@@ -203,9 +242,10 @@ object AresHomeDrop {
         val screenId = AresWidgetAdd.findFreeCell(launcher, info.spanX, info.spanY, cell, info.id)
         if (screenId == AresWidgetAdd.NO_SCREEN) return false
 
-        // Appended, not inserted: a drop is an add, and the grid packs in rank order. Set before
-        // the write so the row is correct on its first pass.
-        info.rank = AresWidgetAdd.nextRank(launcher)
+        val at = index.coerceIn(0, list.aresAdapter.itemCount)
+        // Set before the write so the row is right on its first pass rather than needing a
+        // follow-up. persistOrder below fixes up everything this displaces.
+        info.rank = at
 
         // Fetched at the point of use, never cached: a writer obtained before the first load
         // carries the sentinel mLoadId = -1 and every write through it is silently discarded.
@@ -217,15 +257,8 @@ object AresHomeDrop {
             cell[0],
             cell[1],
         )
-        launcher.workspace.addInScreen(
-            view,
-            Favorites.CONTAINER_DESKTOP,
-            screenId,
-            cell[0],
-            cell[1],
-            info.spanX,
-            info.spanY,
-        )
+        list.aresAdapter.addItemAt(info, at)
+        AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
         return true
     }
 }

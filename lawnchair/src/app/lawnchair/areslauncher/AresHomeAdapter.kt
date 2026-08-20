@@ -303,6 +303,27 @@ class AresHomeAdapter(private val launcher: Launcher) :
         notifyItemInserted(index)
     }
 
+    /**
+     * Inserts [info] at an explicit [index] rather than wherever its `rank` sorts.
+     *
+     * [addItem] is the funnel for items arriving from the *model* — a bind, a restore, an update —
+     * where `rank` is the authority and the visual order must follow it. A **drop** is the other
+     * direction: the index is what the user just expressed with their finger, and `rank` is the
+     * consequence. Sorting by rank here cannot express it, and would not even be deterministic: the
+     * grid's ranks are dense after any drag, so an incoming item at rank *k* ties with the item
+     * already at *k*, and [sortsAfter] then breaks the tie on database `id` — which for a freshly
+     * created row is arbitrarily larger than everything else.
+     *
+     * The caller renumbers afterwards through [AresHomeReorder.persistOrder], which is what makes
+     * the index durable.
+     */
+    fun addItemAt(info: ItemInfo, index: Int) {
+        if (dropDuplicateWidgetRow(info)) return
+        val at = index.coerceIn(0, items.size)
+        items.add(at, info)
+        notifyItemInserted(at)
+    }
+
     /** True when [existing] belongs strictly after [incoming] in the grid's total order. */
     private fun sortsAfter(existing: ItemInfo, incoming: ItemInfo): Boolean =
         existing.rank > incoming.rank ||

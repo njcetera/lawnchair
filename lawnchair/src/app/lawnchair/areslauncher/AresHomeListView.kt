@@ -505,6 +505,67 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     /**
+     * The adapter index an item released at [x],[y] — in this list's own coordinates — should take.
+     *
+     * The grid's whole position model is the ordered sequence (§4: `rank` plus a footprint, no
+     * stored x/y), so "where did they drop it" has exactly one answer shape: an **insertion index**.
+     * Everything after it shifts down and the packer re-derives the pixels.
+     *
+     * Three cases, in the order they are asked:
+     *
+     *  1. **On a tile** — take that tile's index, pushing it and everything after it down. This is
+     *     the Windows Phone rule the packing model already follows: *"reorg allows items to be
+     *     added to the end or throughout the existing grid but to make room it would push things
+     *     down"*.
+     *  2. **In the empty part of a row** — insert after the last tile whose right edge is left of
+     *     the point, so dropping into the gap at the end of a half-filled row puts the item there
+     *     rather than at the end of the grid. Under masonry that gap is common: a tall widget
+     *     leaves one beside it on every row it spans.
+     *  3. **Off the ends** — above everything is index 0, below everything is an append.
+     *
+     * Deliberately **not** "nearest tile by distance". Nearest is unstable exactly where precision
+     * matters — at a boundary it flips between two answers for a one-pixel move — and it gives no
+     * way to express "before the first item", which case 3 needs.
+     */
+    fun dropIndexAt(x: Float, y: Float): Int {
+        dropCandidateUnder(x, y, ItemInfo.NO_ID)?.let { direct ->
+            val position = getChildAdapterPosition(direct)
+            if (position != NO_POSITION) return position
+        }
+
+        var afterIndex = NO_POSITION
+        var afterRight = Int.MIN_VALUE
+        var rowFirstIndex = NO_POSITION
+        var rowFirstLeft = Int.MAX_VALUE
+        var anyAbove = false
+        var anyBelow = false
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val position = getChildAdapterPosition(child)
+            if (position == NO_POSITION) continue
+            if (child.bottom <= y) anyAbove = true
+            if (child.top > y) anyBelow = true
+            // The row band is by vertical overlap, not by row index: a 2-cell-tall widget belongs
+            // to every band it crosses, which is what makes case 2 work beside one.
+            if (y < child.top || y >= child.bottom) continue
+            if (child.right <= x && child.right > afterRight) {
+                afterRight = child.right
+                afterIndex = position
+            }
+            if (child.left < rowFirstLeft) {
+                rowFirstLeft = child.left
+                rowFirstIndex = position
+            }
+        }
+
+        if (afterIndex != NO_POSITION) return afterIndex + 1
+        if (rowFirstIndex != NO_POSITION) return rowFirstIndex
+        if (anyBelow && !anyAbove) return 0
+        return aresAdapter.itemCount
+    }
+
+    /**
      * The ring marking the tile a dwelling drag would drop into ([AresFolderDrop]).
      *
      * Added once and left in place, like [editDots]: it draws nothing while its progress is zero,

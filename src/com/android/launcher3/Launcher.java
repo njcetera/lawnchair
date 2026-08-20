@@ -1558,6 +1558,14 @@ public class Launcher extends StatefulActivity<LauncherState>
             mWorkspace.addInScreen(hostView, launcherInfo);
         }
 
+        // AresLauncher §17: a widget DRAGGED out of the picker lands where it was released, like an
+        // icon does. This is the first point at which the row exists, because the add is
+        // asynchronous -- bind, and possibly a configure activity, run between the drop and here.
+        // A no-op for tap-to-add, and for any non-Ares surface.
+        if (AresWidgetAdd.isAresHome(this)) {
+            AresWidgetAdd.placeNewItem(this, launcherInfo);
+        }
+
         // Show the widget resize frame.
         if (hostView instanceof LauncherAppWidgetHostView) {
             // AresLauncher §7: not on the home list. AppWidgetResizeFrame.setupForWidget() casts

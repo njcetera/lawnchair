@@ -56,6 +56,21 @@ object AresWidgetAdd {
     /** No free region anywhere; caller should abandon the add. */
     const val NO_SCREEN = -1
 
+    /** [addToHomeList] index meaning "put it at the end", which is what a tap-to-add wants. */
+    const val APPEND = Int.MAX_VALUE
+
+    /**
+     * Where a widget currently being added should land, or [APPEND].
+     *
+     * State, reluctantly, because the widget add is the one add path that is **not synchronous**:
+     * `Launcher.addPendingItem` may allocate an id, bind the provider and run a configure activity
+     * before `completeAddAppWidget` finally creates the `LauncherAppWidgetInfo`. The drop point is
+     * known at the start of that and the item does not exist until the end, so something has to
+     * carry it across. Cleared the moment it is consumed, and overwritten by any later add, so the
+     * worst a leak can do is put one widget in the wrong place.
+     */
+    private var pendingIndex = APPEND
+
     /**
      * True when the home list owns desktop items, i.e. this launcher is the Ares home surface.
      *
@@ -195,14 +210,21 @@ object AresWidgetAdd {
      * *caller* that computes the cell (`Workspace.onDropExternal`, and the accessibility delegate
      * above) is. Supplying our own cell is therefore the entire adaptation needed.
      *
+     * [index] is the grid position a **drag** released on; [APPEND] for the sheet's tap-to-add,
+     * which has no drop point to speak of. It is remembered rather than applied here because the
+     * item being placed does not exist yet — see [pendingIndex] — and is consumed by [placeNewItem]
+     * once `completeAddAppWidget` has built the real row.
+     *
      * @return false if there was nowhere to put it, in which case nothing was written.
      */
     @JvmStatic
-    fun addToHomeList(launcher: Launcher, info: PendingAddItemInfo): Boolean {
+    @JvmOverloads
+    fun addToHomeList(launcher: Launcher, info: PendingAddItemInfo, index: Int = APPEND): Boolean {
         val cell = IntArray(2)
         val screenId = findFreeCell(launcher, info.spanX, info.spanY, cell)
         if (screenId == NO_SCREEN) return false
 
+        pendingIndex = index
         launcher.addPendingItem(
             info,
             Favorites.CONTAINER_DESKTOP,
@@ -212,5 +234,36 @@ object AresWidgetAdd {
             info.spanY,
         )
         return true
+    }
+
+    /**
+     * Moves a just-added widget to the position its drag was released on, if there was one.
+     *
+     * Called from `Launcher.completeAddAppWidget` after `addInScreen`, which is the first moment the
+     * row exists in the adapter. The move-then-renumber shape is deliberate: `addInScreen` places by
+     * `rank`, and a rank that ties with an existing one is settled on database `id` — arbitrary for
+     * a row created seconds ago — so asking for the index directly is the only deterministic way to
+     * express it. [AresHomeReorder.persistOrder] then makes it durable, exactly as it does for a
+     * drag-reorder and for [AresHomeDrop]'s icon drops: one persistence path for all of them, which
+     * is §17's rule.
+     *
+     * A no-op for a tap-to-add, which leaves [pendingIndex] at [APPEND] and has already landed at
+     * the end.
+     */
+    @JvmStatic
+    fun placeNewItem(launcher: Launcher, info: ItemInfo) {
+        val index = pendingIndex
+        pendingIndex = APPEND
+        if (index == APPEND) return
+        val list = launcher.workspace?.aresHomeList ?: return
+        val from = list.aresAdapter.indexOf(info)
+        if (from < 0) {
+            Log.w(TAG, "widget ${info.id} is not in the grid; leaving it where it landed")
+            return
+        }
+        val to = index.coerceIn(0, list.aresAdapter.itemCount - 1)
+        list.aresAdapter.moveItem(from, to)
+        AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
+        Log.i(TAG, "dropped widget ${info.id} moved from index $from to $to")
     }
 }
