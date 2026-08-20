@@ -232,7 +232,9 @@ object AresHomeDrop {
      */
     private fun addDraggedItem(launcher: Launcher, view: View, index: Int): Boolean {
         val info = view.tag as? ItemInfo ?: return false
-        val list = launcher.workspace?.aresHomeList ?: return false
+        // Created rather than fetched: on an empty home screen no desktop item has bound yet, so
+        // the list does not exist. That is exactly the case this drop is about to end.
+        val list = launcher.workspace?.orCreateAresHomeListForDrop ?: return false
 
         // A legal cell before anything is written: position is pure bookkeeping for us -- order
         // comes from `rank` alone -- but LoaderCursor.checkItemPlacement validates it on every load

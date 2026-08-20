@@ -64,6 +64,8 @@ import com.android.launcher3.widget.LauncherAppWidgetHostView;
 import com.android.launcher3.widget.PendingAddWidgetInfo;
 import com.android.launcher3.widget.util.WidgetSizes;
 
+import app.lawnchair.areslauncher.AresWidgetAdd;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -134,7 +136,32 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
 
         // Do not add move actions for keyboard request as this uses virtual nodes.
         if (itemSupportsAccessibleDrag(item)) {
-            out.add(mActions.get(MOVE));
+            // AresLauncher: MOVE is a LIVE CRASH for anything on the home grid, and 7e354d5981
+            // gated only RESIZE, so the earlier sweep cleared this wrongly.
+            //
+            // performAction(MOVE) -> beginAccessibleDrag -> ItemLongClickListener.beginDrag, which
+            // builds a CellInfo directly for a container < 0 rather than going through
+            // Workspace.getCellInfoForView (which correctly answers null for our rows). Workspace
+            // .onDragStart then casts mDragInfo.cell.getParent().getParent() to CellLayout. Under
+            // Strategy D that chain is item -> holder FrameLayout -> AresHomeListView, so it throws
+            // ClassCastException -- for icons, widgets, folders and app pairs alike, since
+            // itemSupportsAccessibleDrag admits all of them.
+            //
+            // Reachable without any accessibility service by the keyboard's M shortcut, and by
+            // Switch Access, Voice Access or any client that PERFORMS actions rather than only
+            // reading the tree.
+            //
+            // The hotseat is deliberately not gated: it is still a real CellLayout, so the cast
+            // succeeds and the action works. Folder-contained items (container >= 0) are not gated
+            // either -- their drag stays inside the folder's own CellLayout.
+            //
+            // Offering no MOVE is the honest answer until an Ares-side accessible drag exists;
+            // dragging by touch is unaffected.
+            boolean aresHomeItem = item.container == LauncherSettings.Favorites.CONTAINER_DESKTOP
+                    && AresWidgetAdd.isAresHome(mContext);
+            if (!aresHomeItem) {
+                out.add(mActions.get(MOVE));
+            }
 
             if (item.container >= 0) {
                 out.add(mActions.get(MOVE_TO_WORKSPACE));

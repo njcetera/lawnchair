@@ -1277,13 +1277,48 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
-     * AresLauncher: true once the home list exists, i.e. this Workspace owns desktop items.
+     * AresLauncher: true when this Workspace is the Ares home surface, i.e. it owns desktop items.
      *
-     * <p>Used by {@link app.lawnchair.areslauncher.AresWidgetAdd} to scope the widget-add path,
-     * so the Taskbar's widget sheet (hosted by a non-Launcher context) keeps stock behaviour.
+     * <p>Used by {@link app.lawnchair.areslauncher.AresWidgetAdd} to scope the Ares add/drop paths,
+     * so the Taskbar's widget sheet (hosted by a non-Launcher context, whose caller passes null)
+     * keeps stock behaviour.
+     *
+     * <p><b>This asks about the SURFACE, not about the view.</b> It used to return
+     * {@code mAresHomeList != null}, and that was a live crash on an empty home screen. The list is
+     * created lazily, only when a {@code CONTAINER_DESKTOP} item first binds — so with zero desktop
+     * items <em>every</em> Ares gate in the tree answered false and handed the work back to the
+     * grid-native stock path. {@link app.lawnchair.areslauncher.AresHomeDrop#handleExternalDrop}
+     * bails on exactly this check, so dragging an app from the app list onto an empty home reached
+     * {@code Workspace.onDropExternal} and reproduced the §15 crash:
+     *
+     * <pre>
+     * NullPointerException: 'void ShortcutAndWidgetContainer.measureChild(View)' on a null object
+     *     at DragLayer.animateViewIntoPosition(DragLayer.java:255)
+     *     at Workspace.onDropExternal(Workspace.java:3429)
+     * </pre>
+     *
+     * An empty home is reachable and sticky: the × badge removes any item, emptying a folder
+     * removes the folder, and the state only has to survive one process restart.
+     *
+     * <p>Under Strategy D {@link #addInScreen} redirects <em>every</em> {@code CONTAINER_DESKTOP}
+     * item into the Ares list unconditionally, so a Launcher Workspace is the Ares home surface by
+     * construction whether or not anything has bound yet. Callers that need the view itself must
+     * use {@link #getOrCreateAresHomeListForDrop()}, not {@link #getAresHomeList()}, which is still
+     * null until the first bind.
      */
     public boolean hasAresHomeList() {
-        return mAresHomeList != null;
+        return true;
+    }
+
+    /**
+     * AresLauncher: the home grid, creating and attaching it if no desktop item has bound yet.
+     *
+     * <p>The counterpart to {@link #hasAresHomeList()} returning true before the view exists. A drop
+     * onto an empty home is the first thing that needs the list, exactly as a bind is, and it needs
+     * it built the same way — see {@link #getOrCreateAresHomeList()}.
+     */
+    public AresHomeListView getOrCreateAresHomeListForDrop() {
+        return getOrCreateAresHomeList();
     }
 
     /**
