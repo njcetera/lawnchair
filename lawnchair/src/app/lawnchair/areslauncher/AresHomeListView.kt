@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
@@ -80,6 +81,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         aresAdapter.gridColumns = { masonry.columns }
         aresAdapter.resizeHost = { info -> cycleWidgetSize(info) }
         aresAdapter.removeHost = { info -> removeFromHome(info) }
+        aresAdapter.boundHost = { info, container -> onRowBound(info, container) }
         aresAdapter.menuHost = { info -> showItemMenu(info) }
     }
 
@@ -458,6 +460,83 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // cancels the pending animation of the same property rather than running beside it, so the
         // two can never both be driving the scale.
         child.animate().scaleX(scale).scaleY(scale).setDuration(AresEditMotion.PICKUP_MS).start()
+    }
+
+    /**
+     * Plays "a folder was just made here" on the tile bound to [info] (§C3).
+     *
+     * > *"when holding an app over another app to generate a folder, there is no folder creation
+     * > animation to indicate folder creation"*
+     *
+     * Dropping into an **existing** folder already animates — `Folder.addFolderContent` refreshes
+     * the icon's preview with `animate = true`, so the new app visibly drops into the stack.
+     * Creation had nothing: the two tiles vanished and a folder appeared in one frame, which reads
+     * as a glitch rather than as an outcome. The two are the same event to the user and should read
+     * that way.
+     *
+     * ## Why a pop on the tile rather than stock's create animation
+     *
+     * `FolderIcon.performCreateAnimation` is the stock equivalent and it is unreachable here: it
+     * wants the source and destination *views* plus a rect in the drag layer's space, and it is
+     * driven from `CellLayout`'s drop path, which Strategy D does not use. Our creation is a model
+     * write followed by an adapter insert, and the honest signal for that is the new tile arriving
+     * with weight — scaled up from small with an overshoot, in the slot the user was aiming at.
+     *
+     * ## It waits for the BIND, it does not poll for it
+     *
+     * The insert only notifies the adapter; the holder is built later, so asking for it immediately
+     * answers null. Two other hooks were tried on device first and both were wrong:
+     *
+     *  - A **posted retry** did not find the holder for **2.4 seconds** on emulator-5554, with the
+     *    insert's own change animation in flight — by which time an "it just happened" cue is
+     *    describing something that did not just happen.
+     *  - **`onChildAttachedToWindow` never fired at all.** Creating a folder removes two rows and
+     *    inserts one in the same pass, so RecyclerView rebinds a holder that is *already attached*
+     *    rather than attaching a new one. Measured: the pop was armed and no attach ever came.
+     *
+     * `onBindViewHolder` is the moment that does happen, every time, for an inserted item. The pop
+     * itself is posted from there rather than run inline, because `onChildAttachedToWindow` writes
+     * the resting scale afterwards and would otherwise wipe the pop's starting size.
+     * [CREATED_PENDING_MS] drops the arming if no bind arrives at all.
+     */
+    fun playFolderCreated(info: ItemInfo) {
+        if (!ValueAnimator.areAnimatorsEnabled()) return
+        val position = aresAdapter.indexOf(info)
+        val child = if (position >= 0) findViewHolderForAdapterPosition(position)?.itemView else null
+        if (child != null) {
+            popCreated(child, info.id)
+            return
+        }
+        pendingCreatedId = info.id
+        removeCallbacks(clearPendingCreated)
+        postDelayed(clearPendingCreated, CREATED_PENDING_MS)
+    }
+
+    /** The folder whose arrival pop is waiting for its row to bind, or [ItemInfo.NO_ID]. */
+    private var pendingCreatedId = ItemInfo.NO_ID
+
+    private val clearPendingCreated = Runnable { pendingCreatedId = ItemInfo.NO_ID }
+
+    /** Fires the armed arrival pop when its row binds. Wired to the adapter in `init`. */
+    private fun onRowBound(info: ItemInfo, container: View) {
+        if (pendingCreatedId == ItemInfo.NO_ID || info.id != pendingCreatedId) return
+        pendingCreatedId = ItemInfo.NO_ID
+        removeCallbacks(clearPendingCreated)
+        val id = info.id
+        container.post { popCreated(container, id) }
+    }
+
+    private fun popCreated(child: View, id: Int) {
+        val rest = tileScale(child)
+        child.scaleX = rest * FOLDER_CREATED_FROM
+        child.scaleY = rest * FOLDER_CREATED_FROM
+        child.alpha = 0f
+        child.animate()
+            .scaleX(rest).scaleY(rest).alpha(1f)
+            .setInterpolator(OvershootInterpolator(FOLDER_CREATED_TENSION))
+            .setDuration(FOLDER_CREATED_MS)
+            .start()
+        Log.d(TAG, "folder $id created; playing the arrival pop")
     }
 
     /** Running fade for the grid dots, cancelled before a new one so the two cannot fight. */
@@ -1380,5 +1459,34 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
          * expected to be tuned on the user's device.
          */
         const val PICKUP_HOLD_MS = 200L
+
+        /**
+         * The size a newly created folder's tile grows *from*, as a fraction of its resting scale.
+         *
+         * Small enough that the growth is unmistakable, not so small that the icon is a dot for
+         * half the animation. Relative, not absolute, so it reads the same in edit mode (where
+         * every tile rests at 0.92) as outside it.
+         */
+        const val FOLDER_CREATED_FROM = 0.55f
+
+        /** Overshoot on the arrival pop. Enough to feel like a landing, short of a bounce. */
+        const val FOLDER_CREATED_TENSION = 2.0f
+
+        /**
+         * How long the arrival pop runs.
+         *
+         * Longer than the edit-mode scale (120ms), because this is announcing that something
+         * *happened* rather than that a mode changed, and it has to be seen. Still well under the
+         * quarter second where a launcher starts to feel slow.
+         */
+        const val FOLDER_CREATED_MS = 220L
+
+        /**
+         * How long the arrival pop stays armed waiting for its tile to attach.
+         *
+         * Generous against a slow bind, short enough that a folder created off-screen does not pop
+         * when the user eventually scrolls to it and wonders what just changed.
+         */
+        const val CREATED_PENDING_MS = 1000L
     }
 }

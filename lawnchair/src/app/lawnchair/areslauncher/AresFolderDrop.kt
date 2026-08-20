@@ -649,6 +649,12 @@ object AresFolderDrop {
             adapter.removeItems { it.id == targetInfo.id || it.id == item.id }
             adapter.addItemAt(folderInfo, at)
             AresHomeReorder.persistOrder(launcher, adapter.snapshot())
+            // The visible answer to "what just happened". Dropping into an EXISTING folder already
+            // animates -- addFolderContent refreshes the icon's preview with animate = true -- and
+            // creation had nothing at all, so the two halves of one dwell read as different events:
+            // "when holding an app over another app to generate a folder, there is no folder
+            // creation animation to indicate folder creation".
+            list.playFolderCreated(folderInfo)
         }
         return true
     }

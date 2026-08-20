@@ -631,7 +631,22 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // no badge at all and could not be removed without leaving and re-entering the mode.
         // syncAffordancesFor decides what this particular item is entitled to.
         syncAffordancesFor(holder.container, info)
+
+        // Last, so the host sees a fully-built row. This is the one deterministic moment a
+        // newly-inserted item exists: `onChildAttachedToWindow` is not, because RecyclerView
+        // happily rebinds an already-attached holder when an insert and a removal land in the same
+        // pass -- which is exactly what creating a folder from two tiles does.
+        boundHost?.invoke(info, holder.container)
     }
+
+    /**
+     * Called after every row is bound, so the host can play one-shot arrival animations.
+     *
+     * Host-owned for the same reason as [resizeHost] and [removeHost]: the adapter knows *what*
+     * was bound, and only [AresHomeListView] knows what the mode's resting scale is and which
+     * animators are already running on the container.
+     */
+    var boundHost: ((ItemInfo, FrameLayout) -> Unit)? = null
 
     /**
      * Supplies the grid's column count, for clamping the sizes a widget may be offered.
