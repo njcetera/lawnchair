@@ -16,6 +16,7 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.folder.FolderIcon
+import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import com.android.launcher3.widget.LauncherAppWidgetHostView
@@ -477,6 +478,71 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     /** The folder icon [child] (a holder container) hosts, or null when it hosts anything else. */
     private fun folderIconOf(child: View?): FolderIcon? =
         (child as? ViewGroup)?.getChildAt(0) as? FolderIcon
+
+    /**
+     * Removes every item that matches, **including items inside home folders** (S1/R6).
+     *
+     * `Workspace.removeItemsByMatcher` has always had a `FolderIcon` branch that does this — it
+     * just sits inside the walk over `getWorkspaceAndHotseatCellLayouts()`, and under Strategy D no
+     * folder icon is ever a CellLayout child, so it has never run for one of ours. The Ares
+     * carve-out beside it called straight through to [AresHomeAdapter.removeItems], which matches
+     * **top-level rows only** and never looks at `FolderInfo.getContents()`.
+     *
+     * What that leaves behind, on every uninstall of an app that lives in a home folder — and
+     * equally on `PackageUpdatedTask`, `SessionFailureTask`, `ShortcutsChangedTask` and
+     * `UserLockStateChangedTask`, which all funnel here: the row is gone from the database and the
+     * app is gone from the app list, but the folder still draws the icon in its preview and still
+     * lists it when opened. Tapping it launches nothing. The below-two auto-collapse counts the
+     * ghost, so a folder that is really down to one item never collapses.
+     *
+     * **It heals on a full reload**, which is exactly why it is easy to "fail to reproduce": any
+     * attempt that starts with a restart re-reads the folder from the database and looks fine.
+     *
+     * The fix is to make stock's own branch reachable rather than to reimplement it:
+     * [com.android.launcher3.folder.Folder.removeFolderContent] takes the item out of the
+     * `FolderInfo`, notifies the model, drops the view, rearranges, refreshes the icon preview and
+     * carries the below-two collapse. That is the identical call stock makes one branch away.
+     *
+     * A folder whose row is **recycled off-screen** has no inflated `FolderIcon` and therefore no
+     * `Folder` to call, so its model is corrected directly. The preview is rebuilt from
+     * `getContents()` when the row next binds, so nothing is stale on screen; what is given up in
+     * that case is only the immediate collapse, which the next reload performs.
+     */
+    fun removeItems(matcher: java.util.function.Predicate<ItemInfo>): Boolean {
+        // Top-level rows first, so the folder pass below reads settled adapter positions.
+        var removed = aresAdapter.removeItems(matcher)
+
+        // Collected before acting: removeFolderContent can collapse a folder, which removes its row
+        // and adds the survivor, so mutating while walking positions would skip or double-visit.
+        val work = mutableListOf<Pair<FolderInfo, Array<ItemInfo>>>()
+        for (i in 0 until aresAdapter.itemCount) {
+            val info = aresAdapter.itemAt(i) as? FolderInfo ?: continue
+            val matches = info.getContents().filter { matcher.test(it) }
+            if (matches.isNotEmpty()) work += info to matches.toTypedArray()
+        }
+
+        for ((info, matches) in work) {
+            removed = true
+            val position = aresAdapter.indexOf(info)
+            val holder = if (position >= 0) findViewHolderForAdapterPosition(position) else null
+            val folder = folderIconOf(holder?.itemView)?.folder
+            if (folder != null) {
+                // animate=false: this is a model-driven removal, not a gesture, and stock passes
+                // false on the branch this mirrors.
+                folder.removeFolderContent(false, *matches)
+                Log.i(TAG, "removed ${matches.size} item(s) from folder ${info.id}")
+            } else {
+                info.getContents().removeAll(matches.toSet())
+                launcher.modelWriter.notifyItemModified(info)
+                Log.i(
+                    TAG,
+                    "folder ${info.id} is not attached; corrected its model only, " +
+                        "${matches.size} item(s)",
+                )
+            }
+        }
+        return removed
+    }
 
     /**
      * The tile at [x],[y] that a drag could be dropped **into**, ignoring the one being dragged.

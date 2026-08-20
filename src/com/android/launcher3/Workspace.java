@@ -4298,8 +4298,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // appended a duplicate row (observed: Gmail bound once at cold boot, then again via
         // bindUpdatedWorkspaceItems, 7 rendered rows vs 6 in the database), and uninstalled apps
         // left stale rows behind.
+        //
+        // S1/R6: this now goes through the LIST rather than straight to its adapter, because the
+        // adapter matches TOP-LEVEL ROWS ONLY. The FolderIcon branch below -- which takes an
+        // uninstalled app out of a folder it lives in -- sits inside the CellLayout walk, and no
+        // Ares folder icon is ever a CellLayout child, so it has never run for one of ours.
+        // AresHomeListView.removeItems descends into FolderInfo.getContents() and calls the same
+        // Folder.removeFolderContent this method calls one branch down.
         if (mAresHomeList != null) {
-            mAresHomeList.getAresAdapter().removeItems(matcher);
+            mAresHomeList.removeItems(matcher);
         }
         for (CellLayout layout : getWorkspaceAndHotseatCellLayouts()) {
             ShortcutAndWidgetContainer container = layout.getShortcutsAndWidgets();
