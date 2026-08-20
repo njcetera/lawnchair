@@ -89,6 +89,22 @@ object AresFolderEdit {
         session = null
     }
 
+    /**
+     * True when [x],[y] — in [icon]'s own coordinate space — fall on that icon's × badge.
+     *
+     * The badge lives in a sibling cell laid out over the icon with identical bounds, so a point in
+     * the icon's space is already in the cell's space and no transform mapping is needed. (The home
+     * grid's equivalent does need it: there the badge rides on a holder container that edit mode
+     * scales. See `AresHomeListView.toChildLocal`.)
+     *
+     * Used by [AresFolderDrag.DragStarter] to leave a gesture that begins on the badge alone — it
+     * is a tap on a control, not a drag handle.
+     */
+    fun isPointOnBadgeFor(folder: Folder, icon: View, x: Float, y: Float): Boolean {
+        val cell = session?.takeIf { it.folder === folder }?.cellFor(icon) ?: return false
+        return AresRemoveBadge.isPointOnBadge(cell, x, y)
+    }
+
     private class Session(
         private val launcher: Launcher,
         val folder: Folder,
@@ -99,6 +115,17 @@ object AresFolderEdit {
 
         /** Running floats, keyed by the view they move — icons and badge cells alike. */
         private val wiggles = mutableMapOf<View, ValueAnimator>()
+
+        /**
+         * Turns a plain touch-and-drag on any of this folder's icons into a folder drag.
+         *
+         * One instance for the session rather than one per icon: it holds only per-gesture state,
+         * and a folder can only be dragged from one finger at a time.
+         */
+        private val dragStarter = AresFolderDrag.DragStarter(folder)
+
+        /** The badge cell shadowing [icon], for hit-testing. */
+        fun cellFor(icon: View): View? = cells[icon]
 
         /**
          * The folder is usually still closed at this point, so the pre-draw listener cannot be
@@ -114,6 +141,11 @@ object AresFolderEdit {
         fun stop() {
             folder.removeOnAttachStateChangeListener(this)
             folder.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
+            // Icons are pooled and reused by FolderPagedView's view cache, so a listener left
+            // behind would keep turning drags into folder drags in a folder that is not editing.
+            for (icon in cells.keys) {
+                icon.setOnTouchListener(null)
+            }
             for ((view, animator) in wiggles) {
                 AresEditWiggle.stop(view, animator)
             }
@@ -174,6 +206,11 @@ object AresFolderEdit {
                     cell.requestLayout()
                 }
 
+                // Re-asserted every pass for the same reason the badges are: arrangeChildren wipes
+                // and re-adds the icons, and a recycled BubbleTextView comes back without it.
+                // setOnTouchListener is idempotent for a listener already installed.
+                icon.setOnTouchListener(dragStarter)
+
                 // Icon and badge share a rect and a phase, so the × stays pinned to its corner
                 // instead of drifting across a rotating icon.
                 startWiggle(icon, index)
@@ -185,7 +222,12 @@ object AresFolderEdit {
             val gone = wiggles.keys.filterNot { it in live } + cells.keys.filterNot { it in live }
             for (view in gone.distinct()) {
                 wiggles.remove(view)?.let { AresEditWiggle.stop(view, it) }
-                cells.remove(view)?.let { cell -> (cell.parent as? ViewGroup)?.removeView(cell) }
+                cells.remove(view)?.let { cell ->
+                    (cell.parent as? ViewGroup)?.removeView(cell)
+                    // The icon this cell shadowed has left the folder; take its drag starter with
+                    // it, for the same reason the wiggle is stopped -- the view is pooled.
+                    view.setOnTouchListener(null)
+                }
             }
         }
 

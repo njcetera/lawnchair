@@ -2353,7 +2353,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
         if (child instanceof BubbleTextView) {
             BubbleTextView btv = (BubbleTextView) child;
-            if (!dragOptions.isAccessibleDrag) {
+            // AresLauncher: aresSuppressLongPressPopup is set only by drags this launcher starts
+            // deliberately -- today, a touch-and-drag inside an open folder in edit mode. The user
+            // has already committed to moving the icon, so a menu is wrong; and the popup's
+            // PreDragCondition would put DragController into PRE-drag, where no drop can resolve.
+            // See DragOptions#aresSuppressLongPressPopup.
+            if (!dragOptions.isAccessibleDrag && !dragOptions.aresSuppressLongPressPopup) {
                 dragOptions.preDragCondition = btv.startLongPressAction();
             }
             if (btv.isDisplaySearchResult()) {

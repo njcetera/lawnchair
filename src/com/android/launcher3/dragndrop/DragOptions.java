@@ -41,6 +41,22 @@ public class DragOptions {
     public PreDragCondition preDragCondition = null;
 
     /**
+     * AresLauncher: suppress the long-press popup {@code Workspace.beginDragShared} would otherwise
+     * raise, and with it the pre-drag it installs.
+     *
+     * <p>Set only by drags this launcher starts itself, where the user has already decided to move
+     * something and a menu would be both wrong and in the way — a plain touch-and-drag inside an
+     * open folder while edit mode is on (see {@code AresFolderDrag}). It matters for more than the
+     * menu: {@code startLongPressAction()} returns the popup's {@code PreDragCondition}, and a
+     * non-null one puts {@code DragController} into PRE-drag, where {@code checkTouchMove} refuses
+     * to look for a drop target and {@code drop()}'s {@code !mIsInPreDrag} gate never opens. A drag
+     * that begins from an explicit gesture has no threshold left to clear.
+     *
+     * <p>Default false, so every stock caller is unaffected.
+     */
+    public boolean aresSuppressLongPressPopup = false;
+
+    /**
      * A drag scale that scales the original drag view size when the preDragCondition is met (or
      * is ignored if preDragEndScale is 0).
      */

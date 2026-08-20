@@ -78,6 +78,7 @@ import com.android.launcher3.util.Executors
 import com.android.launcher3.util.RunnableList
 import com.android.launcher3.util.SystemUiController.UI_STATE_BASE_WINDOW
 import com.android.launcher3.util.Themes
+import com.android.launcher3.dragndrop.DragController
 import com.android.launcher3.util.TouchController
 import com.android.launcher3.views.ActivityContext
 import com.android.launcher3.views.OptionsPopupView
@@ -348,13 +349,33 @@ class LawnchairLauncher : QuickstepLauncher() {
         // folded container's sheet in over the persistent pane.
         val gridProvider = { workspace?.aresHomeList }
         val paneProvider = { workspace?.aresAppListPane }
+        // The DragController is deliberately NOT wrapped, and that exclusion is load-bearing.
+        //
+        // It is the one stock controller that never *competes* for a gesture: its
+        // onControllerInterceptTouchEvent returns `mDragDriver != null && ...`, so it claims only
+        // while a drag it started is already in flight. Declining that is never right -- it muzzles
+        // the drag rather than standing aside for the grid.
+        //
+        // Wrapped, it broke every DragController drag that began inside the home grid's bounds
+        // while the launcher was in NORMAL: the guard latches its answer at ACTION_DOWN, and an
+        // open folder is drawn *over* the grid, so a drag started inside a folder was declined for
+        // its whole life. No MOVE reached handleMoveEvent, so no drop target was ever found and
+        // drop() never ran. It also cost DragController its ACTION_DOWN, which is where
+        // LauncherDragController reads mMotionDown for the drag view's registration point.
+        //
+        // Nothing is given up. During a home-grid reorder (ItemTouchHelper) no DragController drag
+        // exists, so the unwrapped controller returns false exactly as the wrapped one did.
         val stock = super.createTouchControllers().map { controller ->
-            app.lawnchair.areslauncher.AresHomeScrollGuard(
-                this,
-                controller,
-                gridProvider,
-                paneProvider,
-            ) as TouchController
+            if (controller is DragController<*>) {
+                controller
+            } else {
+                app.lawnchair.areslauncher.AresHomeScrollGuard(
+                    this,
+                    controller,
+                    gridProvider,
+                    paneProvider,
+                )
+            } as TouchController
         }.toTypedArray()
 
         return arrayOf<TouchController>(paneSwipeController, verticalSwipeController) + stock

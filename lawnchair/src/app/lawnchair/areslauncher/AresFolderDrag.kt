@@ -1,9 +1,13 @@
 package app.lawnchair.areslauncher
 
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
+import com.android.launcher3.dragndrop.DragOptions
 import com.android.launcher3.folder.Folder
+import kotlin.math.hypot
 
 /**
  * What a long-press on an app **inside an open folder** does (§18).
@@ -72,5 +76,81 @@ object AresFolderDrag {
         // Consumed either way. Falling through would arm the drag this whole object exists to
         // stop, and would raise the popup a second time on the editing branch.
         return true
+    }
+
+    /**
+     * Starts a folder drag from a **plain touch-and-drag**, once the finger passes the touch slop.
+     *
+     * ## Why a touch listener rather than stock's press-then-drag
+     *
+     * The user's rule for edit mode, given for the home grid and applied here because the two are
+     * one mode: *"while wiggling, I should [not] have to hold to edit before I can move an icon,
+     * since it's already in edit mode I should be able to quickly drag to move and place."* That is
+     * the same reason [AresHomeReorder.Callback.isLongPressDragEnabled] is false on the grid.
+     *
+     * Installed by [AresFolderEdit] for the life of an editing session, so outside edit mode a
+     * folder behaves exactly as before.
+     *
+     * ## The two things it has to get right
+     *
+     * **Winning the gesture from `FolderPagedView`.** It is a `PagedView`, and its
+     * `determineScrollingStart` claims any horizontal move past `getScaledTouchSlop()` — the same
+     * threshold this uses, so a sideways drag is a race. `requestDisallowInterceptTouchEvent(true)`
+     * at DOWN settles it. That flag is cleared again the moment the drag starts, because it
+     * suppresses `onInterceptTouchEvent` all the way up the tree — including the `DragLayer`'s,
+     * which is how `DragController` takes over the gesture it has just been handed. It is safe to
+     * hold it until then: nothing above needs to intercept while no drag exists, and
+     * `ViewGroup.dispatchTouchEvent` clears the flag at every ACTION_DOWN anyway, *before*
+     * `onInterceptTouchEvent` runs, so `DragController` still sees the DOWN it reads `mMotionDown`
+     * from.
+     *
+     * **Not stealing the × badge's tap.** The badge is a 48dp target on a ~83dp cell, so it covers
+     * a large share of the icon; a gesture that starts on it is a tap on a control, never a drag
+     * handle. Same carve-out the grid makes for the resize chevron.
+     */
+    class DragStarter(private val folder: Folder) : View.OnTouchListener {
+
+        private var downX = 0f
+        private var downY = 0f
+        private var startedOnBadge = false
+        private var dragging = false
+
+        override fun onTouch(v: View, e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.x
+                    downY = e.y
+                    dragging = false
+                    // The badge is a sibling cell drawn over the icon, so its bounds are in the
+                    // icon's coordinate space already -- no transform mapping needed, unlike the
+                    // grid, whose tiles carry edit mode's scale.
+                    startedOnBadge = AresFolderEdit.isPointOnBadgeFor(folder, v, e.x, e.y)
+                    if (!startedOnBadge) {
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (dragging || startedOnBadge) return false
+                    val slop = ViewConfiguration.get(v.context).scaledTouchSlop
+                    if (hypot(e.x - downX, e.y - downY) <= slop) return false
+                    dragging = true
+                    // Released before starting, so the DragLayer can intercept the next MOVE and
+                    // hand the gesture to DragController. Held any longer, the drag view is created
+                    // and then never receives a single move.
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    folder.startDrag(v, DragOptions().apply { aresSuppressLongPressPopup = true })
+                }
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
+                    startedOnBadge = false
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            // Never consumed: the icon still needs its own click and long-press handling, and
+            // DragController owns the stream from the moment the drag starts.
+            return false
+        }
     }
 }
