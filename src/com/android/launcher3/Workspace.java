@@ -466,6 +466,38 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         reanchorAresHomeList();
         syncAresAppListPane();
         pruneAresStrayPages();
+        leaveAllAppsWhileThePaneIsPersistent();
+    }
+
+    /**
+     * Drops out of {@link LauncherState#ALL_APPS} once the app list is a persistent panel.
+     *
+     * <p>The two app-list models collide on a live unfold. Folded, the app list <em>is</em> the
+     * ALL_APPS state -- an overlay the §9 pane swipe drives. Unfolded, it is an ordinary child of
+     * workspace panel 1 that is always visible. Unfold while the state is ALL_APPS and you get
+     * both at once: the user reported "a second app list displayed over the home screen on the
+     * unfolded display... I need to do a back gesture to remove the extra app list". BACK exits the
+     * state, which is why the duplicate does not return until the next fold/unfold.
+     *
+     * <p>Unfolded the state carries no information -- the pane is visible either way -- so it can
+     * only ever duplicate the pane, and leaving it is unconditionally right. Not animated: this is
+     * correcting a state that should never have survived the posture change, not performing a
+     * transition the user asked for.
+     *
+     * <p>Gated on the pane actually being attached, not merely on two-panel mode, so a bind that
+     * has not reached panel 1 yet cannot leave the user looking at neither surface. It runs from
+     * {@link #syncAresDualPane()} for the same reason everything else there does: {@link
+     * #setInsets(Rect)} posts that sweep on every fold and unfold, and it must not run inline
+     * inside the inset dispatch.
+     */
+    private void leaveAllAppsWhileThePaneIsPersistent() {
+        if (!isTwoPanelEnabled() || mAresAppList == null || mAresAppList.getParent() == null) {
+            return;
+        }
+        if (!mLauncher.isInState(ALL_APPS)) {
+            return;
+        }
+        mLauncher.getStateManager().goToState(NORMAL, false /* animated */);
     }
 
     /**
