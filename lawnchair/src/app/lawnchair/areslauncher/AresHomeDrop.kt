@@ -7,6 +7,7 @@ import com.android.launcher3.LauncherAnimUtils
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.LauncherState
 import com.android.launcher3.PendingAddItemInfo
+import com.android.launcher3.folder.Folder
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -58,7 +59,53 @@ object AresHomeDrop {
     private const val TAG = "AresHomeDrop"
 
     /**
+     * True when this drag started **inside an open folder**, which the home grid must refuse
+     * outright rather than consume.
+     *
+     * ## The defect this closes
+     *
+     * Long-pressing an app inside an open folder shows its popup menu *and* arms a drag
+     * (`ItemLongClickListener.beginDrag` routes to `Folder.startDrag` for any item whose container
+     * is a folder). If that drag then resolves against the workspace, [handleExternalDrop] used to
+     * consume it and [addDraggedItem] wrote it to the desktop — and because the item already
+     * carries a database id and a folder container, `addOrMoveItemInDatabase` is a **move**, not a
+     * copy. The app silently left the folder for good.
+     *
+     * Measured on the user's Pixel: after the gesture, `favorites` held id 11 ("Drive") as a
+     * `container = -100` row, and the folder's `container = 6` contents went 7, 8, 9, 10, 12, 13,
+     * 14 — with 11 missing from the sequence. Persisted, not a view-level orphan.
+     *
+     * ## Why this refuses at `acceptDrop` rather than inside [handleExternalDrop]
+     *
+     * Declining *there* is not available: returning false from [handleExternalDrop] falls through
+     * to `Workspace.onDropExternal`, which is the grid-native path Strategy D cannot survive (§15).
+     * Refusing one step earlier, at `Workspace.acceptDrop`, uses stock's own recovery instead:
+     * `DragController` reports `accepted = false`, and `Folder.onDropCompleted`'s failure branch
+     * puts the icon back where it came from. Nothing is written, and the folder keeps its app.
+     *
+     * ## What this deliberately gives up
+     *
+     * Dragging an app *out* of a folder onto the home grid now does nothing — it snaps back. That
+     * is a real behaviour, but it was never part of the interaction model: §18 gives folders the ×
+     * badge for removing apps, and emptying a folder is what disposes of it. Composing folders by
+     * drag is scoped out in the other direction too (design/strategy-d-dead-paths.md), and doing
+     * this one properly means removing from the `FolderInfo`, re-ranking on the desktop and
+     * handling the auto-collapse — separate work. Until then, refusing is strictly better than
+     * moving the user's app without being asked.
+     */
+    @JvmStatic
+    fun isDragOutOfFolder(launcher: Launcher, d: DropTarget.DragObject): Boolean {
+        if (!AresWidgetAdd.isAresHome(launcher)) return false
+        return d.dragSource is Folder
+    }
+
+    /**
      * Handles a drop that originated outside the home grid.
+     *
+     * The sources this serves are the app list (§15) and the widget picker's drag-to-place; both
+     * arrive with no database row of their own, so writing one is an *add*. A drag out of an open
+     * folder is the case that must never reach here — it carries an existing row, so the same write
+     * would relocate it — and is refused earlier by [isDragOutOfFolder]; see that doc.
      *
      * @param isHotseatTarget true when the drop landed on the hotseat, which is still a real
      *   `CellLayout` and keeps stock behaviour entirely.

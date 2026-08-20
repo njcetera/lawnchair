@@ -2397,6 +2397,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             if (dropTargetLayout == null) {
                 return false;
             }
+            // AresLauncher: a drag that started inside an open folder must not land on the masonry
+            // home grid. onDrop would route it to AresHomeDrop, whose write is a MOVE for an item
+            // that already has a row -- the app left the folder for good. Refusing here rather than
+            // in onDrop is what makes it recoverable: DragController reports accepted=false and
+            // Folder.onDropCompleted's failure branch puts the icon back. The hotseat is excluded
+            // for the same reason AresHomeDrop excludes it -- it is still a real CellLayout.
+            if (!mLauncher.isHotseatLayout(dropTargetLayout)
+                    && AresHomeDrop.isDragOutOfFolder(mLauncher, d)) {
+                return false;
+            }
             if (!transitionStateShouldAllowDrop()) return false;
 
             mDragViewVisualCenter = d.getVisualCenter(mDragViewVisualCenter);
