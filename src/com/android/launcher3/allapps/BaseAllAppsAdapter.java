@@ -386,12 +386,30 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
                                 : new SectionDecorationInfo(mActivityContext, ROUND_NOTHING);
                 break;
             case VIEW_TYPE_ARES_SECTION_HEADER: {
-                // AresLauncher: render the letter. Guarded rather than cast blindly -- this view
-                // type is only ever produced with an AresSectionHeaderItem, but a mismatch here
-                // would be a ClassCastException on the bind path rather than a blank row.
+                // AresLauncher: render the letter -- or, for a section marked with an icon rather
+                // than a letter (§11b's recents), the icon in the letter's place. Guarded rather
+                // than cast blindly: this view type is only ever produced with an
+                // AresSectionHeaderItem, but a mismatch here would be a ClassCastException on the
+                // bind path rather than a blank row.
                 AdapterItem headerItem = mApps.getAdapterItems().get(position);
                 if (headerItem instanceof AresSectionHeaderItem sectionHeader) {
-                    ((TextView) holder.itemView).setText(sectionHeader.sectionName);
+                    TextView header = (TextView) holder.itemView;
+                    if (sectionHeader.iconRes != 0) {
+                        // Empty text, not a placeholder character: the drawable IS the marker, and
+                        // it sits at the start exactly where a letter would, because the header's
+                        // gravity and paddingStart are untouched.
+                        header.setText("");
+                        header.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                                sectionHeader.iconRes, 0, 0, 0);
+                        // Tinted from the header's own text colour, so the bolt tracks
+                        // ?attr/workspaceTextColor against the wallpaper exactly as the letters do.
+                        header.setCompoundDrawableTintList(header.getTextColors());
+                    } else {
+                        header.setText(sectionHeader.sectionName);
+                        // BOTH branches must clear the other's work. Headers recycle, so a letter
+                        // bound into a holder that last showed the bolt would otherwise draw both.
+                        header.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0);
+                    }
                 }
                 break;
             }

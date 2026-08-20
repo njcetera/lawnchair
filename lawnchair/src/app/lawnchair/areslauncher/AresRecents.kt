@@ -2,8 +2,13 @@ package app.lawnchair.areslauncher
 
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.graphics.drawable.Drawable
 import android.os.Process
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ImageSpan
 import android.util.Log
+import com.android.launcher3.R
 import com.android.launcher3.model.data.AppInfo
 import java.util.concurrent.TimeUnit
 
@@ -47,6 +52,60 @@ object AresRecents {
     const val COUNT = 5
 
     private const val TAG = "AresRecents"
+
+    /**
+     * The recents section's identity, for adapter diffing only. **Never rendered.**
+     *
+     * A section is identified by its name everywhere in this stack — `AresSectionHeaderItem`'s
+     * `isSameAs`/`isContentSame` compare it, and without a distinct value the recents header would
+     * diff equal to whichever letter header happened to sit at the same index. It cannot collide
+     * with a real section name, because those come from `AppInfo.sectionName` and are single
+     * characters.
+     *
+     * It is not a *sentinel* in the sense of "a magic string a binder recognises": nothing branches
+     * on this value. What the header and the fast scroller branch on is
+     * [AresSectionHeaderItem.iconRes] being non-zero, which is a type flag and says what it means.
+     */
+    const val SECTION_ID = "ares-recents"
+
+    /**
+     * The glyph that stands in for a letter beside this section, in the fast-scroll popup.
+     *
+     * The in-list header takes the drawable directly (see [AresSectionHeaderItem.iconRes]); this is
+     * for the places that can only accept a `CharSequence` — `FastScrollSectionInfo.sectionName`,
+     * which `RecyclerViewFastScroller` puts straight into the popup bubble, and the A–Z rail's
+     * `LetterListTextView` if it is ever revived.
+     *
+     * An [ImageSpan] rather than a sentinel string, because **stock already does exactly this**:
+     * `AlphabeticalAppsList` builds `mPrivateProfileAppScrollerBadge` as a `SpannableString`
+     * carrying an `ImageSpan` and hands it to `FastScrollSectionInfo` as a section name. So a
+     * section name that renders as a picture is an established shape here, not a new convention —
+     * and it means no consumer has to learn about recents to draw it correctly.
+     *
+     * @param sizePx the box to draw the bolt in. Passed rather than taken from the drawable's
+     *   intrinsic 14dp, which is sized against the 13sp in-list header and is far too small beside
+     *   the popup's 32dp letters.
+     * @param color the colour to tint it, which every caller resolves from the text colour of the
+     *   view it is going into. A colour baked into the drawable would be wrong on one of them.
+     */
+    @JvmStatic
+    fun sectionMarker(context: Context, sizePx: Int, color: Int): CharSequence {
+        val icon: Drawable = context.getDrawable(R.drawable.ares_ic_recents)
+            ?: return ""
+        icon.mutate()
+        icon.setTint(color)
+        icon.setBounds(0, 0, sizePx, sizePx)
+        // One space to hang the span on: ImageSpan replaces the character it covers, so the string
+        // needs exactly one and its content is never seen.
+        return SpannableString(" ").apply {
+            setSpan(
+                ImageSpan(icon, ImageSpan.ALIGN_BOTTOM),
+                0,
+                1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
+    }
 
     /**
      * How far back to look. Long enough that the block is populated after a quiet day, short enough

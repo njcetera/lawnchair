@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher: the marker for the RECENTS section of the app-list pane (§11b).
+
+     A lightning bolt, at the user's suggestion: "we should also give it an icon like the letters -
+     maybe a lightning bolt or something". It stands in the same slot a letter occupies, so the
+     recents block reads as one of the list's own sections rather than as a block bolted above them.
+
+     A VECTOR, deliberately, and not the ⚡ emoji codepoint. An emoji renders in the system emoji
+     font: full colour, its own metrics, and a weight that has nothing to do with the letters beside
+     it. A monochrome path tinted from the same colour the section headers already use sits at the
+     letters' weight by construction, in both themes and against any wallpaper.
+
+     No colour of its own for the same reason: every consumer tints it. The in-list header tints
+     from the header TextView's own text colour (?attr/workspaceTextColor), and the fast-scroll
+     popup tints from the popup's (?android:attr/textColorPrimaryInverse). Baking a colour in here
+     would be wrong on one of them whatever it was.
+
+     The intrinsic 14dp box is sized against the 13sp header letters. The popup overrides it with
+     explicit bounds, because its letters are much larger.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="14dp"
+    android:height="14dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M7,2 L7,13 L10,13 L10,22 L17,10 L13,10 L17,2 Z" />
+</vector>

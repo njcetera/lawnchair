@@ -30,10 +30,12 @@ import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCH
 import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_PRIVATE_SPACE_USER_INSTALLED_APPS_COUNT;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.style.ImageSpan;
 import android.util.Log;
+import android.util.TypedValue;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
@@ -384,34 +386,93 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
     }
 
     /**
-     * AresLauncher §11b: prepends the five most recently used apps as ordinary icon rows.
+     * AresLauncher §11b: the five most recently used apps, as the list's leading SECTION.
      *
-     * <p>Deliberately {@code VIEW_TYPE_ICON} and not a new view type. What the user rejected in §18
-     * was {@code PredictionRowView} -- a horizontal strip of four icons sitting on top of a
-     * one-per-line list, which read as a foreign element. The request now is for the same
-     * information "in list form so it blends into the design", so these are the same rows,
-     * inflated from the same {@code ares_all_apps_icon.xml}, with nothing to distinguish them but
-     * their position. No header and no divider above them for the same reason: any chrome here
-     * would recreate the visual seam that got the old row removed.
+     * <p>The rows are ordinary {@code VIEW_TYPE_ICON} rows, inflated from the same
+     * {@code ares_all_apps_icon.xml} as every other app, and they sit under a header that is the
+     * same view, the same typography, the same insets and the same height as an A/B/C header. The
+     * only difference is that its marker is a lightning bolt rather than a letter.
+     *
+     * <p><b>This is not a reversal of the "no chrome" decision {@code 600100f6ae} took</b>, and the
+     * distinction is the user's own: <i>"it would be nice to build the recents into the app list as
+     * a natural extension. we should also give it an icon like the letters"</i>. What was rejected
+     * twice — {@code PredictionRowView}, then any header at all above these rows — was a
+     * differently-shaped block sitting <em>on top of</em> a list. A section marker consistent with
+     * every other section is the opposite of that: it makes recents part of the list's own
+     * structure instead of a preamble to it. The test applied here was "does it look like the
+     * existing sections, or like something bolted above them".
+     *
+     * <p><b>And it is what makes the block REACHABLE.</b>
+     * {@code AllAppsRecyclerView.scrollToPositionAtProgress} maps the thumb's travel onto
+     * {@link FastScrollSectionInfo} entries and nothing else, so rows above the first entry are
+     * outside the mapping entirely — the thumb's topmost position landed on the first letter and
+     * the recents had to be reached by scrolling up by hand. That was the user's report. Being a
+     * real section fixes it by construction rather than by special-casing the top of the track:
+     * index 0 of the mapping is now this header at adapter position 0. No other geometry is
+     * involved, so it holds against §13's shortened track exactly as it does against a full-height
+     * one — the track's length changes how far the thumb travels, never what fraction 0 means.
+     *
+     * <p>The section name handed to the scroller is an {@code ImageSpan}, so the popup bubble draws
+     * the bolt while scrubbing here. That is stock's own idiom, not a new one: {@code
+     * mPrivateProfileAppScrollerBadge} is built the same way a few lines above.
      *
      * <p>Gated on {@link AresAllApps#isAresAppListPane}, so the Taskbar's all-apps sheet and the
      * secondary-display host -- which share this class -- are unchanged. That gate is also what
      * keeps {@code ares-smoke.ps1}'s {@code predictions-row-absent} check meaningful: no
      * {@code PredictionRowView} is reinstated anywhere by this.
      *
-     * @return the adapter position after the rows that were added.
+     * @return the adapter position after the header and rows that were added.
      */
     private int addAresRecents(int position) {
         if (!AresAllApps.isAresAppListPane(mActivityContext)) {
             return position;
         }
-        List<AppInfo> recents = AresRecents.recentApps(
-                (Context) mActivityContext, mApps, AresRecents.COUNT);
+        Context context = (Context) mActivityContext;
+        List<AppInfo> recents = AresRecents.recentApps(context, mApps, AresRecents.COUNT);
+        if (recents.isEmpty()) {
+            // No usage access, or no history: no header either. A marker over nothing is worse
+            // than the list simply starting at 'A', which is exactly what it did before §11b.
+            return position;
+        }
+
+        // Recorded BEFORE the header is added, for the same reason addAppsWithSections() captures
+        // its own: FastScrollSectionInfo.position is an ADAPTER position, and the section starts at
+        // its header.
+        mFastScrollerSections.add(new FastScrollSectionInfo(
+                AresRecents.sectionMarker(context, aresPopupMarkerSizePx(context),
+                        aresPopupMarkerColor(context)),
+                position));
+        mAdapterItems.add(new AresSectionHeaderItem(
+                AresRecents.SECTION_ID, R.drawable.ares_ic_recents));
+        position++;
+
         for (AppInfo info : recents) {
             mAdapterItems.add(AdapterItem.asApp(info));
             position++;
         }
         return position;
+    }
+
+    /** Box for the bolt in the fast-scroll popup: the size of the letters it stands in for. */
+    private static int aresPopupMarkerSizePx(Context context) {
+        return context.getResources().getDimensionPixelSize(R.dimen.fastscroll_popup_text_size);
+    }
+
+    /**
+     * Colour for the bolt in the fast-scroll popup.
+     *
+     * Resolved from the very attribute {@code @style/FastScrollerPopup} sets on its own text, so
+     * the bolt and the letters cannot disagree about what colour a popup letter is.
+     */
+    private static int aresPopupMarkerColor(Context context) {
+        TypedValue value = new TypedValue();
+        if (context.getTheme().resolveAttribute(
+                android.R.attr.textColorPrimaryInverse, value, true)) {
+            return value.resourceId != 0
+                    ? context.getColor(value.resourceId)
+                    : value.data;
+        }
+        return Color.WHITE;
     }
 
     int addPrivateSpaceItems(int position) {
