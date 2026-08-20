@@ -48,6 +48,7 @@ import com.android.launcher3.views.ActivityContext;
 
 import com.google.android.msdl.data.model.MSDLToken;
 
+import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.theme.color.tokens.ColorTokens;
 import app.lawnchair.theme.drawable.DrawableTokens;
 
@@ -216,6 +217,33 @@ public abstract class ButtonDropTarget extends TextView
 
     @Override
     public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
+        // AresLauncher: DATA LOSS. 8d1b546a4c keeps the drop-target bar DOWN for a drag out of one
+        // of our open folders, because its targets are not in the §4/§18 model and raising it
+        // behind a still-open folder is what the user saw as "it pops the screen out". But
+        // DropTargetBar.setup registers each button with the DragController as its OWN listener and
+        // drop target, so suppressing the bar's animation left the buttons armed: mActive stayed
+        // true, isDropEnabled() stayed true, and getHitRectRelativeToDragLayer still covered the
+        // top strip of the screen (measured at 10,230-1070,367).
+        //
+        // Measured consequence, twice in a row on the emulator: an app dragged out of a folder and
+        // released at (410,294) -- an ordinary-looking spot on the grid, well inside that strip --
+        // was DELETED. "removing items from db com.google.android.deskclock. Reason: [removed by
+        // accessibility drop]". The second one took the folder with it, since dropping below two
+        // items auto-collapses. No visible target, no confirmation, no undo bar (that is the bar we
+        // suppressed), and the row is gone from the database.
+        //
+        // An invisible control must not accept a drop. Deactivating here rather than in
+        // DropTargetBar because mActive lives here, so it cannot depend on which DragListener the
+        // controller happens to notify first.
+        if (AresFolderDrag.isFolderDrag(
+                mActivityContext instanceof Launcher ? (Launcher) mActivityContext : null,
+                dragObject.dragSource)) {
+            mActive = false;
+            setVisibility(View.GONE);
+            mAccessibleDrag = false;
+            setOnClickListener(null);
+            return;
+        }
         if (options.isKeyboardDrag) {
             mActive = false;
         } else {
