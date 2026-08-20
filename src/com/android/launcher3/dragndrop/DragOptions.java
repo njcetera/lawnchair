@@ -57,6 +57,24 @@ public class DragOptions {
     public boolean aresSuppressLongPressPopup = false;
 
     /**
+     * AresLauncher: how much bigger than its source the {@code DragView} settles at, as a multiple.
+     *
+     * <p>The user's edit-mode request — <em>"when selecting an item in edit mode, it slightly
+     * enlarges to really highlight that its been selected"</em> — applies to an icon inside an open
+     * folder as much as to a tile on the home grid, because the two are one mode. On the grid the
+     * real tile is what moves, so the host scales it directly; in a folder the moving thing is a
+     * {@code DragView} in the drag layer, and this is what tells it to arrive bigger.
+     *
+     * <p>Fed into {@code LauncherDragController}'s existing {@code scalePx}, so the enlargement is
+     * stock's own {@code DragView} zoom (150ms, one animator) rather than a second animator laid on
+     * top of it.
+     *
+     * <p>Default 1f, which computes a zero {@code scalePx} — byte-identical to the previous
+     * hardcoded {@code 0f}, so every stock drag is unaffected by construction.
+     */
+    public float aresPickupScale = 1f;
+
+    /**
      * A drag scale that scales the original drag view size when the preDragCondition is met (or
      * is ignored if preDragEndScale is 0).
      */

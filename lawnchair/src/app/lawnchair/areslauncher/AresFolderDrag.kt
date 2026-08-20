@@ -185,7 +185,16 @@ object AresFolderDrag {
                     // hand the gesture to DragController. Held any longer, the drag view is created
                     // and then never receives a single move.
                     v.parent?.requestDisallowInterceptTouchEvent(false)
-                    folder.startDrag(v, DragOptions().apply { aresSuppressLongPressPopup = true })
+                    folder.startDrag(
+                        v,
+                        DragOptions().apply {
+                            aresSuppressLongPressPopup = true
+                            // The picked-up icon swells, exactly as a tile on the home grid does --
+                            // one mode, one cue. Routed through stock's own DragView zoom rather
+                            // than a second animator; see DragOptions.aresPickupScale.
+                            aresPickupScale = AresEditMotion.PICKUP_SCALE_FACTOR
+                        },
+                    )
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {

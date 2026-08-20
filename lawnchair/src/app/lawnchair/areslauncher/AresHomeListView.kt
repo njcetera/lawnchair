@@ -313,12 +313,82 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         masonry.restScale = scale
         for (i in 0 until childCount) {
             val child = getChildAt(i)
-            child.animate().scaleX(scale).scaleY(scale).setDuration(120).start()
+            child.animate().scaleX(tileScale(child)).scaleY(tileScale(child))
+                .setDuration(EDIT_SCALE_MS).start()
             setItemClickable(child, !editMode)
-            syncChevron(child)
+            syncAffordances(child)
             syncWiggle(child)
         }
         animateGridDots()
+    }
+
+    /**
+     * The tile currently in the user's hand, or null.
+     *
+     * Only the scale is kept here; the float suspension and the reflow exemption ride on
+     * [setFloatSuspendedFor], which `ItemTouchHelper` drives from the same two callbacks.
+     */
+    private var pickedUp: View? = null
+
+    /**
+     * What size [child] should be resting at right now.
+     *
+     * One expression, consulted by every writer of the scale on this surface — the edit-mode walk,
+     * the attach hook and the pick-up bump — so the three cannot disagree. The picked-up tile is a
+     * **multiple** of the mode's rest scale rather than an absolute, so the same gesture reads
+     * identically here (0.92 → 1.03) and inside an open folder (1.00 → 1.12), where the rest scale
+     * is different. See [AresEditMotion.PICKUP_SCALE_FACTOR].
+     */
+    private fun tileScale(child: View): Float {
+        val rest = if (editMode) EDIT_MODE_SCALE else 1f
+        return if (child === pickedUp) rest * AresEditMotion.PICKUP_SCALE_FACTOR else rest
+    }
+
+    /**
+     * Enlarges [child] slightly to mark it as picked up, or restores the previous one when passed
+     * null.
+     *
+     * > *"when selecting an item in edit mode, it slightly enlarges to really highlight that its
+     * > been selected"*
+     *
+     * Called from [AresHomeReorder.Callback] at `onSelectedChanged(ACTION_STATE_DRAG)` and
+     * `clearView` — the same pair that suspends and restores the float, because they are the exact
+     * moments `ItemTouchHelper` takes and releases the tile.
+     *
+     * **No pivot is set, deliberately.** `View` treats an explicitly-set pivot as sticky and
+     * nothing would put it back, which is how the resize chevron was killed once already (see the
+     * ⛔ note in [AresMasonryLayoutManager]): a leftover top-left pivot drew every tile up to 8%
+     * off its layout box while hit-testing stayed transform-blind. The default pivot is the view's
+     * centre, which is what this wants anyway — the tile should swell in place, not toward a corner.
+     *
+     * **Restores to the rest scale, never to a constant.** [tileScale] reads the *current* mode, so
+     * a drag that outlives edit mode (the mode exited mid-gesture) settles at 1.0 rather than
+     * snapping back to 0.92, and nothing is left enlarged.
+     */
+    fun setPickedUp(child: View?) {
+        val previous = pickedUp
+        if (previous === child) return
+        pickedUp = child
+        previous?.let { animateTileScale(it) }
+        child?.let { animateTileScale(it) }
+        // Once per drag, and it says the absolute number rather than the factor: "0.92 times 1.12"
+        // is not a thing anyone can check against what they are looking at, and a scale that is
+        // silently not applied looks exactly like one that is too small to see.
+        Log.d(TAG, "pickup: ${if (child != null) "held at" else "released to"} " +
+            "${child?.let { tileScale(it) } ?: previous?.let { tileScale(it) }}")
+    }
+
+    private fun animateTileScale(child: View) {
+        val scale = tileScale(child)
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            child.scaleX = scale
+            child.scaleY = scale
+            return
+        }
+        // ViewPropertyAnimator, like the edit-mode walk: a second animate() call on the same view
+        // cancels the pending animation of the same property rather than running beside it, so the
+        // two can never both be driving the scale.
+        child.animate().scaleX(scale).scaleY(scale).setDuration(AresEditMotion.PICKUP_MS).start()
     }
 
     /** Running fade for the grid dots, cancelled before a new one so the two cannot fight. */
@@ -406,16 +476,17 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     /**
-     * Brings one attached row's resize chevron in line with the current mode.
+     * Brings one attached row's edit-mode affordances in line with the current mode — the × badge,
+     * the resize chevron and the cell outline, not the chevron alone.
      *
-     * Adds and removes the view directly instead of rebinding, because widget holders are
+     * Adds and removes the views directly instead of rebinding, because widget holders are
      * non-recyclable: `notifyItemChanged` on one builds a *second* holder and leaves the first
      * attached, which leaked a widget host view per toggle.
      *
-     * Note the chevron rides on the holder container, which is also what the edit-mode scale
-     * animates — so it transforms with the item rather than sitting still over it.
+     * Note they ride on the holder container, which is also what the edit-mode scale animates — so
+     * they transform with the item rather than sitting still over it.
      */
-    private fun syncChevron(child: View) {
+    private fun syncAffordances(child: View) {
         val container = child as? FrameLayout ?: return
         // Deliberately no early return on NO_POSITION. A row that has left the adapter -- removed,
         // or mid-animation on its way out -- is still an attached child carrying our × and chevron,
@@ -423,13 +494,14 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         // reported "the x won't leave and the resize button on one won't leave but neither are
         // actually editable", with the state dump confirming mState:Normal. getOrNull(-1) resolves
         // to a null item, which the adapter already reads as "this row carries nothing".
-        aresAdapter.syncChevron(container, getChildAdapterPosition(child))
+        aresAdapter.syncAffordances(container, getChildAdapterPosition(child))
     }
 
     override fun onChildAttachedToWindow(child: View) {
         super.onChildAttachedToWindow(child)
-        // Rows bound while already editing (recycled in on scroll) must match the current mode.
-        val scale = if (editMode) EDIT_MODE_SCALE else 1f
+        // Rows bound while already editing (recycled in on scroll) must match the current mode --
+        // including the pick-up bump, so a re-attached dragged tile does not shed it.
+        val scale = tileScale(child)
         child.scaleX = scale
         child.scaleY = scale
         setItemClickable(child, !editMode)
@@ -439,7 +511,7 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
         // onBindViewHolder running. Such a row kept whatever badge it had when it left, which
         // outlived the mode in both directions -- a stale × after exiting, and no × at all on a row
         // that scrolled in after editing began.
-        syncChevron(child)
+        syncAffordances(child)
     }
 
     override fun onChildDetachedFromWindow(child: View) {
@@ -1162,6 +1234,9 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
+
+        /** Matches the edit-mode enter/exit scale animation. */
+        const val EDIT_SCALE_MS = 120L
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L

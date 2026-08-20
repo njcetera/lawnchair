@@ -128,11 +128,25 @@ public class LauncherDragController extends DragController<Launcher> {
 
         final Resources res = mActivity.getResources();
 
+        // AresLauncher: the width DragView will be built at, so aresPickupScale below can be
+        // expressed as a plain multiple rather than in the px DragView's own maths wants.
+        final int aresDragWidthPx = drawable != null
+                ? drawable.getIntrinsicWidth()
+                : (view != null ? view.getMeasuredWidth() : 0);
+
         final float scalePx;
         if (originalView.getViewType() == DraggableView.DRAGGABLE_WIDGET) {
             scalePx = mIsInPreDrag ? 0f : getWidgetDragScalePx(drawable, view, dragInfo);
         } else {
-            scalePx = mIsInPreDrag ? res.getDimensionPixelSize(R.dimen.pre_drag_view_scale) : 0f;
+            // AresLauncher: the else branch was a hardcoded 0f. aresPickupScale defaults to 1f,
+            // which computes 0f, so every stock drag is unchanged; only a drag that asked for a
+            // pick-up bump (an icon dragged inside an open folder in edit mode) gets one, and it
+            // gets it from DragView's own zoom animation rather than a second animator.
+            // DragView computes mEndScale = (width + scalePx) / width, so this is exactly the
+            // requested multiple.
+            scalePx = mIsInPreDrag
+                    ? res.getDimensionPixelSize(R.dimen.pre_drag_view_scale)
+                    : aresDragWidthPx * (mOptions.aresPickupScale - 1f);
         }
         final DragView dragView = mDragObject.dragView = drawable != null
                 ? new LauncherDragView(

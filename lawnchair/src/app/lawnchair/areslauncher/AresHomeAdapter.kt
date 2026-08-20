@@ -67,8 +67,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
     /**
      * Whether the surface is currently in edit mode.
      *
-     * Only consulted to decide whether a widget row shows its resize chevron. The host keeps this
-     * in step via [setEditMode]; the adapter deliberately does not observe edit state itself.
+     * Consulted by **every** edit-mode affordance this adapter owns — the resize chevron, the ×
+     * remove badge and the §21 cell outline — all of which funnel through [syncAffordancesFor]. The
+     * host keeps this in step via [setEditMode]; the adapter deliberately does not observe edit
+     * state itself.
+     *
+     * It used to say "only consulted to decide whether a widget row shows its resize chevron",
+     * which was true when written and false the moment the × was added to every item. A comment of
+     * exactly that shape already shipped a bug here (`1c4a4f33bc`), so: **if you add a fourth
+     * affordance, this list and the funnel's name are part of the change.**
      */
     private var editMode = false
 
@@ -80,20 +87,21 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * attached. Toggling edit mode that way leaked a widget host view per widget per toggle
      * (observed: four host views for two widgets, one still drawn at its pre-resize size).
      *
-     * The host adds and removes chevrons on already-attached rows itself via [syncChevron], which
-     * it does while walking children for the edit-mode scale anyway.
+     * The host adds and removes affordances on already-attached rows itself via [syncAffordances],
+     * which it does while walking children for the edit-mode scale anyway.
      */
     fun setEditMode(enabled: Boolean) {
         editMode = enabled
     }
 
     /**
-     * Adds or removes an attached row's resize chevron to match the current mode.
+     * Brings an attached row's edit-mode affordances -- × badge, resize chevron and cell outline
+     * -- in line with the current mode.
      *
      * Operates on the live view rather than rebinding, for the reason in [setEditMode].
      */
-    fun syncChevron(container: FrameLayout, position: Int) {
-        syncChevronFor(container, items.getOrNull(position))
+    fun syncAffordances(container: FrameLayout, position: Int) {
+        syncAffordancesFor(container, items.getOrNull(position))
     }
 
     /**
@@ -127,7 +135,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
      *
      * So: keep animating the container. Do not move these into the item view to make them wiggle.
      */
-    private fun syncChevronFor(container: FrameLayout, info: ItemInfo?) {
+    private fun syncAffordancesFor(container: FrameLayout, info: ItemInfo?) {
         val existing = container.findViewWithTag<View>(AresWidgetResize.CHEVRON_TAG)
         val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
         if (target != null && existing == null) {
@@ -560,8 +568,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // home screen can be taken off it -- and while this was gated on AppWidgetHostView, an icon
         // or folder bound during edit mode (scrolled in, or delivered by a late bind) came up with
         // no badge at all and could not be removed without leaving and re-entering the mode.
-        // syncChevronFor decides what this particular item is entitled to.
-        syncChevronFor(holder.container, info)
+        // syncAffordancesFor decides what this particular item is entitled to.
+        syncAffordancesFor(holder.container, info)
     }
 
     /**

@@ -33,8 +33,13 @@ import com.android.launcher3.model.data.ItemInfo
  * [Callback.onMove] reorders the adapter, which notifies a move, which invalidates the packing
  * ([AresMasonryLayoutManager.onItemsMoved] nulls its cached layout). The next layout pass re-runs
  * the packer over the new order, so every other item repacks around the dragged one **continuously
- * while the finger moves** — the signature WP behaviour — with no ghost placeholder and no separate
- * animation code. It is the same pure function called more often.
+ * while the finger moves** — the signature WP behaviour — with no ghost placeholder.
+ *
+ * What that gives on its own is the right *positions*, arrived at instantly: a displaced tile
+ * appears at its new cell rather than travelling to it. The travel is
+ * [AresMasonryLayoutManager.reflowActive], which springs each moved tile from where it was drawn to
+ * where the packer just put it. Deliberately a spring rather than a per-change animation — see
+ * [AresEditMotion] for why restarting an animator is what produces the snap it is meant to remove.
  */
 object AresHomeReorder {
 
@@ -260,10 +265,15 @@ object AresHomeReorder {
             list.setReorderInProgress(true)
 
             // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
-            // the edit-mode float ([AresEditWiggle]). The float stands down for the duration --
-            // both because two writers on one property fight frame-by-frame, and because a lifted
-            // tile reads correctly only if it is still.
+            // the edit-mode float ([AresEditWiggle]) and the live reflow ([AresEditMotion]). Both
+            // stand down for the duration -- because two writers on one property fight
+            // frame-by-frame, and because a lifted tile reads correctly only if it is still.
             viewHolder?.itemView?.let { list.setFloatSuspendedFor(it) }
+
+            // The visible answer to "I have picked this up": the tile swells slightly. Scale, not
+            // translation, so it composes with ItemTouchHelper rather than competing with it --
+            // the two write different properties and never meet.
+            viewHolder?.itemView?.let { list.setPickedUp(it) }
 
             // A popup may still be open from the long-press that entered edit mode. Once the finger
             // moves and this becomes a reorder, it is stale.
@@ -275,6 +285,9 @@ object AresHomeReorder {
             // below restarts from rest rather than from wherever the drop settled.
             super.clearView(recyclerView, viewHolder)
             list.setFloatSuspendedFor(null)
+            // Back to the mode's resting size -- which is read from the mode, not from a constant,
+            // so a drag that outlived edit mode settles at 1.0 rather than snapping to 0.92.
+            list.setPickedUp(null)
             list.setReorderInProgress(false)
 
             // A dwell that armed resolves as a folder drop instead of a reorder, and it renumbers
