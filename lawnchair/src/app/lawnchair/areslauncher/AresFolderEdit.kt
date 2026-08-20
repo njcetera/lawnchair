@@ -1,6 +1,6 @@
 package app.lawnchair.areslauncher
 
-import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -97,8 +97,8 @@ object AresFolderEdit {
         /** Badge cell per icon view, so a cell is never added twice for the same icon. */
         private val cells = mutableMapOf<View, View>()
 
-        /** Running wiggles, keyed by the view they rotate — icons and badge cells alike. */
-        private val wiggles = mutableMapOf<View, ObjectAnimator>()
+        /** Running floats, keyed by the view they move — icons and badge cells alike. */
+        private val wiggles = mutableMapOf<View, ValueAnimator>()
 
         /**
          * The folder is usually still closed at this point, so the pre-draw listener cannot be

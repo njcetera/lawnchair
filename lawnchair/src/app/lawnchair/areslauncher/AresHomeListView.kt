@@ -1,6 +1,5 @@
 package app.lawnchair.areslauncher
 
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
@@ -213,13 +212,23 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     private var enteredEditModeDuringGesture = false
 
     /**
-     * Running wiggle animators, keyed by the holder container they rotate.
+     * Running edit-mode float animators, keyed by the holder container they move.
      *
      * Held so they can be cancelled individually as rows recycle and wholesale on exit. An
-     * animator left running on a recycled view would rotate whatever item was bound into it next,
-     * including outside edit mode.
+     * animator left running on a recycled view would keep moving whatever item was bound into it
+     * next, including outside edit mode.
      */
-    private val wiggles = mutableMapOf<View, ObjectAnimator>()
+    private val wiggles = mutableMapOf<View, ValueAnimator>()
+
+    /**
+     * The tile whose float is suspended because [ItemTouchHelper] is dragging it.
+     *
+     * `ItemTouchHelper` writes `translationX/Y` on the dragged view every frame to keep it under
+     * the finger, and [AresEditWiggle] writes the same two properties — so the float has to stand
+     * down for the duration of the drag rather than trade the property with it. It is also the
+     * behaviour that reads correctly: a lifted tile should be still, not still drifting.
+     */
+    private var floatSuspendedFor: View? = null
 
     /**
      * True while the grid is in edit mode.
@@ -317,23 +326,23 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
     }
 
     /**
-     * Starts or stops one row's edit-mode wiggle.
+     * Starts or stops one row's edit-mode float.
      *
-     * ## Why a wiggle at all
+     * ## Why any motion at all
      *
      * The scale-down alone proved too subtle to notice, so there was no way to tell whether the
      * surface was editable — which made taps that no longer launched look broken rather than
-     * intentional. The oscillation is the iOS/Windows Phone cue, and crucially **its absence is the
+     * intentional. The motion is the iOS/Windows Phone cue, and crucially **its absence is the
      * signal that you are back to normal**, so exiting has visible feedback too.
      *
      * The amplitude, period and per-item phase offset live in [AresEditWiggle], shared with the
      * apps inside an open folder — the two surfaces are the same mode and have to look like it.
      *
-     * ## Rotation, on the container
+     * ## On the container
      *
      * Applied to the holder container rather than the item view, matching the scale and the two
-     * affordances — so the × and the chevron wiggle *with* the tile instead of sitting still over a
-     * moving icon. (For a widget the item view is an `AppWidgetHostView`, whose children the
+     * affordances — so the × and the chevron move *with* the tile instead of sitting still over a
+     * drifting icon. (For a widget the item view is an `AppWidgetHostView`, whose children the
      * provider replaces on every update; the container is the only stable place to attach to.)
      *
      * Honours the system animator scale: with animations off, items simply hold the edit-mode
@@ -341,16 +350,35 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
      */
     private fun syncWiggle(child: View) {
         AresEditWiggle.stop(child, wiggles.remove(child))
-        if (!editMode) return
+        if (!editMode || child === floatSuspendedFor) return
         AresEditWiggle.start(child, getChildAdapterPosition(child))?.let { wiggles[child] = it }
     }
 
-    /** Stops every wiggle and clears the rotation, so nothing is left tilted. */
+    /**
+     * Suspends the float on the tile [child] while it is being dragged, or resumes it when passed
+     * null.
+     *
+     * Called from [AresHomeReorder.Callback] at the two points where `ItemTouchHelper` takes and
+     * releases ownership of the view's translation — `onSelectedChanged(ACTION_STATE_DRAG)` and
+     * `clearView`. `clearView`'s superclass call has already reset the translation to zero by the
+     * time this restarts the float, so the tile resumes from rest rather than from wherever the
+     * drop settled.
+     */
+    fun setFloatSuspendedFor(child: View?) {
+        val previous = floatSuspendedFor
+        if (previous === child) return
+        floatSuspendedFor = child
+        if (previous != null) syncWiggle(previous)
+        if (child != null) syncWiggle(child)
+    }
+
+    /** Stops every float and puts every tile back at rest, so nothing is left displaced. */
     private fun clearWiggles() {
         for ((child, animator) in wiggles) {
             AresEditWiggle.stop(child, animator)
         }
         wiggles.clear()
+        floatSuspendedFor = null
     }
 
     /**
@@ -392,10 +420,13 @@ class AresHomeListView(context: Context, private val launcher: Launcher) : Recyc
 
     override fun onChildDetachedFromWindow(child: View) {
         super.onChildDetachedFromWindow(child)
-        // Stop the animator with the view it belongs to. Left running, it would keep rotating a
+        // Stop the animator with the view it belongs to. Left running, it would keep moving a
         // recycled view after a different item had been bound into it.
         wiggles.remove(child)?.cancel()
-        child.rotation = 0f
+        // Clear the float's displacement -- but never on the tile ItemTouchHelper is dragging.
+        // That view carries the drag's own translation and no float, so zeroing it here would
+        // snap it off the finger.
+        if (child !== floatSuspendedFor) AresEditWiggle.reset(child)
     }
 
     /**

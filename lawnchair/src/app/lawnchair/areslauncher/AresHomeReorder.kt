@@ -192,13 +192,22 @@ object AresHomeReorder {
 
             list.setReorderInProgress(true)
 
+            // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
+            // the edit-mode float ([AresEditWiggle]). The float stands down for the duration --
+            // both because two writers on one property fight frame-by-frame, and because a lifted
+            // tile reads correctly only if it is still.
+            viewHolder?.itemView?.let { list.setFloatSuspendedFor(it) }
+
             // A popup may still be open from the long-press that entered edit mode. Once the finger
             // moves and this becomes a reorder, it is stale.
             AbstractFloatingView.closeAllOpenViews(launcher)
         }
 
         override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+            // Runs first: the superclass clears ItemTouchHelper's own translation, so the float
+            // below restarts from rest rather than from wherever the drop settled.
             super.clearView(recyclerView, viewHolder)
+            list.setFloatSuspendedFor(null)
             list.setReorderInProgress(false)
             persistOrder(launcher, list.aresAdapter.snapshot())
         }
