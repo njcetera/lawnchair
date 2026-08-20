@@ -114,7 +114,7 @@ object AresWidgetResize {
      * target would fail the 44dp minimum; growing the glyph instead would cover the widget it is
      * meant to sit on.
      */
-    fun createChevron(container: FrameLayout, onTap: () -> Unit): View {
+    fun createChevron(container: FrameLayout, label: CharSequence?, onTap: () -> Unit): View {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         val glyph = res.getDimensionPixelSize(R.dimen.ares_widget_resize_chevron_size)
@@ -129,7 +129,14 @@ object AresWidgetResize {
             setBackgroundResource(R.drawable.ares_widget_resize_background)
             isClickable = true
             isFocusable = true
-            contentDescription = res.getString(R.string.action_resize)
+            // Named, not bare: "Resize" alone gives a screen-reader user no way to tell which of
+            // several widgets a control belongs to. See AresRemoveBadge.createBadge.
+            contentDescription = if (label.isNullOrBlank()) {
+                res.getString(R.string.action_resize)
+            } else {
+                res.getString(R.string.ares_resize_item, label)
+            }
+            AresA11y.describeAsButton(this)
             setOnClickListener { onTap() }
             layoutParams = FrameLayout.LayoutParams(touch, touch).apply {
                 gravity = Gravity.BOTTOM or Gravity.END

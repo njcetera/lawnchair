@@ -48,12 +48,16 @@ object AresRemoveBadge {
      * so an affordance hanging outside the cell would overlap a neighbour — and the resize chevron
      * already owns bottom-end, so the two never collide even on a 1×1 tile.
      *
+     * [label] is the item's own name, and is spoken rather than drawn: it turns six identical
+     * "Remove" buttons into "Remove Chrome from home screen". Null or blank falls back to the bare
+     * label, which is still better than no description at all.
+     *
      * The glyph is [R.dimen.ares_remove_badge_size] inside a [R.dimen.ares_widget_resize_touch_size]
      * view, padded out to a comfortable target: the glyph is sized to read against an icon, the
      * touch target to satisfy the 44dp minimum. Growing the glyph to fill the target instead would
      * bury the icon it sits on.
      */
-    fun createBadge(container: FrameLayout, onTap: () -> Unit): View {
+    fun createBadge(container: FrameLayout, label: CharSequence?, onTap: () -> Unit): View {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
@@ -69,7 +73,12 @@ object AresRemoveBadge {
             scaleType = ImageView.ScaleType.CENTER
             isClickable = true
             isFocusable = true
-            contentDescription = res.getString(R.string.remove_drop_target_label)
+            contentDescription = if (label.isNullOrBlank()) {
+                res.getString(R.string.remove_drop_target_label)
+            } else {
+                res.getString(R.string.ares_remove_from_home, label)
+            }
+            AresA11y.describeAsButton(this)
             setOnClickListener { onTap() }
             layoutParams = FrameLayout.LayoutParams(touch, touch).apply {
                 gravity = Gravity.TOP or Gravity.START

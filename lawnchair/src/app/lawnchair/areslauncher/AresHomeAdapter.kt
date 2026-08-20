@@ -131,7 +131,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val existing = container.findViewWithTag<View>(AresWidgetResize.CHEVRON_TAG)
         val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
         if (target != null && existing == null) {
-            container.addView(AresWidgetResize.createChevron(container) { resizeHost?.invoke(target) })
+            container.addView(
+                AresWidgetResize.createChevron(container, spokenNameOf(container, target)) {
+                    resizeHost?.invoke(target)
+                },
+            )
         } else if (target == null && existing != null) {
             container.removeView(existing)
         }
@@ -189,11 +193,28 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val existing = container.findViewWithTag<View>(AresRemoveBadge.BADGE_TAG)
         val target = info?.takeIf { editMode && it !is FolderInfo }
         if (target != null && existing == null) {
-            container.addView(AresRemoveBadge.createBadge(container) { removeHost?.invoke(target) })
+            container.addView(
+                AresRemoveBadge.createBadge(container, spokenNameOf(container, target)) {
+                    removeHost?.invoke(target)
+                },
+            )
         } else if (target == null && existing != null) {
             container.removeView(existing)
         }
     }
+
+    /**
+     * The name an affordance on this row should speak, or null when the row has no usable one.
+     *
+     * `ItemInfo.title` covers icons, shortcuts and folders. It is routinely **null for a widget** —
+     * the model has no title for one — so the item view's own content description is the fallback:
+     * `LauncherAppWidgetHostView` sets it from the provider's label, which is what a user would
+     * call the thing ("Analog", "Chrome bookmarks"). The item view is child 0 by construction,
+     * added by [onBindViewHolder] before this runs.
+     */
+    private fun spokenNameOf(container: FrameLayout, info: ItemInfo): CharSequence? =
+        info.title?.takeIf { it.isNotBlank() }
+            ?: container.getChildAt(0)?.contentDescription?.takeIf { it.isNotBlank() }
 
     private fun isResizable(info: ItemInfo): Boolean {
         val columns = gridColumns?.invoke() ?: return false

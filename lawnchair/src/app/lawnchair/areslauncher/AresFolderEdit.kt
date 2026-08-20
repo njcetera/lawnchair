@@ -203,7 +203,9 @@ object AresFolderEdit {
         private fun createCell(parent: ViewGroup, info: ItemInfo): View {
             val cell = EditCell(parent.context)
             cell.tag = CELL_TAG
-            cell.addView(AresRemoveBadge.createBadge(cell) { removeFromFolder(info) })
+            // Named for the same reason as on the grid: a folder of six apps would otherwise offer
+            // six controls that all announce themselves as "Remove".
+            cell.addView(AresRemoveBadge.createBadge(cell, info.title) { removeFromFolder(info) })
             return cell
         }
 

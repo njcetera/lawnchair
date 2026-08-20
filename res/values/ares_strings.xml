@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings owned by AresLauncher. Kept out of res/values/strings.xml, which is vendored from
+     Launcher3, so upstream merges stay clean and the blast radius of a change here is visible.
+     See design/change-practices.md. -->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- Content descriptions for the edit-mode affordances (§9D / §6).
+
+         Both name the item they act on. The plain labels they replace ("Remove", "Resize") are
+         fine on a screen where one such control exists, and useless on a home grid where every
+         tile carries one: a screen-reader user swiping through edit mode heard "Remove" six times
+         with nothing to distinguish them, and no way to tell which tile was about to go.
+
+         The visible glyph is unchanged — this is what is spoken, not what is drawn. -->
+
+    <!-- Spoken label for the x badge. %1$s is the item's own name, e.g. "Chrome".
+         Says "from home screen" deliberately: x takes the item off the home screen and never
+         uninstalls it, and that distinction is exactly what a user who cannot see the result
+         needs stated. -->
+    <string name="ares_remove_from_home">Remove <xliff:g id="item_name" example="Chrome">%1$s</xliff:g> from home screen</string>
+
+    <!-- Spoken label for the resize chevron. %1$s is the widget's own name, e.g. "Analog". -->
+    <string name="ares_resize_item">Resize <xliff:g id="item_name" example="Analog">%1$s</xliff:g></string>
+
+</resources>
