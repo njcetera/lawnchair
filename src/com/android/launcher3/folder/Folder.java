@@ -138,6 +138,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.patrykmichalik.opto.core.PreferenceExtensionsKt;
+import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.preferences2.PreferenceManager2;
 import app.lawnchair.theme.color.ColorOption;
 import app.lawnchair.theme.color.tokens.ColorTokens;
@@ -457,6 +458,17 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     }
 
     public boolean onLongClick(View v) {
+        // AresLauncher §18: a long-press inside an open folder belongs to edit mode, not to a drag.
+        // Stock arms Folder.startDrag from the press alone -- which raises that app's popup (via
+        // beginDragShared's startLongPressAction) and lifts the icon out of the folder before the
+        // finger has moved. See AresFolderDrag for both halves of that. Home-screen folders only:
+        // app-drawer folders are Lawnchair's and keep stock behaviour, and the launcher is null on
+        // any host that is not one (the Taskbar's sheet).
+        Launcher launcher = mLauncherDelegate.getLauncher();
+        if (launcher != null && !isInAppDrawer()
+                && AresFolderDrag.onFolderItemLongClick(launcher, this, v)) {
+            return true;
+        }
         // Return if global dragging is not enabled
         if (!getIsLauncherDraggingEnabled()) return true;
         return startDrag(v, new DragOptions());
