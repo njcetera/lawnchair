@@ -190,6 +190,16 @@ object AresHomeReorder {
              * continuously and only a *stationary* widget is held still.
              */
             const val WIDGET_SWAP_HYSTERESIS_DP = 24f
+
+            /**
+             * How far the finger must travel past a widget swap before the dragged item's
+             * previous rank may be nominated again. Roughly a cell: past that, a 4x3 re-homed
+             * into the vacated space no longer reaches half-coverage of a 2x2 riding the finger,
+             * so the revert nomination could only be deliberate. Deliberately larger than
+             * [WIDGET_SWAP_HYSTERESIS_DP] -- forward progress stays cheap, undoing the swap the
+             * user just watched costs a real return trip.
+             */
+            const val REVERT_HYSTERESIS_DP = 96f
         }
 
         /** Where the dragged tile sat when the last widget swap was committed; NaN before any. */
@@ -232,6 +242,9 @@ object AresHomeReorder {
          * a device to measure it on.
          */
         private var lastSwapTarget: ItemInfo? = null
+
+        /** The rank the dragged item left in its last swap; see the revert block in the chooser. */
+        private var lastSwapFromRank = RecyclerView.NO_POSITION
 
         /** The dragged tile's current top-left, sampled by [chooseDropTarget] for [onMove]. */
         private var curDragX = 0
@@ -392,8 +405,8 @@ object AresHomeReorder {
                 // Hysteresis. Nominate nothing until the drag has actually travelled since the last
                 // swap, or the coverage rule oscillates against the bounds its own swap moved.
                 // See [WIDGET_SWAP_HYSTERESIS_DP].
+                val density = list.resources.displayMetrics.density
                 if (!lastSwapX.isNaN()) {
-                    val density = list.resources.displayMetrics.density
                     val need = WIDGET_SWAP_HYSTERESIS_DP * density
                     if (kotlin.math.hypot(curX - lastSwapX, curY - lastSwapY) < need) return null
                 }
@@ -423,6 +436,26 @@ object AresHomeReorder {
                     // The return leg of the A -> B -> A cycle. See [lastSwapTarget].
                     val info = list.aresAdapter.itemAt(holder.bindingAdapterPosition)
                     if (info != null && info === lastSwapTarget) continue
+                    // The return leg by RANK, briefly. A swap re-homes the displaced mass into the
+                    // space the dragged item vacated -- which is where the finger just was, and
+                    // with a big bystander (the 4x3) the new box lands ON the finger, satisfies
+                    // the coverage rule, and swaps straight back. [lastSwapTarget] cannot stop
+                    // that cycle: a rank jump displaces TWO OR MORE bystanders and the return legs
+                    // alternate between them (measured: transitions=9, revisits=7 among 3 orders,
+                    // the dragged 2x2 bouncing rank 0<->2 every evaluation -- the same numbers row
+                    // 26's broken guard produced, from a cycle its fix did not close). So the
+                    // dragged item's own previous rank is blocked as a destination -- but only
+                    // until the finger has travelled [REVERT_HYSTERESIS_DP] past the swap. Row
+                    // 26's original sin was this same block WITHOUT the decay: an index blocked
+                    // until the next swap punished whatever innocent tile later stood there. With
+                    // it, the block dies metres before any deliberate return trip could exist.
+                    if (holder.bindingAdapterPosition == lastSwapFromRank &&
+                        !lastSwapX.isNaN() &&
+                        kotlin.math.hypot(curX - lastSwapX, curY - lastSwapY) <
+                        REVERT_HYSTERESIS_DP * density
+                    ) {
+                        continue
+                    }
                     val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
                     val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
                     // Normalised by the SMALLER of the two, not by the target.
@@ -547,6 +580,7 @@ object AresHomeReorder {
                 lastSwapX = curDragX.toFloat()
                 lastSwapY = curDragY.toFloat()
                 lastSwapTarget = targetInfo
+                lastSwapFromRank = from
             }
             return moved
         }
@@ -600,6 +634,7 @@ object AresHomeReorder {
             lastSwapX = Float.NaN
             lastSwapY = Float.NaN
             lastSwapTarget = null
+            lastSwapFromRank = RecyclerView.NO_POSITION
             list.setReorderInProgress(true)
 
             // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
@@ -626,6 +661,7 @@ object AresHomeReorder {
             lastSwapX = Float.NaN
             lastSwapY = Float.NaN
             lastSwapTarget = null
+            lastSwapFromRank = RecyclerView.NO_POSITION
             list.setFloatSuspendedFor(null)
             // Back to the mode's resting size -- which is read from the mode, not from a constant,
             // so a drag that outlived edit mode settles at 1.0 rather than snapping to 0.92.
