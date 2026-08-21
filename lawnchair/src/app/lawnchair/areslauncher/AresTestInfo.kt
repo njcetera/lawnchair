@@ -215,6 +215,14 @@ object AresTestInfo {
     const val REQUEST_OVERSCROLL_STATE = "ares-overscroll-state"
 
     /**
+     * Monotonic count of S4 decline-branch executions (release outside an open folder inside the
+     * grace). Exists so the S4 journey can PROVE its scenario ran: the margin between exercised
+     * and vacuously green is tens of milliseconds of settle timing, and a pass that never entered
+     * the branch must be detectable.
+     */
+    const val REQUEST_FOLDER_DROP_STATS = "ares-folder-drop-stats"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -256,6 +264,10 @@ object AresTestInfo {
         REQUEST_OVERSCROLL_STATE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> overscrollState(launcher) },
+        )
+        REQUEST_FOLDER_DROP_STATS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putLong(key, value) },
+            { _ -> AresFolderDrop.declinedExitingCount() },
         )
         REQUEST_FOLDER_METRICS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },

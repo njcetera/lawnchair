@@ -136,6 +136,18 @@ object AresFolderDrop {
     private var previewExiting = false
 
     /**
+     * How many times the S4 decline branch has actually run since process start. Exists for the
+     * test channel only: the S4 journey's margin between "exercised" and "vacuously green" is a
+     * few dozen milliseconds of settle timing, and a pass that never entered the branch must be
+     * detectable (adversarial review, 2026-08-21). Monotonic; never reset.
+     */
+    private var declinedExiting = 0L
+
+    /** See [declinedExiting]. */
+    @JvmStatic
+    fun declinedExitingCount(): Long = declinedExiting
+
+    /**
      * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
      * `DragController` drag from the app list, the widget picker or another folder.
      *
@@ -454,6 +466,16 @@ object AresFolderDrop {
     }
 
     /**
+     * Whether a dwell over [target] while holding [source] could ever arm — the eligibility half
+     * of [kindOf], for callers that must not displace a tile the user may be aiming at (row 32:
+     * the external drop-slot mover). Deliberately NOT the freeze: candidacy alone must keep the
+     * slot from shoving the aim aside, but only an actual arm may stop the slot moving elsewhere.
+     */
+    @JvmStatic
+    fun couldAcceptDwell(target: ItemInfo, source: ItemInfo): Boolean =
+        kindOf(target, source) != Kind.NONE
+
+    /**
      * Completes a drop that the dwell armed, moving [item] into the folder it locked onto.
      *
      * ## Why this resolves against the armed target rather than re-hit-testing the drop point
@@ -496,8 +518,14 @@ object AresFolderDrop {
             // folder", maintained per move by onDragPoint. Outside means the release belongs to
             // the grid: close the preview and decline, and the ordinary placement path takes it.
             if (previewExiting) {
+                // Cancel BEFORE closing: closePreview() drops the previewExiting flag, and
+                // cancelPreviewExit() early-returns on a clear flag -- run in the other order the
+                // posted 400ms `previewExitElapsed` survives this branch and fires into the NEXT
+                // drag's state, the S1 class reintroduced (adversarial review, 2026-08-21).
+                cancelPreviewExit()
                 closePreview()
                 clear()
+                declinedExiting++
                 return false
             }
             cancelPreviewExit()

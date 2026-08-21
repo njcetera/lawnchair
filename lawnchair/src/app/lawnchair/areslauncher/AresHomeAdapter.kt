@@ -489,6 +489,16 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private fun dropDuplicateWidgetRow(info: ItemInfo): Boolean {
         if (info !is LauncherAppWidgetInfo) return false
+        // Same DATABASE ROW arriving twice (a double bind) is checked FIRST, by primary key, for
+        // every widget row -- allocated or not. The first version of the allocation gate below
+        // sat above this check and made it unreachable for unrestored rows, which are exactly the
+        // rows the model re-delivers (row 34: every reload re-races them; the removeItems KDoc
+        // records Gmail id 14 arriving twice). Two entries for one row under
+        // `setHasStableIds(true)` is two positions answering one stable id, which RecyclerView
+        // does not tolerate. Nothing to delete: just don't list it again.
+        if (items.any { it === info || (it is LauncherAppWidgetInfo && it.id == info.id) }) {
+            return true
+        }
         // An UNALLOCATED id is not an identity. Every restore placeholder carries
         // `appWidgetId = NO_ID`, so two seeded-but-not-yet-bound widgets "share" -1 without
         // sharing anything -- and when the bind race resolves slowly enough for both to arrive
@@ -503,9 +513,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (index < 0) return false
 
         val existing = items[index] as LauncherAppWidgetInfo
-        // Same row arriving twice (a double bind), not two rows: nothing to delete, just don't
-        // list it again. removeItems() exists to keep this rare, but it is cheap to be sure.
-        if (existing === info || existing.id == info.id) return true
 
         if (isPlaceholder(existing) && !isPlaceholder(info)) {
             launcher.modelWriter.deleteItemFromDatabase(existing, DUPLICATE_WIDGET_REASON)

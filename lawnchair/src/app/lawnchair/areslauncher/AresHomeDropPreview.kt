@@ -84,7 +84,29 @@ object AresHomeDropPreview : DragController.DragListener {
         if (AresFolderDrop.isFrozen()) return
 
         val local = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
-        val index = grid.dropIndexAt(local[0], local[1])
+
+        var index = grid.dropIndexAt(local[0], local[1])
+
+        // Never displace the tile the finger is INSIDE when a dwell over it could arm (row 32).
+        // dropIndexAt's case 1 takes the hovered tile's own index — right for a RELEASE, wrong for
+        // the live mover: opening the gap AT the aim shoves the aim target aside (measured: the
+        // icon slid 263px out from under a still finger), so the CREATE dwell structurally never
+        // completed — the freeze only engages once a dwell ARMS, and the dwell needs the icon to
+        // still be there. Parking the slot one index PAST the hovered tile keeps every tile before
+        // it — the aim included — exactly where it is, which is the external-pipeline mirror of
+        // the in-grid rule that displacement "must not fire at the point they are aiming for".
+        val aim = grid.dropCandidateUnder(local[0], local[1], item.id)
+        if (aim != null) {
+            val position = grid.getChildAdapterPosition(aim)
+            val info = if (position != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
+                grid.aresAdapter.itemAt(position)
+            } else {
+                null
+            }
+            if (info != null && AresFolderDrop.couldAcceptDwell(info, item)) {
+                index = position + 1
+            }
+        }
 
         if (list !== grid) {
             clear()

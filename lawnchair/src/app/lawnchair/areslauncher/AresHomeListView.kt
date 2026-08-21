@@ -1631,14 +1631,71 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * expand-notifications` did **not** reproduce a CANCEL against injected input, and reading that
      * run as a failed fix would have been wrong.)
      */
-    /** See [GESTURE_END_NONE]/[GESTURE_END_UP]/[GESTURE_END_CANCEL] on the companion. */
-    internal var lastGestureEnd = GESTURE_END_NONE
+    /**
+     * How the gesture that owned the CURRENT reorder drag ended. A LATCH, not a last-event
+     * record: `clearView` reads this ~250ms after the release, and the user's next touch lands
+     * inside that window in the ordinary rapid-rearrange rhythm — a plain last-event field was
+     * measured rewriting a completed UP to "never ended", which discarded the armed folder commit
+     * AND the persist (adversarial review, 2026-08-21). So: armed by
+     * [AresHomeReorder.Callback.onSelectedChanged] via [beginDragGestureWatch] when a drag
+     * starts, written ONCE by the first UP/CANCEL that arrives while a reorder is in progress,
+     * ignored the rest of the time. Later gestures cannot rewrite the drag's own ending.
+     *
+     * See [GESTURE_END_NONE]/[GESTURE_END_UP]/[GESTURE_END_CANCEL] on the companion.
+     */
+    internal var dragGestureEnd = GESTURE_END_NONE
+        private set
+
+    /** Arms [dragGestureEnd] for a new drag. Called at drag start, before any end can arrive. */
+    internal fun beginDragGestureWatch() {
+        dragGestureEnd = GESTURE_END_NONE
+    }
+
+    // ------------------------------------------------------- folder-exit handoff (rows 31/32)
+
+    private var lastHandoffX = 0f
+    private var lastHandoffY = 0f
+
+    /**
+     * Feeds [AresFolderExitHandoff]'s relayed gesture into this view's ordinary dispatch, so the
+     * in-grid pipeline — ItemTouchHelper, the gesture-end latch, the empty-space tracker — sees a
+     * stream indistinguishable from a finger that started here. Deliberately through
+     * [dispatchTouchEvent], NOT `super`: the popup's synthetic CANCEL bypasses via `super`
+     * precisely so it cannot masquerade, and this relay is the opposite case — it must.
+     */
+    internal fun dispatchSyntheticHandoffEvent(
+        action: Int,
+        downTime: Long,
+        eventTime: Long,
+        x: Float,
+        y: Float,
+    ) {
+        lastHandoffX = x
+        lastHandoffY = y
+        val ev = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
+        dispatchTouchEvent(ev)
+        ev.recycle()
+    }
+
+    /** Where the relay last placed the pointer, for ending a drag whose source has gone. */
+    internal fun lastHandoffPoint(): FloatArray = floatArrayOf(lastHandoffX, lastHandoffY)
+
+    /** Selects [holder] for the in-grid drag; the relayed MOVEs drive it from there. */
+    internal fun startHandoffDrag(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder) {
+        itemTouchHelper.startDrag(holder)
+    }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> lastGestureEnd = GESTURE_END_NONE
-            MotionEvent.ACTION_UP -> lastGestureEnd = GESTURE_END_UP
-            MotionEvent.ACTION_CANCEL -> lastGestureEnd = GESTURE_END_CANCEL
+        val end = when (ev.actionMasked) {
+            MotionEvent.ACTION_UP -> GESTURE_END_UP
+            MotionEvent.ACTION_CANCEL -> GESTURE_END_CANCEL
+            else -> GESTURE_END_NONE
+        }
+        if (end != GESTURE_END_NONE &&
+            isReorderInProgress() &&
+            dragGestureEnd == GESTURE_END_NONE
+        ) {
+            dragGestureEnd = end
         }
         if (ev.actionMasked == MotionEvent.ACTION_CANCEL) AresFolderDrop.cancel()
         trackEmptySpaceLongPress(ev)
@@ -1816,9 +1873,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
          * empty-space popup's synthetic CANCEL deliberately bypasses it by dispatching through
          * `super`, so it cannot masquerade as a real ending here either.
          *
-         * Known, accepted imprecision: a new DOWN that lands during a previous drop's settle
-         * animation resets this to NONE before that drop's `clearView` runs, which skips one
-         * persistOrder. The next completed drag persists the same ranks; nothing is lost.
+         * The record is a per-drag LATCH ([dragGestureEnd]): the first ending that arrives while
+         * a reorder is in progress wins, and later touches cannot rewrite it. The first version
+         * was a last-event field reset on every DOWN, and its "known, accepted imprecision" was
+         * neither known fully nor acceptable: a tap landing inside the ~250ms settle window --
+         * the ordinary rapid-rearrange rhythm -- rewrote a completed UP to NONE, which discarded
+         * an armed folder commit outright and skipped the persist (adversarial review,
+         * 2026-08-21).
          */
         const val GESTURE_END_NONE = 0
         const val GESTURE_END_UP = 1
