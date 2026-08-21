@@ -41,6 +41,8 @@ import androidx.annotation.Keep;
 import androidx.annotation.Nullable;
 import androidx.core.view.WindowInsetsCompat;
 
+import app.lawnchair.areslauncher.AresTestInfo;
+
 import com.android.launcher3.BubbleTextView;
 import com.android.launcher3.CellLayout;
 import com.android.launcher3.DeviceProfile;
@@ -464,7 +466,10 @@ public class TestInformationHandler implements ResourceBasedOverride {
                 return getFromExecutorSync(MODEL_EXECUTOR, Bundle::new);
 
             default:
-                return null;
+                // Ares requests, kept out of stock's switch so a future Lawnchair merge sees one
+                // added line rather than a rewritten method. Returns null for anything not ours,
+                // which is exactly what this branch returned before.
+                return AresTestInfo.handle(method, arg);
         }
     }
 

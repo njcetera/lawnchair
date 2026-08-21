@@ -1,0 +1,52 @@
+// AresLauncher's out-of-process instrumentation module.
+//
+// `com.android.test`, exactly like `:baseline-profile` -- a self-contained test APK that installs
+// alongside the launcher and drives it from its own process. Nothing here is compiled into the
+// shipped app.
+//
+// Deliberately NOT an `androidTest` source set on the app module: that would run in the launcher's
+// own process, where the test classpath and the launcher's would have to agree, and where a test
+// could reach into view state directly instead of through the seam the tests are meant to exercise.
+plugins {
+    alias(libs.plugins.android.test)
+}
+
+android {
+    namespace 'app.lawnchair.arestests'
+
+    defaultConfig {
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    targetProjectPath = ":"
+
+    // OUT-OF-PROCESS, and this line is the whole of it.
+    //
+    // Without it AGP points the instrumentation at the app: `am instrument` then FORCE-STOPS the
+    // launcher and re-launches it as an instrumented process with the test classes inside it.
+    // Measured here: `pm list instrumentation` read `(target=app.lawnchair.debug)`, and enabling
+    // the test provider -- which restarts the launcher -- killed the test with it.
+    //
+    // Self-instrumenting makes the test its own target, so the launcher runs as the real home app,
+    // in its own process, with its own lifecycle, and the test drives it from outside. Same switch
+    // macrobenchmark uses, and the reason `:baseline-profile` does not hit this.
+    experimentalProperties["android.experimental.self-instrumenting"] = true
+
+    // Must mirror the app's dimensions or AGP cannot resolve which app variant to test against.
+    flavorDimensions += ["app", "recents", "channel"]
+    productFlavors {
+        lawn { dimension = "app" }
+        withQuickstep { dimension = "recents" }
+        github { dimension = "channel" }
+        nightly { dimension = "channel" }
+        play { dimension = "channel" }
+    }
+}
+
+dependencies {
+    implementation libs.androidx.junit
+    implementation libs.androidx.uiautomator
+    implementation libs.androidx.test.runner
+    implementation libs.androidx.test.rules
+    implementation libs.google.truth
+}

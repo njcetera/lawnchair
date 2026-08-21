@@ -23,6 +23,8 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import app.lawnchair.areslauncher.AresTestInfo;
+
 import com.android.launcher3.Utilities;
 import com.android.launcher3.util.ContentProviderProxy;
 
@@ -33,7 +35,11 @@ public class TestInformationProvider extends ContentProviderProxy {
     @Nullable
     @Override
     public ProxyProvider getProxy(@NonNull Context context) {
-        if (Utilities.isRunningInTestHarness()) {
+        // Ares: also opened by our own debug-build predicate, so the channel need not be bought
+        // with ro.test_harness -- a global behaviour switch with ~41 product call sites, at least
+        // one of them (SpringLoadedDragController's dwell) on a surface under test. See
+        // AresTestInfo for the full reasoning and for why a test cannot set it anyway.
+        if (Utilities.isRunningInTestHarness() || AresTestInfo.isTestChannelOpen(context)) {
             return new ProxyProvider() {
                 @Nullable
                 @Override

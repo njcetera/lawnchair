@@ -26,6 +26,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import app.lawnchair.areslauncher.AresTestInfo
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material3.Button
@@ -70,6 +71,7 @@ class LawnchairApp : LauncherApplication() {
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)
+        AresTestInfo.enableTestProviderIfDebug(this)
     }
 
     fun hideClockInStatusBar() {
