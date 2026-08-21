@@ -204,6 +204,76 @@ class AresLauncherDriver {
     }
 
     /**
+     * The home grid's three child counts. See `AresTestInfo.REQUEST_CHILD_CENSUS`.
+     *
+     * [viewGroup] counts hidden children, [layoutManager] does not, so `viewGroup - layoutManager`
+     * is the number of views RecyclerView is holding attached but invisible to layout — a ghost
+     * count. [adapter] is what the model says should be there; it does **not** equal either of the
+     * others in normal operation, because only what fits on screen is attached.
+     */
+    data class Census(val viewGroup: Int, val layoutManager: Int, val adapter: Int) {
+        override fun toString() = "$viewGroup|$layoutManager|$adapter"
+    }
+
+    fun childCensus(): Census {
+        val raw = call("ares-child-census")?.getString("response") ?: "0|0|0"
+        val p = raw.split("|")
+        return Census(
+            p.getOrNull(0)?.toIntOrNull() ?: 0,
+            p.getOrNull(1)?.toIntOrNull() ?: 0,
+            p.getOrNull(2)?.toIntOrNull() ?: 0,
+        )
+    }
+
+    /** Removes the first `"widget"` or `"icon"` on the grid via the × badge's own code path. */
+    fun removeFirstItem(kind: String): Int =
+        call("ares-remove-item", kind)?.getInt("response") ?: -1
+
+    /**
+     * Fails loudly if the two-widget fixture is not present.
+     *
+     * NOT self-healing, deliberately, after trying. Tests in this suite mutate the grid and one of
+     * them -- AresGhostWidgetTest -- has to DELETE a widget to test widget deletion, so class order
+     * (alphabetical) decided whether a later test found its fixture. Restoring the rows in-process
+     * does not work: `run-as <pkg> ls databases` succeeds through
+     * `UiAutomation.executeShellCommand`, but `run-as <pkg> sqlite3 <db> "<sql>"` returns empty
+     * for every quoting variant tried (bare, single, double, wrapped in `sh -c` both ways) while
+     * the identical command works over `adb shell`. So re-seeding belongs to the runner, which has
+     * a real shell: `design/scripts/run-ares-tests.sh` seeds before every class.
+     *
+     * A precondition that cannot be met must be LOUDER than a failure, never quieter -- so this
+     * throws with the command to run rather than skipping, and never reports a pass it did not
+     * earn.
+     */
+    fun requireWidgetFixture() {
+        val widgets = homeOrder().count { it.substringAfter("/") == "type4" }
+        check(widgets >= 2) {
+            "FIXTURE MISSING: this test needs 2 widgets on the grid, found . " +
+                "Re-seed with: design/scripts/seed-widget-fixture.sh emulator-5554 " +
+                "(or run the whole suite via design/scripts/run-ares-tests.sh, which seeds " +
+                "before every class -- AresGhostWidgetTest deletes a widget by design)."
+        }
+    }
+
+    /**
+     * Force-stops the launcher and waits for the grid to come back.
+     *
+     * Needed by anything measuring attached children: a view that RecyclerView has left attached
+     * but hidden survives every ordinary interaction and is only cleared by activity recreation, so
+     * without this a leak from one test is read as a leak in the next.
+     */
+    fun restartLauncher() {
+        device.executeShellCommand("am force-stop $launcherPackage")
+        device.pressHome()
+        device.wait(Until.hasObject(By.pkg(launcherPackage).depth(0)), 10_000)
+        // Both conditions: the adapter fills before the children attach, and a census taken in
+        // between reads `0|0|32` -- which is not a ghost, but would be read as one.
+        waitFor("home grid to rebind after restart") {
+            homeOrder().isNotEmpty() && childCensus().viewGroup > 0
+        }
+    }
+
+    /**
      * The whole Ares drag, as ONE gesture: long-press to enter edit mode, then travel without
      * lifting.
      *

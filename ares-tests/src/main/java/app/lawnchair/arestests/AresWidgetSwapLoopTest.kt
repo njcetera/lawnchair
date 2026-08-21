@@ -45,6 +45,11 @@ class AresWidgetSwapLoopTest {
         ares.openTestChannel()
         ares.goHome()
         ares.exitEditMode()
+        // Both cases here need two widgets, and AresGhostWidgetTest deletes one by design, so this
+        // says so rather than failing later with `expected at least 2, but was 0` -- which reads
+        // like a product defect and is not one. The runner re-seeds per class; see
+        // AresLauncherDriver.requireWidgetFixture for why that cannot happen in-process.
+        ares.requireWidgetFixture()
     }
 
     @After

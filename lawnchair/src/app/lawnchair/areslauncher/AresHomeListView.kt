@@ -186,7 +186,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * simply what the next layout pass computes. This is the first interaction that exercises that
      * property against real removals rather than the packer's own tests.
      */
-    private fun removeFromHome(info: ItemInfo) {
+    internal fun removeFromHome(info: ItemInfo) {
         val id = info.id
         val removed = aresAdapter.removeItems { it.id == id }
         if (!removed) return

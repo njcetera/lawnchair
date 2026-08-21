@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.Reorderable
 import com.android.launcher3.testing.TestInformationHandler
 
@@ -118,6 +119,35 @@ object AresTestInfo {
     const val REQUEST_TILE_METRICS = "ares-tile-metrics"
 
     /**
+     * The W1 metric: `viewGroup|layoutManager|adapter` child counts for the home grid.
+     *
+     * The three disagree in exactly one interesting way. `RecyclerView.getChildCount()` is plain
+     * `ViewGroup`, so it counts **every** attached child including ones `ChildHelper` is hiding;
+     * `LayoutManager.getChildCount()` is `getUnhiddenChildCount()`, so it does not. A view that
+     * `animateDisappearance` re-attached hidden and never removed shows up as
+     * `viewGroup > layoutManager` and is invisible to everything the layout manager can reach —
+     * it cannot be laid out, cannot be recycled, and keeps the bounds it had when it was deleted.
+     *
+     * That is the ghost the owner reported, and this is the number that says whether one is
+     * present. It is the same divergence the ledger recorded by hand as "17 attached children
+     * against 16 database rows", measured directly rather than parsed out of `dumpsys`.
+     */
+    const val REQUEST_CHILD_CENSUS = "ares-child-census"
+
+    /**
+     * Removes the first home item matching `arg` (`"widget"` or `"icon"`), returning its id or -1.
+     *
+     * Calls [AresHomeListView.removeFromHome] — the same function the × badge's click listener
+     * calls, and the whole point of routing through it rather than poking the adapter. The W1 bug
+     * lives downstream of `notifyItemRemoved`, in RecyclerView's disappearance handling, so what
+     * matters is that the notify is real; whether the finger or the test asked for it is not part
+     * of the mechanism. Driving it from here rather than through a synthesised tap on a badge also
+     * keeps the check away from the gesture reliability this harness is separately known to be bad
+     * at.
+     */
+    const val REQUEST_REMOVE_ITEM = "ares-remove-item"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -140,6 +170,14 @@ object AresTestInfo {
             { b, key, value -> b.putStringArray(key, value) },
             { launcher -> tileMetrics(launcher) },
         )
+        REQUEST_CHILD_CENSUS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> childCensus(launcher) },
+        )
+        REQUEST_REMOVE_ITEM -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putInt(key, value) },
+            { launcher -> removeFirst(launcher, arg) },
+        )
         else -> null
     }
 
@@ -159,6 +197,33 @@ object AresTestInfo {
             val info = adapter.itemAt(i)
             if (info == null) "?" else "${info.id}/${info.title ?: "type${info.itemType}"}"
         }.toTypedArray()
+    }
+
+    /** See [REQUEST_CHILD_CENSUS]. `viewGroup|layoutManager|adapter`. */
+    private fun childCensus(launcher: Launcher): String {
+        val list = launcher.workspace?.aresHomeList ?: return "0|0|0"
+        // list.childCount is ViewGroup's, so it counts hidden children too. The layout manager's
+        // is getUnhiddenChildCount(). Their difference is the ghost count.
+        val viewGroup = list.childCount
+        val layoutManager = list.layoutManager?.childCount ?: 0
+        val adapter = list.aresAdapter.itemCount
+        return "$viewGroup|$layoutManager|$adapter"
+    }
+
+    /** See [REQUEST_REMOVE_ITEM]. Returns the removed item's id, or -1. */
+    private fun removeFirst(launcher: Launcher, arg: String?): Int {
+        val list = launcher.workspace?.aresHomeList ?: return -1
+        val adapter = list.aresAdapter
+        val wantWidget = arg == "widget"
+        for (i in 0 until adapter.itemCount) {
+            val info = adapter.itemAt(i) ?: continue
+            val isWidget = info.itemType == Favorites.ITEM_TYPE_APPWIDGET ||
+                info.itemType == Favorites.ITEM_TYPE_CUSTOM_APPWIDGET
+            if (isWidget != wantWidget) continue
+            list.removeFromHome(info)
+            return info.id
+        }
+        return -1
     }
 
     private fun tileMetrics(launcher: Launcher): Array<String> {
