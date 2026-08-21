@@ -127,6 +127,17 @@ object AresGestures {
      * [pressHoldDragRelease]'s single destination cannot express. No hold on purpose: a pan must
      * start moving before the long-press timeout or it becomes a long-press.
      */
+    /**
+     * Injects a lone ACTION_CANCEL, clearing any pointer a crashed gesture left mid-stream.
+     * A test that throws between DOWN and UP strands the injected pointer, and every later
+     * injection in the process can then be refused -- which reads as emulator degradation and is
+     * not. For tearDown, wrapped in runCatching.
+     */
+    fun cancelStuckPointer() {
+        val now = SystemClock.uptimeMillis()
+        send(now, now, MotionEvent.ACTION_CANCEL, 1f, 1f)
+    }
+
     fun dragPath(points: List<PointF>, legMs: Long, onStep: (at: PointF) -> Unit = { }) {
         require(points.size >= 2) { "a path needs at least two points" }
         val downTime = SystemClock.uptimeMillis()

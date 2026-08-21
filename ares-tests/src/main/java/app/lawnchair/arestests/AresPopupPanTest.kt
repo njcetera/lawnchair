@@ -57,9 +57,11 @@ class AresPopupPanTest {
 
     @After
     fun tearDown() {
+        runCatching { AresGestures.cancelStuckPointer() }
         // BACK closes the popup if a failure left it up.
         runCatching { ares.pressBack() }
         runCatching { ares.exitEditMode() }
+        runCatching { ares.scrollGridToTop() }
     }
 
     @Test

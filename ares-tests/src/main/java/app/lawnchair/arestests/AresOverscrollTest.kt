@@ -34,6 +34,17 @@ import org.junit.runner.RunWith
  * otherwise the pane never overscrolled and a final "finished" proves nothing. When the pull never
  * starts, this fails as *could not reproduce*, which is a different statement from *the release is
  * broken*. Same discipline as the C4 test, same reason.
+ *
+ * ## Status: the pull CANNOT be armed here, and this test is out of the suite
+ *
+ * Measured 2026-08-21: 0 pulled samples in 101, across extreme over-pulls both starting FROM a
+ * settled ALL_APPS and crossing full open in one gesture (which would need the mid-flight
+ * from-state reinit). The overshoot is a stock path built for the VERTICAL all-apps swipe; this
+ * fork opens the app list with the §10 horizontal pane, and nothing reachable by injection drives
+ * `progress <= 0` with `mFromState == ALL_APPS`. The row-29 fix stands as hardening -- strictly
+ * more release, never less -- but a check that cannot observe the armed state cannot falsify
+ * anything, so it earns no place in the runner. If the owner ever SEES a stuck stretch on the app
+ * list, that is the moment this becomes reachable and worth revisiting.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
@@ -67,20 +78,29 @@ class AresOverscrollTest {
         // its from-state at full open -- timing that can miss. Retrying setup is setup.
         while (attempt < MAX_ATTEMPTS && !pulled) {
             attempt++
+            val y = 1200f
+            // The overshoot arms at `progress <= 0 && mFromState == ALL_APPS`
+            // (AbstractStateChangeTouchController.java:227) -- a gesture measured FROM the app
+            // list being pulled past its own zero. A single home-origin gesture only reaches that
+            // through a mid-flight from-state reinit at the full-open crossing, which the first
+            // version of this test missed by 80px of travel, three attempts straight. So: open the
+            // pane and SETTLE first, then over-pull and reverse as one gesture from ALL_APPS --
+            // which is also exactly the reviewer's reported scenario.
             ares.goHome()
             Thread.sleep(400)
-            val y = 1200f
+
             val sampler = AresSampler(intervalMs = 40L) { ares.overscrollFinished() }
             sampler.start()
             AresGestures.dragPath(
                 listOf(
-                    PointF(980f, y),       // start near the right edge
-                    PointF(140f, y),       // open the pane fully
-                    PointF(60f, y),        // and keep pulling: the overscroll
-                    PointF(60f, y),        // hold the pull a beat
-                    PointF(980f, y),       // reverse all the way home
+                    PointF(1000f, y),      // from the closed side, so the crossing reinit runs too
+                    PointF(400f, y),
+                    PointF(5f, y),         // cross full open and keep pulling to the bezel
+                    PointF(5f, y),         // hold the pull
+                    PointF(5f, y),         // and hold
+                    PointF(1040f, y),      // reverse all the way home
                 ),
-                legMs = 380,
+                legMs = 500,
             )
             samples = sampler.stop()
             pulled = samples.any { !it }

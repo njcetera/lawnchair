@@ -312,6 +312,26 @@ class AresLauncherDriver {
         }
     }
 
+    /**
+     * Scrolls the grid back to offset 0 with plain downward drags.
+     *
+     * Gesture tests assume tile coordinates are ON SCREEN, and `tiles()` reports them wherever the
+     * grid happens to be scrolled -- a prior test that scrolled to the end left the next test
+     * aiming at `y = -247`, which `injectInputEvent` refuses, and every later gesture in the batch
+     * then inherited the stuck stream. Scroll state is shared mutable fixture, same as the
+     * database; reset it, do not hope.
+     */
+    fun scrollGridToTop() {
+        var guard = 0
+        while (surfaceState().scrollOffset > 0 && guard++ < 10) {
+            AresGestures.dragPath(
+                listOf(android.graphics.PointF(540f, 700f), android.graphics.PointF(540f, 1900f)),
+                legMs = 300,
+            )
+            Thread.sleep(500)
+        }
+    }
+
     /** `state|inTransition|optionsPopup|scrollOffset`. See `AresTestInfo.REQUEST_SURFACE_STATE`. */
     data class SurfaceState(
         val state: String,
@@ -323,7 +343,7 @@ class AresLauncherDriver {
     fun surfaceState(): SurfaceState {
         val p = (call("ares-surface-state")?.getString("response") ?: "?|false|false|-1").split("|")
         return SurfaceState(
-            p.getOrElse(0) { "?" },
+            p.getOrElse(0) { "?" }.uppercase(),
             p.getOrNull(1)?.toBoolean() ?: false,
             p.getOrNull(2)?.toBoolean() ?: false,
             p.getOrNull(3)?.toIntOrNull() ?: -1,

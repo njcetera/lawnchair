@@ -49,12 +49,15 @@ class AresSwapGeometryTest {
         ares.setAnimatorScale(1)
         ares.goHome()
         ares.exitEditMode()
+        ares.scrollGridToTop()
         ares.requireWidgetFixture()
     }
 
     @After
     fun tearDown() {
+        runCatching { AresGestures.cancelStuckPointer() }
         runCatching { ares.exitEditMode() }
+        runCatching { ares.scrollGridToTop() }
     }
 
     @Test
