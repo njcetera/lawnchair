@@ -370,7 +370,7 @@ public abstract class AbstractStateChangeTouchController
         anim.setFloatValues(startProgress, endProgress);
         updateSwipeCompleteAnimation(anim, duration, targetState, velocity, fling);
         mCurrentAnimation.dispatchOnStart();
-        if (targetState == LauncherState.ALL_APPS) {
+        if (targetState == LauncherState.ALL_APPS && aresWantsAllAppsSpring()) {
             if (mAllAppsOvershootStarted) {
                 mLauncher.getAppsView().onRelease();
                 mAllAppsOvershootStarted = false;
@@ -379,6 +379,18 @@ public abstract class AbstractStateChangeTouchController
             }
         }
         anim.start();
+    }
+
+    /**
+     * AresLauncher: whether the app list should spring as it settles into ALL_APPS.
+     *
+     * <p>True for stock, whose all-apps arrives on a VERTICAL swipe-up where a sheet springing to
+     * a stop reads correctly. AresLauncher also reaches all-apps by a horizontal Pivot pan, and the
+     * same spring there reads as an unexplained bounce -- the surface tracked the finger sideways
+     * and then wobbles vertically. Overridden by AresPaneSwipeController.
+     */
+    protected boolean aresWantsAllAppsSpring() {
+        return true;
     }
 
     protected void updateSwipeCompleteAnimation(ValueAnimator animator, long expectedDuration,

@@ -134,6 +134,23 @@ class AresPaneSwipeController(launcher: Launcher) :
         return 1f / totalShift
     }
 
+    /**
+     * No spring on the app list as it settles (§2).
+     *
+     * Stock attaches `addSpringFromFlingUpdateListener` to the settle animation whenever the target
+     * is ALL_APPS. That is right for the gesture it was written for: all-apps arrives on a
+     * **vertical** swipe-up, and a sheet springing as it comes to rest is the whole feel of it.
+     *
+     * This controller brings the same surface in on a **horizontal** Pivot pan, and there the
+     * spring is a non-sequitur — the pane tracks the finger sideways and then wobbles on an axis
+     * the gesture never used. Reported as *"when I swipe from the home page to the app list, theres
+     * this subtle bounce annimation the app list does. I dont like that"*.
+     *
+     * Only the spring is dropped. The interpolators stay stock, deliberately, so the reveal itself
+     * still looks like the transition it parallels.
+     */
+    override fun aresWantsAllAppsSpring(): Boolean = false
+
     override fun getConfigForStates(
         fromState: LauncherState,
         toState: LauncherState,
