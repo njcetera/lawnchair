@@ -8,7 +8,7 @@
 
      Arms deliberately SHORT. The first cut ran them 11 units into a 26-unit box and read as a
      bracket framing the corner rather than a mark sitting on it - "Id like to make it a tad smaller
-     or shorter, and lets move it to the boarder". They are now 6 units in a 22-unit box, and the
+     or shorter, and lets move it to the boarder". They are now 3 units of straight arm either side of the elbow, in a 22-unit box, and the
      view's margin was dropped so the whole thing sits on the tile's edge instead of inside it.
 
      The elbow is a quarter-circle rather than a mitre so it follows the same curve the tile's own
@@ -27,7 +27,7 @@
     android:tint="?android:attr/textColorPrimary">
 
     <path
-        android:pathData="M8,19 H13 A6,6 0 0 0 19,13 V8"
+        android:pathData="M10,19 H13 A6,6 0 0 0 19,13 V10"
         android:strokeColor="@android:color/white"
         android:strokeWidth="2.25"
         android:strokeLineCap="round"
