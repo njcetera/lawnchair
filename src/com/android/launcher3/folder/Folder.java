@@ -923,6 +923,31 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
      */
     public void aresEndPreviewSizing() {
         mAresPreviewingDrag = false;
+        aresRestoreDropTarget();
+    }
+
+    /**
+     * AresLauncher: re-registers this folder with DragController after a dwell preview ends while
+     * the folder stays OPEN.
+     *
+     * <p>{@link #aresBeginPreviewDrag} removes the folder as a drop target on purpose: during a
+     * preview our own path resolves the release, and letting DragController hand it the drop would
+     * run {@link #onDrop} with no current drag view. Nothing put it back. The only re-registration
+     * in the class is inside {@link #animateOpen}, guarded by {@code getParent() == null}, which is
+     * false for a folder that is already open — so after a dwell-drop the folder stayed on screen,
+     * parented, and permanently unable to accept a drop.
+     *
+     * <p>The consequence was not cosmetic: dragging an app inside that folder to reorder it found
+     * no drop target, fell through to the Workspace, and AresHomeDrop moved the app OUT onto the
+     * home grid. That is the defect 529276c113 and 8d1b546a4c were written to close, reached
+     * through a different door.
+     *
+     * <p>Idempotent — DragController.addDropTarget is a no-op for a target already registered.
+     */
+    public void aresRestoreDropTarget() {
+        if (mIsOpen && getParent() != null) {
+            mActivityContext.getDragController().addDropTarget(this);
+        }
     }
 
     /** AresLauncher: the rank the previewed empty slot currently sits at. */
@@ -990,6 +1015,14 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mPrevTargetRank = -1;
         if (mIsOpen) {
             close(true);
+            mRearrangeOnClose = true;
+        } else if (mState == STATE_ANIMATING) {
+            // Stock's completeDragExit has THREE branches and the first cut of this method kept
+            // two, its comment claiming they were "the same two lines stock uses ... and in the
+            // same order". Mid-close, mIsOpen is already false while the animation is still
+            // running, so without this we call rearrangeChildren() in precisely the state stock
+            // avoids calling it in — and B2 makes dwelling in and out repeatedly the specified
+            // use, so landing mid-close is normal rather than exotic.
             mRearrangeOnClose = true;
         } else {
             rearrangeChildren();

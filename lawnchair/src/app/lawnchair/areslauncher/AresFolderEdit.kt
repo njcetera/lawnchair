@@ -284,6 +284,18 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                     cell.requestLayout()
                 }
 
+                // Re-sized every pass, not once at creation.
+                //
+                // createCell runs from the first sync, which can happen BEFORE the folder's icons
+                // have been laid out — `iconLp.width` is then 0, the badge size computes to
+                // ((0 - 2*margin) / 2).coerceAtLeast(1) = **1**, and since createCell only re-runs
+                // when a cell's parent changes it never recovered. Measured: opening a folder by
+                // tapping it while the grid was already editing, first time after a cold start,
+                // gave four 1x1px badges in 202x231 cells — the × was there but unhittable. Closing
+                // and reopening produced the correct 91px, which is exactly why every earlier check
+                // missed it: they used the other open path.
+                sizeBadges(cell, iconLp.width)
+
                 // Re-asserted every pass for the same reason the badges are: arrangeChildren wipes
                 // and re-adds the icons, and a recycled BubbleTextView comes back without it.
                 // setOnTouchListener is idempotent for a listener already installed.
@@ -359,6 +371,29 @@ private const val CELL_TAG = "ares_folder_edit_cell"
          * The badge itself is [AresRemoveBadge]'s, unchanged, so the affordance is identical to
          * the grid's — same glyph, same touch target, same corner.
          */
+        /**
+         * Brings both badges to the size [cellWidthPx] affords, if it is known yet.
+         *
+         * Half the cell each, less the margins, so the two abut at the centre and cannot overlap
+         * for any cell width. Declines to act on a width of 0 rather than computing a size from
+         * it — a badge that is briefly absent is recoverable, a badge sized 1px looks present and
+         * is not usable, and nothing came back to correct it.
+         */
+        private fun sizeBadges(cell: View, cellWidthPx: Int) {
+            if (cellWidthPx <= 0 || cell !is ViewGroup) return
+            val margin = cell.resources.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+            val touch = ((cellWidthPx - 2 * margin) / 2).coerceAtLeast(1)
+            for (tag in arrayOf(AresRemoveBadge.BADGE_TAG, AresInfoBadge.BADGE_TAG)) {
+                val badge = cell.findViewWithTag<View>(tag) ?: continue
+                val lp = badge.layoutParams as? FrameLayout.LayoutParams ?: continue
+                if (lp.width != touch || lp.height != touch) {
+                    lp.width = touch
+                    lp.height = touch
+                    badge.layoutParams = lp
+                }
+            }
+        }
+
         private fun createCell(parent: ViewGroup, info: ItemInfo, cellWidthPx: Int): View {
             val cell = EditCell(parent.context)
             cell.tag = CELL_TAG
@@ -378,25 +413,19 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             // its own translucent panel, so this is frost over frost. If it reads muddy the answer
             // is a lower alpha here, not removing it -- the box is load-bearing for the badges now.
             //
-            // INSET, unlike the home grid's. Folder cells are laid out edge to edge -- measured
-            // 0,0-202,240 beside 202,0-404,240 -- and the frost is the cell's background, so it
-            // fills that rect exactly. At rest two boxes share a seam; during a reorder stock
-            // animates the icons past one another and the cells follow, so the boxes visibly run
-            // into each other: "apps in folders will have their blur backgrounds overlap and
-            // collide while moving".
+            // NOT an InsetDrawable, and this is a trap worth stating. Wrapping the frost in one to
+            // give neighbouring boxes a gap looks harmless and is not: `View.setBackground` applies
+            // a background's `getPadding` through `internalSetPadding`, which does **not** route
+            // through the overridable `setPadding` that [EditCell] deliberately no-ops. So the
+            // drawable's 10px inset silently became 10px of real cell padding, the two badges' own
+            // margins stacked on top of it, and two 91px badges stopped fitting across a 202px
+            // cell -- measured, they overlapped by 20x91px, and the ! (added second) stole that
+            // strip from the ×, making the remove control smaller than it should be.
             //
-            // Half an inset each side gives neighbours a full one between them, the same
-            // arrangement widgets use on the home grid (§23). It cannot crowd the icon: the box is
-            // still 182px around a 158px icon.
-            val frostInset =
-                cell.resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset) / 2
-            cell.background = android.graphics.drawable.InsetDrawable(
-                AresEditGrid.cellOutline(cell.context),
-                frostInset,
-                frostInset,
-                frostInset,
-                frostInset,
-            )
+            // If a visual gap between boxes is wanted again, it has to come from something that
+            // reports no padding -- a smaller drawn shape, or a child view with margins -- never
+            // from a background wrapper.
+            cell.background = AresEditGrid.cellOutline(cell.context)
 
             // Both badges take a REDUCED target here. A folder cell is ~83dp (202x240px measured):
             // two 48dp targets side by side need 234px of a 202px width and would overlap by about
