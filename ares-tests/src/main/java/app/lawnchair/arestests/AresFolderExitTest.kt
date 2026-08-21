@@ -119,7 +119,14 @@ class AresFolderExitTest {
 
     /** One press-hold-drag out of the folder onto the grid, with what was sampled during it. */
     private fun attemptDrag(): List<Sample> {
-        ares.restartLauncher()
+        // Close and reopen rather than restarting the launcher. A force-stop immediately before the
+        // gesture left the long-press failing to register at all -- twelve consecutive attempts
+        // never entered edit mode, where the same press-and-hold in AresFolderHoldTest enters it
+        // reliably without one. Not root-caused; the restart simply is not needed, since a drag
+        // that never armed moved nothing.
+        runCatching { ares.setFolderEdit(false) }
+        ares.pressBack()
+        ares.goHome()
         ares.exitEditMode()
         assertThat(ares.openFolder()).isTrue()
         ares.waitFor("folder to open") { ares.folderIcons().size >= 3 }
