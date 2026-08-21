@@ -155,7 +155,7 @@ object AresTestInfo {
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
-     * `folder|top,bottom|contentBottom|nameTop,nameBottom|state`
+     * `folder|top,bottom|contentBottom|nameTop,nameBottom|state|dragViews`
      *
      * Then one line per icon:
      * `icon|title|stateLift|actualTy|screenX,screenY|width,height`
@@ -386,7 +386,18 @@ object AresTestInfo {
         val name = folder.findViewById<View>(R.id.folder_name)
         val nameTop = name?.let { it.getLocationOnScreen(loc); loc[1] } ?: -1
         val nameBottom = if (name != null && nameTop >= 0) nameTop + name.height else -1
-        out.add("folder|$folderTop,$folderBottom|$contentBottom|$nameTop,$nameBottom|${if (folder.aresIsAnimating()) "animating" else "settled"}")
+        // DragViews in the DragLayer: the D4 tell. A bare hold that wrongly arms a drag lifts the
+        // icon OUT of the folder container into a DragView, so the chrome is absent by
+        // construction rather than lost -- see the D4 correction in defect-ledger.md.
+        var dragViews = 0
+        val dl = launcher.dragLayer
+        for (i in 0 until dl.childCount) {
+            if (dl.getChildAt(i)?.javaClass?.simpleName?.contains("DragView") == true) dragViews++
+        }
+        out.add(
+            "folder|$folderTop,$folderBottom|$contentBottom|$nameTop,$nameBottom|" +
+                "${if (folder.aresIsAnimating()) "animating" else "settled"}|$dragViews",
+        )
 
         for (icon in folder.iconsInReadingOrder) {
             val t = translationOf(icon)

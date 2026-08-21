@@ -255,6 +255,11 @@ class AresLauncherDriver {
         override fun toString() = "$title(lift=$stateLift actual=$actualTy at=$screenX,$screenY)"
     }
 
+    /** Number of `DragView`s in the DragLayer. The D4 observable: a bare hold must produce none. */
+    fun dragViewCount(): Int = folderMetrics()
+        .firstOrNull { it.startsWith("folder|") }
+        ?.split("|")?.getOrNull(5)?.toIntOrNull() ?: -1
+
     /** `nameTop` of the open folder, or -1. The D9 observable. */
     fun folderNameTop(): Int = folderMetrics()
         .firstOrNull { it.startsWith("folder|") }
