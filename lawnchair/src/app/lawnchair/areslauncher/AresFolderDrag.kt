@@ -183,9 +183,11 @@ object AresFolderDrag {
                     downX = e.x
                     downY = e.y
                     dragging = false
-                    // The badge is a sibling cell drawn over the icon, so its bounds are in the
-                    // icon's coordinate space already -- no transform mapping needed, unlike the
-                    // grid, whose tiles carry edit mode's scale.
+                    // The badge is a sibling cell drawn over the icon. Its bounds used to be in the
+                    // icon's coordinate space outright; §26's lift moves the icon inside a cell
+                    // that stays put, so the two spaces now differ by that one term. The mapping
+                    // lives in isPointOnBadgeFor, which owns both views -- do not pass raw icon
+                    // coordinates to AresRemoveBadge from here.
                     startedOnBadge = AresFolderEdit.isPointOnBadgeFor(folder, v, e.x, e.y)
                     if (!startedOnBadge) {
                         v.parent?.requestDisallowInterceptTouchEvent(true)

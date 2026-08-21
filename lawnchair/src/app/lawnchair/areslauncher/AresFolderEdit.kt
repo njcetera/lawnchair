@@ -125,17 +125,26 @@ private const val CELL_TAG = "ares_folder_edit_cell"
     /**
      * True when [x],[y] — in [icon]'s own coordinate space — fall on that icon's × badge.
      *
-     * The badge lives in a sibling cell laid out over the icon with identical bounds, so a point in
-     * the icon's space is already in the cell's space and no transform mapping is needed. (The home
-     * grid's equivalent does need it: there the badge rides on a holder container that edit mode
-     * scales. See `AresHomeListView.toChildLocal`.)
+     * The badge lives in a sibling cell laid out over the icon with identical bounds, and the two
+     * wiggle in phase, so the float cancels out and only **one** term separates their coordinate
+     * spaces: the lift.
+     *
+     * That term is the price of §26. The lift is written to the icon and deliberately not to the
+     * cell — the badge marks the cell and must stay on it while the icon slides to the middle —
+     * which is exactly what makes a point in one space stop being a point in the other. The icon's
+     * box has moved down by the lift relative to the cell's, so `cellY = iconY + lift`. Left
+     * unmapped, the × keeps a 48dp target that no longer sits under the drawn glyph: with a ~36px
+     * lift, the top third of the × is dead and an equal strip below it removes the app.
+     *
+     * (The home grid needs a mapping for a different reason: there the badge rides on a holder
+     * container that edit mode scales. See `AresHomeListView.toChildLocal`.)
      *
      * Used by [AresFolderDrag.DragStarter] to leave a gesture that begins on the badge alone — it
      * is a tap on a control, not a drag handle.
      */
     fun isPointOnBadgeFor(folder: Folder, icon: View, x: Float, y: Float): Boolean {
         val cell = session?.takeIf { it.folder === folder }?.cellFor(icon) ?: return false
-        return AresRemoveBadge.isPointOnBadge(cell, x, y)
+        return AresRemoveBadge.isPointOnBadge(cell, x, y + AresEditLabel.liftOf(icon))
     }
 
     private class Session(
@@ -181,6 +190,12 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // Cached views: a tap must launch again the moment the mode ends. This is the
                 // same listener FolderPagedView.createNewView installs.
                 icon.setOnClickListener(launcher.itemOnClickListener)
+                // The label comes back for the same reason the click listener does, and it is the
+                // more visible of the two failures: this runs both when edit mode ends with the
+                // folder open AND when the folder simply closes (onViewDetachedFromWindow ->
+                // detach -> stop), so it is the only restore point covering a folder that is shut
+                // while still editing.
+                AresEditLabel.resetItem(icon)
             }
             for ((view, animator) in wiggles) {
                 AresEditWiggle.stop(view, animator)
@@ -329,6 +344,22 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 startWiggle(icon, index)
                 startWiggle(cell, index)
 
+                // No app names in here either, same as the grid (§26).
+                //
+                // Idempotent, so calling it every pre-draw is the re-measure: the first sync can
+                // run before the folder has laid its icons out, and a lift measured from a height
+                // of 0 is 0. The grid needs a separate reassert hook for this; here the funnel
+                // already runs every frame.
+                //
+                // What makes this safe next to the badge is a channel separation, and it is the
+                // whole reason an earlier attempt talked itself out of doing this at all:
+                // everything AresEditMotion writes goes to INDEX_REORDER_BOUNCE_OFFSET, while the
+                // badge below copies INDEX_REORDER_PREVIEW_OFFSET -- stock's channel, and stock's
+                // only. So the badge follows the rearrangement slide and is blind to the lift,
+                // which is exactly the split §21 wants: the frost box marks the CELL and stays
+                // there while the icon moves to the middle of it.
+                AresEditLabel.setItem(icon, true)
+
                 // ...and share the slide, during a rearrangement. `animateChildToPosition` moves
                 // the icon with a translation while leaving its layout params at the old cell, and
                 // the badge's bounds are copied from those layout params -- so without this the ×
@@ -348,6 +379,11 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             // left running on a recycled BubbleTextView would keep rotating it somewhere else.
             val gone = wiggles.keys.filterNot { it in live } + cells.keys.filterNot { it in live }
             for (view in gone.distinct()) {
+                // Before the wiggle, which clears the translation but knows nothing about the text
+                // alpha. `gone` holds badge cells as well as icons; a cell falls straight through
+                // this with nothing written. An app left at alpha 0 in a pooled view would come
+                // back somewhere else with no name and no path to getting one.
+                AresEditLabel.resetItem(view)
                 wiggles.remove(view)?.let { AresEditWiggle.stop(view, it) }
                 cells.remove(view)?.let { cell ->
                     (cell.parent as? ViewGroup)?.removeView(cell)

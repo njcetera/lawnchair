@@ -122,6 +122,12 @@ object AresEditMotion {
      * centre stays ~19dp away and fully tappable. On a large widget nothing is near the centre and
      * this changes nothing. Bigger makes small tiles easier to pick up at the cost of that corner.
      *
+     * §26 improved the folder case rather than disturbing it, which is worth stating because the
+     * paragraph above reads as though it might not have. The zone is measured from the **cell's**
+     * centre, and hiding the label slides the icon to exactly that point — so the disc that always
+     * belongs to the drag now sits on the picture instead of near the × the badge's target used to
+     * reach. Aiming at the middle of a folder icon is aiming at the icon.
+     *
      * See [AresHomeListView.isInDragPriorityZone] and `AresFolderEdit.EditCell`.
      */
     const val DRAG_PRIORITY_RADIUS_DP = 10f
@@ -221,12 +227,18 @@ object AresEditMotion {
      * A fixed offset with no motion of its own, like [setFollow] — [AresEditLabel] drives its own
      * animator and calls this each frame, rather than a second animator appearing here.
      *
-     * **This is the one contribution written to the ITEM view rather than the holder container.**
-     * Everything else in this file moves the container, because that is what carries the badges and
-     * the frost with it. The lift must not: the badges mark the *cell*, and the frost outlines it
-     * (§21), so both stay put while only the icon moves. That also means the lift never shares a
-     * view with the orbit or the reflow on the home grid, and inside an open folder nothing lifts
-     * at all — see [AresEditLabel] for why folders are excluded.
+     * **On the home grid this is the one contribution written to the ITEM view rather than the
+     * holder container.** Everything else in this file moves the container, because that is what
+     * carries the badges and the frost with it. The lift must not: the badges mark the *cell*, and
+     * the frost outlines it (§21), so both stay put while only the icon moves.
+     *
+     * Inside an open folder there is no container to separate them — the icon is the cell's own
+     * child — so the lift lands on the same view as the float, and [apply] sums them. The badges
+     * still stay put, but for a different reason worth stating where it can be seen: a folder badge
+     * rides in a *sibling* cell whose only link to the icon is `AresFolderEdit` copying the icon's
+     * `INDEX_REORDER_PREVIEW_OFFSET` into [setFollow] each pre-draw. Everything this file writes
+     * goes to `INDEX_REORDER_BOUNCE_OFFSET` instead, so the badge tracks the stock slide and never
+     * sees the lift. Change either channel and that separation goes with it.
      */
     fun setLift(view: View, y: Float) {
         // Nothing to record, and no reason to create an entry, for the resting case.

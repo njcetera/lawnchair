@@ -57,17 +57,33 @@ import java.util.WeakHashMap
  *   fixture, and one cannot be created without the split-screen flow.
  * - **Widgets** — untouched. They have no label and no icon to centre; [labelOf] returns null for
  *   an `AppWidgetHostView` and nothing is written to it at all.
- * - **Apps inside an open folder (`AresFolderEdit`) — deliberately excluded.** Three reasons, in
- *   descending order of weight. The user already drew this exact line for the §21 frost — *"makes
- *   sense for it to just be on the home screen edit and not inside folders when editing"* — and the
- *   two are the same visual language, so they should not disagree about where they stop. A folder's
- *   cells are stock `CellLayout` cells and stock owns their translation during a rearrangement
- *   (`CellLayout.animateChildToPosition` drives `INDEX_REORDER_PREVIEW_OFFSET` on those very
- *   views), so a lift there is a fight rather than a composition. And `AresFolderEdit` positions
- *   each × badge by copying the icon's layout params and then tracking its translation every
- *   pre-draw ([AresEditMotion.setFollow]); a lifted icon would drag every badge down with it,
- *   which is the opposite of what the home grid wants. An open folder is also small and already
- *   captioned by its own name, so there is less label noise to remove.
+ * - **Apps inside an open folder (`AresFolderEdit`) — included, via [setItem].** This bullet used
+ *   to say the opposite, and the three reasons it gave are kept here rather than deleted, because
+ *   two of them were *wrong* and the way they were wrong is worth recognising again:
+ *
+ *   1. *"The user already drew this line for the §21 frost."* True when written, and the only real
+ *      reason of the three — but a preference, not a fact, and they reversed it: the frost went
+ *      into folders because a corner badge with no box to be in the corner of reads as floating.
+ *      Labels follow it for the same reason the frost did. A grid where every tile centres its
+ *      icon and the folder's contents alone stay high reads as a bug, not as a distinction.
+ *   2. *"Stock owns those views' translation, so a lift there is a fight."* Wrong. Stock's
+ *      rearrangement drives `INDEX_REORDER_PREVIEW_OFFSET`; every write in [AresEditMotion] lands
+ *      on `INDEX_REORDER_BOUNCE_OFFSET` (see `AresEditMotion.write`). A `MultiTranslateDelegate`
+ *      exists precisely so independent channels **sum** instead of fighting — which is the whole
+ *      reason that file has a single writer. The folder float has composed with the stock slide
+ *      since it shipped; the lift joins it on the same channel.
+ *   3. *"A lifted icon would drag every badge down with it."* Wrong, and refutable by reading the
+ *      one line it is about: `AresFolderEdit` copies `getTranslation(INDEX_REORDER_PREVIEW_OFFSET)`
+ *      into [AresEditMotion.setFollow] — the stock channel only, never the total. The badge tracks
+ *      the *slide* and is blind to the lift, so it does exactly what the home grid wants without
+ *      any change: it stays on the cell while the icon moves inside it.
+ *
+ *   Both wrong reasons share a shape this project has produced before: a claim about a channel or a
+ *   cast, plausible from the class names, never checked against the line it describes.
+ *
+ *   The folder's own name in the footer is **not** hidden. It is not an app name, it is the only
+ *   text identifying which folder is open, and hiding it would mask D9 — the name jumping from the
+ *   footer to the centre when an item moves — rather than fix it.
  *
  * ## One entry point, so no path is missed
  *
@@ -122,14 +138,57 @@ object AresEditLabel {
      */
     fun set(container: View, hidden: Boolean) {
         val item = itemOf(container) ?: return
+        setItem(item, hidden)
+    }
+
+    /**
+     * [set], for a surface whose icon is **not** wrapped in a holder container.
+     *
+     * An open folder's cells hold the `BubbleTextView` itself — there is no per-tile container to
+     * unwrap, because a folder page is a stock `CellLayout` and the icon is its own direct child.
+     * Everything else is identical, including the idempotence: `AresFolderEdit.sync` runs on every
+     * pre-draw and calls this each time, which is what re-measures the lift once the folder has
+     * laid its icons out. (The home grid needs an explicit [reassert] for that only because its
+     * funnel does *not* run every frame.)
+     */
+    fun setItem(item: View, hidden: Boolean) {
         val label = labelOf(item) ?: return
         val state = states.getOrPut(item) { State() }
         val targetLift = if (hidden) liftFor(item) else 0f
 
-        if (state.hidden == hidden && state.animator == null) {
-            // Already correct. The lift can still be stale — it is measured, and the row may have
-            // been laid out (or folded, or repacked) since. See [reassert].
-            if (state.lift != targetLift) writeLift(item, state, targetLift)
+        if (state.hidden == hidden) {
+            // Already in the right state, **or already on its way there**. The second half is what
+            // makes this safe to call every frame, and leaving it out is not a missed nicety --
+            // it silently disables the whole transition.
+            //
+            // The guard used to also require `state.animator == null`, so an in-flight fade fell
+            // through to the code below, which cancels it and starts a fresh one from wherever the
+            // view currently is. On the home grid that is harmless: the funnel runs on bind and on
+            // the mode walk, so the animator is started once and left alone. `AresFolderEdit.sync`
+            // is a **pre-draw listener** and the edit-mode float is a never-ending animator, so it
+            // runs on every single frame -- and the fade was therefore cancelled and restarted from
+            // alpha 1.0 roughly every 19ms, forever. Measured on emulator-5554 before the fix: an
+            // icon reporting `hidden=true, anim=true` for as long as the folder was open, with
+            // `alpha=1.0` and `lift=0.0` on every frame -- the transition perpetually reborn and
+            // never once advancing.
+            //
+            // This is the same failure the folder's own reorder alarm has, and this file's
+            // neighbour already describes it: `Folder.onDragOver` re-arms `REORDER_DELAY` on every
+            // change of target, so while the finger moves nothing ever rearranges. See
+            // `AresFolderEdit.reorderDelayMs`. A repeating caller must not restart work that is
+            // already heading where it asked.
+            if (state.animator == null) {
+                // Settled. Assert both ends rather than trusting the flag: the lift is measured and
+                // the row may have been laid out, folded or repacked since (see [reassert]), and
+                // the text alpha is owned by other policies too -- `CellLayout.addViewToCellLayout`
+                // sets it on every re-add, which is what `FolderPagedView.arrangeChildren` does to
+                // every icon in the folder.
+                val want = if (hidden || !label.shouldTextBeVisible()) 0f else 1f
+                if (BubbleTextView.TEXT_ALPHA_PROPERTY.get(label) != want) {
+                    BubbleTextView.TEXT_ALPHA_PROPERTY.set(label, want)
+                }
+                if (state.lift != targetLift) writeLift(item, state, targetLift)
+            }
             return
         }
 
@@ -198,6 +257,24 @@ object AresEditLabel {
      */
     fun reset(container: View) {
         val item = itemOf(container) ?: return
+        resetItem(item)
+    }
+
+    /**
+     * [reset], for an unwrapped item view. See [setItem].
+     *
+     * Harmless on a view this file has never touched — a folder's × badge cell arrives here from
+     * `AresFolderEdit`'s sweep over everything that left the folder, and falls straight through
+     * [labelOf] with nothing written. That is deliberate: the sweep must not have to know which of
+     * the two views it is holding.
+     *
+     * Note what this does **not** rely on. `AresEditWiggle.reset` already clears every
+     * [AresEditMotion] contribution for a view, the lift included, so a folder icon that stops
+     * editing gets its translation back either way. The text alpha is the part only this knows
+     * about, and a label left at alpha 0 on a view the folder's cache is about to rebind would be
+     * an app with no name and no way to get one back.
+     */
+    fun resetItem(item: View) {
         val state = states.remove(item)
         state?.animator?.cancel()
         labelOf(item)?.let {
@@ -205,6 +282,17 @@ object AresEditLabel {
         }
         AresEditMotion.setLift(item, 0f)
     }
+
+    /**
+     * How far [item] is currently slid from its layout position, in px. Zero when it is not hidden.
+     *
+     * For a caller that has to map a point between the item and something that is **not** moving
+     * with it. `AresFolderEdit.isPointOnBadgeFor` is the case: a folder's × rides in a sibling cell
+     * whose layout box is identical to the icon's, and it used to be true that a point in one was
+     * already a point in the other. The lift ends that — it is written to the icon and not to the
+     * cell, precisely so the badge stays on the cell — so the difference has to be added back.
+     */
+    fun liftOf(item: View): Float = states[item]?.lift ?: 0f
 
     private fun writeLift(item: View, state: State, lift: Float) {
         state.lift = lift
