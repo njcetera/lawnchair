@@ -251,7 +251,7 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 var cell = cells[icon]
                 if (cell == null || cell.parent !== parent) {
                     (cell?.parent as? ViewGroup)?.removeView(cell)
-                    cell = createCell(parent, info)
+                    cell = createCell(parent, info, iconLp.width)
                     cells[icon] = cell
                     parent.addView(cell, newCellParams())
                 }
@@ -345,7 +345,7 @@ private const val CELL_TAG = "ares_folder_edit_cell"
          * The badge itself is [AresRemoveBadge]'s, unchanged, so the affordance is identical to
          * the grid's — same glyph, same touch target, same corner.
          */
-        private fun createCell(parent: ViewGroup, info: ItemInfo): View {
+        private fun createCell(parent: ViewGroup, info: ItemInfo, cellWidthPx: Int): View {
             val cell = EditCell(parent.context)
             cell.tag = CELL_TAG
 
@@ -372,8 +372,21 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             // real cost, mitigated by EditCell.dispatchTouchEvent already handing the icon's centre
             // back to the icon -- so the miss case is "the drag starts" rather than "the wrong
             // destructive control fires".
+            // Sized from the CELL's own width, which is the icon's layout width.
+            //
+            // The first cut derived it as `parent.width / columnsOf(parent)`, and `columnsOf` cast
+            // the parent to CellLayout to read `countX` -- but the parent here is a
+            // ShortcutAndWidgetContainer, so the cast ALWAYS failed and it fell back to 4. A
+            // two-column folder was therefore measured as four: 404/4 - 20, halved, gave badges of
+            // **40px** where the cell affords 91. Measured on the owner's device: two 40x40
+            // ImageViews at (10,10) and (152,10) in a 202-wide cell, which reads as a pair of ticks
+            // rather than controls. A fallback that silently produces a plausible-looking wrong
+            // number is worse than one that throws.
+            //
+            // The cell width is handed in rather than derived, so there is nothing left to get
+            // wrong: it is the same `iconLp.width` the cell's own bounds are copied from.
             val margin = cell.resources.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
-            val touch = ((parent.width / columnsOf(parent)) - 2 * margin) / 2
+            val touch = ((cellWidthPx - 2 * margin) / 2).coerceAtLeast(1)
 
             // Named for the same reason as on the grid: a folder of six apps would otherwise offer
             // six controls that all announce themselves as "Remove".
@@ -387,10 +400,6 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             }
             return cell
         }
-
-        /** Columns in the open folder's grid, defaulting to 4 when it cannot be read. */
-        private fun columnsOf(parent: ViewGroup): Int =
-            (parent as? com.android.launcher3.CellLayout)?.countX?.takeIf { it > 0 } ?: 4
 
         /**
          * Raises the context menu for an app **inside** the folder (§25).
