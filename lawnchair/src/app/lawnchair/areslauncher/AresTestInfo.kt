@@ -12,6 +12,10 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.Reorderable
 import com.android.launcher3.testing.TestInformationHandler
+import com.android.launcher3.BubbleTextView
+import com.android.launcher3.R
+import com.android.launcher3.folder.Folder
+import com.android.launcher3.folder.FolderIcon
 
 import com.android.launcher3.util.MultiTranslateDelegate.INDEX_REORDER_BOUNCE_OFFSET
 
@@ -148,6 +152,44 @@ object AresTestInfo {
     const val REQUEST_REMOVE_ITEM = "ares-remove-item"
 
     /**
+     * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
+     *
+     * Line 0 is the folder itself:
+     * `folder|top,bottom|contentBottom|nameTop,nameBottom|state`
+     *
+     * Then one line per icon:
+     * `icon|title|stateLift|actualTy|screenY`
+     *
+     * **`stateLift` and `actualTy` are both reported, and the gap between them is the bug.**
+     * `AresEditLabel.liftOf` returns what the label state *believes* it wrote; `actualTy` reads the
+     * view's real `INDEX_REORDER_BOUNCE_OFFSET` channel. S12 is precisely those two disagreeing —
+     * `AresEditWiggle.start`'s animators-off path called the full teardown, which dropped the whole
+     * `Motion` entry including the lift, while the label state went on believing it had applied one
+     * and therefore declined to write it again. A probe that read only `liftOf` would report the
+     * belief and miss the defect entirely.
+     *
+     * The folder line carries D9: the reported symptom is *"with three items in a folder, starting
+     * to move one sends the folder name from the bottom to the centre"*, which is a layout
+     * consequence of the content shrinking by a row mid-drag. `nameTop` not moving between rest and
+     * mid-drag is the evidence that closes it.
+     */
+    const val REQUEST_FOLDER_METRICS = "ares-folder-metrics"
+
+    /**
+     * Opens the first folder on the home grid, returning whether one was opened.
+     *
+     * Through `FolderIcon.performClick`, i.e. the path a tap takes, rather than a synthesised tap.
+     * A scripted gesture aimed at a folder **closes it more often than it opens it** here — that is
+     * why `folder-edit-chrome` and `folder-badge-geometry` SKIP in the PowerShell harness, and it is
+     * a reachability problem, not something worth re-tuning. What is under test on this surface is
+     * what happens once the folder is open, so getting there deterministically is the point.
+     */
+    const val REQUEST_OPEN_FOLDER = "ares-open-folder"
+
+    /** Turns folder edit mode on or off on the open folder. `arg`: "on" (default) or "off". */
+    const val REQUEST_FOLDER_EDIT = "ares-folder-edit"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -177,6 +219,18 @@ object AresTestInfo {
         REQUEST_REMOVE_ITEM -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putInt(key, value) },
             { launcher -> removeFirst(launcher, arg) },
+        )
+        REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putBoolean(key, value) },
+            { launcher -> setFolderEdit(launcher, arg) },
+        )
+        REQUEST_FOLDER_METRICS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putStringArray(key, value) },
+            { launcher -> folderMetrics(launcher) },
+        )
+        REQUEST_OPEN_FOLDER -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putBoolean(key, value) },
+            { launcher -> openFirstFolder(launcher) },
         )
         else -> null
     }
@@ -283,6 +337,67 @@ object AresTestInfo {
      * `VIEW_TRANSLATE_X` -- so it is not wrong for a single view. It is only a partial answer
      * because on this grid two different views carry two different contributions.
      */
+    /** See [REQUEST_OPEN_FOLDER]. */
+    private fun openFirstFolder(launcher: Launcher): Boolean {
+        val list = launcher.workspace?.aresHomeList ?: return false
+        for (i in 0 until list.childCount) {
+            val container = list.getChildAt(i) as? ViewGroup ?: continue
+            val icon = container.getChildAt(0)
+            if (icon is FolderIcon) {
+                icon.performClick()
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Attaches or detaches folder edit mode on the open folder. `arg` "on" or "off".
+     *
+     * `AresFolderEdit.attach` is the product's own entry point -- it is what a click on a folder
+     * takes while the grid is already editing. Reaching it by gesture would mean a long-press to
+     * enter home edit mode and then a tap that opens rather than closes the folder, which is the
+     * exact sequence this harness is documented as unable to perform reliably.
+     */
+    private fun setFolderEdit(launcher: Launcher, arg: String?): Boolean {
+        if (arg == "off") {
+            AresFolderEdit.detach()
+            return true
+        }
+        val folder = Folder.getOpen(launcher) ?: return false
+        val icon = folder.folderIcon ?: return false
+        AresFolderEdit.attach(launcher, icon)
+        return true
+    }
+
+    /** See [REQUEST_FOLDER_METRICS]. */
+    private fun folderMetrics(launcher: Launcher): Array<String> {
+        val folder = Folder.getOpen(launcher) ?: return emptyArray()
+        val out = ArrayList<String>()
+        val loc = IntArray(2)
+
+        folder.getLocationOnScreen(loc)
+        val folderTop = loc[1]
+        val folderBottom = loc[1] + folder.height
+        val content = folder.findViewById<View>(R.id.folder_content)
+        val contentBottom = content?.let {
+            it.getLocationOnScreen(loc); loc[1] + it.height
+        } ?: -1
+        val name = folder.findViewById<View>(R.id.folder_name)
+        val nameTop = name?.let { it.getLocationOnScreen(loc); loc[1] } ?: -1
+        val nameBottom = if (name != null && nameTop >= 0) nameTop + name.height else -1
+        out.add("folder|$folderTop,$folderBottom|$contentBottom|$nameTop,$nameBottom|${if (folder.aresIsAnimating()) "animating" else "settled"}")
+
+        for (icon in folder.iconsInReadingOrder) {
+            val t = translationOf(icon)
+            icon.getLocationOnScreen(loc)
+            val title = (icon as? BubbleTextView)?.text?.toString() ?: "?"
+            // Both numbers, deliberately: their disagreement IS S12. See REQUEST_FOLDER_METRICS.
+            out.add("icon|$title|${AresEditLabel.liftOf(icon)}|${t[1]}|${loc[1]}")
+        }
+        return out.toTypedArray()
+    }
+
     private fun translationOf(view: View): FloatArray {
         val reorderable = view as? Reorderable
         return if (reorderable != null) {

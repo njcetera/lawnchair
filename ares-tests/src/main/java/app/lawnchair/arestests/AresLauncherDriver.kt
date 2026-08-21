@@ -229,6 +229,64 @@ class AresLauncherDriver {
     fun removeFirstItem(kind: String): Int =
         call("ares-remove-item", kind)?.getInt("response") ?: -1
 
+    /** Opens the first folder on the grid, through `FolderIcon.performClick`. */
+    fun openFolder(): Boolean = call("ares-open-folder")?.getBoolean("response") ?: false
+
+    /** Attaches or detaches folder edit mode on the open folder. */
+    fun setFolderEdit(on: Boolean): Boolean =
+        call("ares-folder-edit", if (on) "on" else "off")?.getBoolean("response") ?: false
+
+    /**
+     * One icon inside the open folder.
+     *
+     * [stateLift] is what `AresEditLabel` believes it wrote; [actualTy] is the view's real
+     * translation channel. **Their disagreement is the defect** — see `AresFolderLiftTest`.
+     */
+    data class FolderIcon(
+        val title: String,
+        val stateLift: Float,
+        val actualTy: Float,
+        val screenY: Int,
+    ) {
+        override fun toString() = "$title(lift=$stateLift actual=$actualTy y=$screenY)"
+    }
+
+    private fun folderMetrics(): List<String> =
+        (call("ares-folder-metrics")?.getStringArray("response") ?: emptyArray()).toList()
+
+    fun folderIcons(): List<FolderIcon> = folderMetrics()
+        .filter { it.startsWith("icon|") }
+        .map { it.split("|") }
+        .map {
+            FolderIcon(
+                it.getOrElse(1) { "?" },
+                it.getOrNull(2)?.toFloatOrNull() ?: 0f,
+                it.getOrNull(3)?.toFloatOrNull() ?: 0f,
+                it.getOrNull(4)?.toIntOrNull() ?: -1,
+            )
+        }
+
+    /**
+     * Sets all three animation scales.
+     *
+     * A test that touches this **must** put it back — `AresEditWiggle.start()` and
+     * `AresEditMotion.displaceTo()` both early-out when animators are disabled, so a scale left at 0
+     * silently deletes the float and the reflow spring for everything that runs afterwards.
+     */
+    fun setAnimatorScale(scale: Int) {
+        for (key in listOf(
+            "window_animation_scale",
+            "transition_animation_scale",
+            "animator_duration_scale",
+        )) {
+            shell("settings put global $key $scale")
+        }
+    }
+
+    fun pressBack() = device.pressBack()
+
+    private fun shell(cmd: String): String = device.executeShellCommand(cmd)
+
     /**
      * Fails loudly if the two-widget fixture is not present.
      *
