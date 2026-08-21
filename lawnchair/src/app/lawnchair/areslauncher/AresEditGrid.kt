@@ -196,7 +196,9 @@ object AresEditGrid {
             // falls outside the view bounds and is clipped. Nudge the centre inward by the radius
             // so the whole dot shows. Only X is clamped: it does not scroll, whereas clamping Y
             // would pin an off-screen perimeter row to the viewport edge as the grid scrolls.
-            val maxX = parent.width - radius
+            // coerceAtLeast(radius) keeps min <= max for the coerceIn below: a view narrower than
+            // two radii (never a real grid, but layout can flash one) would otherwise throw.
+            val maxX = (parent.width - radius).coerceAtLeast(radius)
             for (row in firstRow..lastRow) {
                 val y = (originY + row * cellH).toFloat()
                 for (col in 0..columns) {
