@@ -340,7 +340,28 @@ object AresHomeReorder {
                     if (holder.bindingAdapterPosition == RecyclerView.NO_POSITION) continue
                     val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
                     val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
-                    val area = (v.width * v.height).toFloat()
+                    // Normalised by the SMALLER of the two, not by the target.
+                    //
+                    // Dividing by the target's area alone made the rule directional, and the
+                    // failure was arithmetic rather than a matter of feel: the overlap can never
+                    // exceed the dragged item's own area, so whenever the dragged widget is smaller
+                    // than half the target, `cover` cannot reach [WIDGET_COVER_FRACTION] AT ALL.
+                    // Reported as *"moving a smaller widget struggles to move a larger widget out of
+                    // the way"*, and on the owner's own grid the two cases are exactly that: a 2x2
+                    // dragged onto a 4x3 tops out at 4/12 = 33% -- impossible, not merely hard --
+                    // while a 2x4 onto the same 4x3 tops out at 67%, which is why that one moved
+                    // only after near-total overlap and read as "struggles".
+                    //
+                    // min() keeps the verified direction untouched: a big widget over a small icon
+                    // still divides by the icon, which is the behaviour measured for §24 and the one
+                    // the owner signed off ("moving a large widgetr around now moves the apps").
+                    // What changes is only the case that could not succeed. The rule now reads the
+                    // same in both directions -- "half of the smaller thing is buried" -- which is
+                    // also the honest statement of "as soon as the app is covered by the widget".
+                    val area = minOf(
+                        v.width.toLong() * v.height,
+                        selected.itemView.width.toLong() * selected.itemView.height,
+                    ).toFloat()
                     if (overlapW > 0 && overlapH > 0 && area > 0f) {
                         val cover = (overlapW * overlapH) / area
                         if (cover >= WIDGET_COVER_FRACTION && cover > bestCover) {
