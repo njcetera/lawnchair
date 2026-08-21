@@ -92,6 +92,16 @@ object AresFolderDrop {
     const val DWELL_MS = 500L
 
     /**
+     * How long to wait before re-trying a dwell that landed mid folder-animation.
+     *
+     * Well under [DWELL_MS], because this is not a fresh dwell — the user has already held still
+     * long enough to earn one, and making them pay the full 500ms again for the launcher's own
+     * animation would read as the dwell simply not working. The close set runs ~200ms
+     * (`config_materialFolderExpandDuration`), so a couple of these land about when it ends.
+     */
+    private const val ANIMATING_RETRY_MS = 80L
+
+    /**
      * How far the drag may drift while dwelling before the timer restarts.
      *
      * Not zero: a real finger jitters by a pixel or two even when the user believes it is still,
@@ -333,6 +343,29 @@ object AresFolderDrop {
     private fun arm() {
         val list = grid ?: return
         val view = candidate ?: return
+
+        // NOT YET is not the same as NEVER.
+        //
+        // `aresBeginPreviewDrag` refuses while a close animation still owns the folder, which is a
+        // window B2 walks straight into: dragging an icon back out closes the folder, and dwelling
+        // again a moment later is the specified way to reopen it. Treating that refusal like a
+        // permanent one falls through to the highlight ring below, so the user sees a ring where
+        // they asked for an open folder -- and a release then files the icon into a folder they
+        // were never shown, which is B1 unmet and a commit they did not ask for.
+        //
+        // So: leave it UNARMED and come back. The close set runs ~200ms
+        // (config_materialFolderExpandDuration), so a short retry reopens the folder about when the
+        // animation ends rather than making the user lift and dwell again.
+        if (candidateKind == Kind.ADD && fromGrid) {
+            val animating = folderIconOf(view)?.folder?.aresIsAnimating() == true
+            if (animating) {
+                list.removeCallbacks(dwellElapsed)
+                list.postDelayed(dwellElapsed, ANIMATING_RETRY_MS)
+                Log.i(TAG, "dwell elapsed on ${candidateInfo?.id} mid-animation; retrying")
+                return
+            }
+        }
+
         armed = true
         if (candidateKind == Kind.ADD && fromGrid) {
             val icon = folderIconOf(view)

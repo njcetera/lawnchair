@@ -317,8 +317,19 @@ object AresEditMotion {
      * `INDEX_REORDER_BOUNCE_OFFSET` is the channel to use inside a folder: its only stock writer is
      * `ReorderPreviewAnimation`, created by `CellLayout.beginOrAdjustReorderPreviewAnimations`,
      * which a folder never calls — folder rearrangement goes through `FolderPagedView.realTimeReorder`
-     * instead. The home grid's tiles are plain holder `FrameLayout`s and take the direct branch, so
-     * none of this applies there.
+     * instead.
+     *
+     * **The home grid takes BOTH branches, and this comment used to claim it took only one.** Its
+     * holder containers are plain `FrameLayout`s and do take the direct branch — that part was and
+     * is true, and it is where the orbit, the reflow and the follow are written. But §26's lift is
+     * written to the ITEM view instead of the holder (see [setLift]), and every home item view —
+     * `BubbleTextView`, `FolderIcon`, `AppPairIcon` — implements [Reorderable], so the lift goes
+     * through `INDEX_REORDER_BOUNCE_OFFSET` on the grid as well.
+     *
+     * No functional consequence today: nothing on the grid writes that channel on those views,
+     * because they are not children of a `CellLayout`. Corrected anyway, because a stale claim about
+     * which channel a write lands on is exactly the error §26 records this project making twice in
+     * one change — and the next person to reason from this paragraph would inherit it.
      */
     private fun write(view: View, x: Float, y: Float) {
         val reorderable = view as? Reorderable

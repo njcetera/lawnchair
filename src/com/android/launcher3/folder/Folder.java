@@ -874,6 +874,16 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
      *
      * @return true when the folder actually opened.
      */
+    /**
+     * AresLauncher: true while an open or close animation owns this folder.
+     *
+     * <p>Exists so a caller can tell {@link #aresBeginPreviewDrag()}'s "not yet" apart from its
+     * "never". {@code getState()} is package-private and the Ares code is in another package.
+     */
+    public boolean aresIsAnimating() {
+        return mState == STATE_ANIMATING;
+    }
+
     public boolean aresBeginPreviewDrag() {
         // STATE_ANIMATING is refused, not just mIsOpen.
         //
@@ -894,6 +904,13 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (isInAppDrawer() || mIsOpen || mState == STATE_ANIMATING || mInfo.getContents().isEmpty()) {
             return false;
         }
+        // NOTE for callers: this returns false for two very different reasons. "Never" --
+        // app-drawer folder, already open, no contents -- and "not yet", which is only the
+        // STATE_ANIMATING case above. A caller that treats them alike falls back to the plain
+        // highlight ring during a close animation, so re-dwelling after dragging an icon back out
+        // shows a ring instead of reopening the folder, and a release then files the icon into a
+        // folder the user was never shown. That breaks B2, which makes dwelling in and out
+        // repeatedly the specified use. Ask aresIsAnimating() first and retry rather than fall back.
         mPrevTargetRank = -1;
         ArrayList<ItemInfo> items = new ArrayList<>(mInfo.getContents());
         mEmptyCellRank = items.size();

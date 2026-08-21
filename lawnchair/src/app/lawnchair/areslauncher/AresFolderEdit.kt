@@ -126,8 +126,22 @@ private const val CELL_TAG = "ares_folder_edit_cell"
      * True when [x],[y] — in [icon]'s own coordinate space — fall on that icon's × badge.
      *
      * The badge lives in a sibling cell laid out over the icon with identical bounds, and the two
-     * wiggle in phase, so the float cancels out and only **one** term separates their coordinate
-     * spaces: the lift.
+     * wiggle in **near**-phase, so the float very nearly cancels and the term that actually
+     * separates their coordinate spaces is the lift.
+     *
+     * "Near", not exactly, and the difference is worth stating rather than rounding away.
+     * `AresEditWiggle.start` seeds `currentPlayTime` from the item's index, but each animator's
+     * epoch is when `start()` was called, and `startWiggle` never restarts one that already exists.
+     * `FolderPagedView.arrangeChildren` calls `removeAllViews()`, which makes the badge cell's
+     * parent change and forces [createCell] to build a **new** cell with a **new** animator, while
+     * the icon keeps the one it has had since the folder opened. After any rearrangement the two
+     * orbits are therefore offset by the elapsed time, mod the cycle.
+     *
+     * The residual is bounded by twice the orbit radius — a few px against a 91px badge — so the
+     * hit test below survives it comfortably. What it does cost is the thing the comment further
+     * down claims cannot happen: the × can drift very slightly across a rotating icon after a
+     * rearrangement. Pre-existing, not worth a second animator to fix, and recorded so the next
+     * reader does not treat exact cancellation as an invariant they can build on.
      *
      * That term is the price of §26. The lift is written to the icon and deliberately not to the
      * cell — the badge marks the cell and must stay on it while the icon slides to the middle —
