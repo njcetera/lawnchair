@@ -205,6 +205,20 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 (cell.parent as? ViewGroup)?.removeView(cell)
             }
             cells.clear()
+
+            // Put the grid's own labels back under §26 after the folder finishes closing.
+            //
+            // POSTED, deliberately. This runs from `closeComplete`, which removes the folder from
+            // the DragLayer FIRST -- that removal is what detaches us and calls stop() -- and only
+            // several lines later runs `mFolderIcon.mFolderName.setTextVisibility(true)`. Re-asserting
+            // inline would therefore happen BEFORE the write it exists to undo. The post lands after
+            // closeComplete returns.
+            //
+            // Without this, opening a folder in edit mode and closing it again leaves that one tile
+            // captioned while every other tile is bare, for the rest of the mode -- and under B2,
+            // where dwelling back out closes the folder mid-drag, the caption reappears on every
+            // dwell-out with the finger still down.
+            launcher.workspace?.aresHomeList?.let { list -> list.post { list.reassertLabels() } }
         }
 
         override fun onPreDraw(): Boolean {
@@ -419,6 +433,18 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             if (cellWidthPx <= 0 || cell !is ViewGroup) return
             val margin = cell.resources.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
             val touch = ((cellWidthPx - 2 * margin) / 2).coerceAtLeast(1)
+            // The corner pull is derived from `touch` too, so it is re-applied here for exactly the
+            // reason the SIZE is: `createCell` runs once per cell and never re-runs, and the first
+            // sync can happen before the folder's icons are laid out, when `cellWidthPx` is 0.
+            //
+            // Leaving it in createCell alone reproduced the 1x1-badge defect in a quieter form.
+            // With width 0 the cell's `touch` computes to 1px, so cornerPullFor(1) clamps the pull
+            // to 0 -- and a pull of 0 centres the drawn circle in its target, ~11px in from each
+            // edge, which is the "badge sitting ON the icon" §25 exists to avoid. sizeBadges would
+            // then correct the size to 91px on the next pass and leave the padding at 0 for the
+            // whole folder session, on the same cold-start "tap a folder open while the grid is
+            // already editing" path the earlier defect was measured on.
+            val pull = AresRemoveBadge.cornerPullFor(cell.resources, touch)
             for (tag in arrayOf(AresRemoveBadge.BADGE_TAG, AresInfoBadge.BADGE_TAG)) {
                 val badge = cell.findViewWithTag<View>(tag) ?: continue
                 val lp = badge.layoutParams as? FrameLayout.LayoutParams ?: continue
@@ -426,6 +452,15 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                     lp.width = touch
                     lp.height = touch
                     badge.layoutParams = lp
+                }
+                // Start/top for the ×, end/top for the !, mirroring how each was first built.
+                val toStart = tag == AresInfoBadge.BADGE_TAG
+                val start = if (toStart) pull else 0
+                val end = if (toStart) 0 else pull
+                if (badge.paddingStart != start || badge.paddingEnd != end ||
+                    badge.paddingBottom != pull
+                ) {
+                    badge.setPaddingRelative(start, 0, end, pull)
                 }
             }
         }

@@ -244,6 +244,31 @@ object AresEditLabel {
         // Never during a transition: the animator is mid-interpolation toward its own target and
         // overwriting it would stutter. It re-measures on the next call anyway.
         if (!state.hidden || state.animator != null) return
+
+        // The TEXT, not only the lift.
+        //
+        // This used to re-measure the lift alone, on the reasoning that the alpha cannot drift
+        // because nothing else writes it. Stock does: `Folder.closeComplete` runs
+        // `mFolderIcon.mFolderName.setTextVisibility(true)`, which is this exact property, and it
+        // is reached on the most ordinary path there is — §18 makes tapping a folder the one tap
+        // edit mode does NOT make inert, so opening a folder and closing it again leaves that one
+        // tile captioned while every other tile on the grid is bare, for the rest of the mode.
+        //
+        // Worse under B2, where dwelling out of a folder closes it mid-drag
+        // (`AresFolderPreview.close` -> `aresEndPreviewDrag` -> `close(true)` -> same
+        // closeComplete), so the caption pops back on every dwell-out with the finger still down.
+        //
+        // None of the four write sites covers it: the row is not detached, not rebound, and the
+        // edit-mode walk does not re-run, so this hook is the only thing that fires afterwards.
+        // The same argument the settled branch of [setItem] already makes — the alpha is owned by
+        // other policies too — applies here and was simply missed.
+        // Unconditionally 0: this branch is only reached when the item is meant to be label-less.
+        labelOf(item)?.let { label ->
+            if (BubbleTextView.TEXT_ALPHA_PROPERTY.get(label) != 0f) {
+                BubbleTextView.TEXT_ALPHA_PROPERTY.set(label, 0f)
+            }
+        }
+
         val target = liftFor(item)
         if (target != state.lift) writeLift(item, state, target)
     }

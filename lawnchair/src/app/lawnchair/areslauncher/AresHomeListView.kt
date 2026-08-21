@@ -1610,6 +1610,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
     }
 
+    /**
+     * Re-asserts the edit-mode label treatment on every attached row, from outside this view.
+     *
+     * The one caller is `AresFolderEdit`, when a folder closes. `Folder.closeComplete` runs
+     * `mFolderIcon.mFolderName.setTextVisibility(true)` on the way out, which un-hides that one
+     * tile's caption while the rest of the grid stays bare — and nothing in the normal funnel
+     * covers it, because the row is neither detached nor rebound and the mode walk does not re-run.
+     *
+     * **It must be POSTED by the caller, not called inline.** `closeComplete` removes the folder
+     * from the DragLayer *first* (which is what tells `AresFolderEdit` to stop) and sets the text
+     * visible several lines later, so a synchronous re-assert would run before the write it is
+     * meant to undo and be silently overwritten.
+     *
+     * Safe on the mode-ending path: [reassertLabelLift] early-outs when not editing, so a folder
+     * closing *because* edit mode ended does nothing here and the ordinary restore stands.
+     */
+    fun reassertLabels() = reassertLabelLift()
+
     override fun onScrolled(dx: Int, dy: Int) {
         super.onScrolled(dx, dy)
         // A scroll attaches and lays out rows without a layout pass (AresMasonryLayoutManager.fill
