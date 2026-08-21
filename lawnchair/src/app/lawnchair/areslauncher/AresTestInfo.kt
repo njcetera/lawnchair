@@ -158,7 +158,7 @@ object AresTestInfo {
      * `folder|top,bottom|contentBottom|nameTop,nameBottom|state`
      *
      * Then one line per icon:
-     * `icon|title|stateLift|actualTy|screenY`
+     * `icon|title|stateLift|actualTy|screenX,screenY|width,height`
      *
      * **`stateLift` and `actualTy` are both reported, and the gap between them is the bug.**
      * `AresEditLabel.liftOf` returns what the label state *believes* it wrote; `actualTy` reads the
@@ -393,7 +393,7 @@ object AresTestInfo {
             icon.getLocationOnScreen(loc)
             val title = (icon as? BubbleTextView)?.text?.toString() ?: "?"
             // Both numbers, deliberately: their disagreement IS S12. See REQUEST_FOLDER_METRICS.
-            out.add("icon|$title|${AresEditLabel.liftOf(icon)}|${t[1]}|${loc[1]}")
+            out.add("icon|$title|${AresEditLabel.liftOf(icon)}|${t[1]}|${loc[0]},${loc[1]}|${icon.width},${icon.height}")
         }
         return out.toTypedArray()
     }

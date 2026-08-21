@@ -246,10 +246,19 @@ class AresLauncherDriver {
         val title: String,
         val stateLift: Float,
         val actualTy: Float,
+        val screenX: Int,
         val screenY: Int,
+        val width: Int,
+        val height: Int,
     ) {
-        override fun toString() = "$title(lift=$stateLift actual=$actualTy y=$screenY)"
+        fun center() = PointF(screenX + width / 2f, screenY + height / 2f)
+        override fun toString() = "$title(lift=$stateLift actual=$actualTy at=$screenX,$screenY)"
     }
+
+    /** `nameTop` of the open folder, or -1. The D9 observable. */
+    fun folderNameTop(): Int = folderMetrics()
+        .firstOrNull { it.startsWith("folder|") }
+        ?.split("|")?.getOrNull(3)?.split(",")?.getOrNull(0)?.toIntOrNull() ?: -1
 
     private fun folderMetrics(): List<String> =
         (call("ares-folder-metrics")?.getStringArray("response") ?: emptyArray()).toList()
@@ -258,11 +267,16 @@ class AresLauncherDriver {
         .filter { it.startsWith("icon|") }
         .map { it.split("|") }
         .map {
+            val at = (it.getOrNull(4) ?: "0,0").split(",")
+            val wh = (it.getOrNull(5) ?: "0,0").split(",")
             FolderIcon(
                 it.getOrElse(1) { "?" },
                 it.getOrNull(2)?.toFloatOrNull() ?: 0f,
                 it.getOrNull(3)?.toFloatOrNull() ?: 0f,
-                it.getOrNull(4)?.toIntOrNull() ?: -1,
+                at.getOrNull(0)?.toIntOrNull() ?: -1,
+                at.getOrNull(1)?.toIntOrNull() ?: -1,
+                wh.getOrNull(0)?.toIntOrNull() ?: 0,
+                wh.getOrNull(1)?.toIntOrNull() ?: 0,
             )
         }
 
