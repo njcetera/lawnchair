@@ -244,6 +244,33 @@ object AresHomeReorder {
          * Falls back to the stock choice when the centre is over empty space, so a drag into a gap
          * still resolves to something sensible rather than doing nothing.
          */
+        /**
+         * How far a drag must travel before `ItemTouchHelper` will even look for a swap target.
+         *
+         * Stock returns 0.5, and it is a fraction **of the dragged view's own size** — so the
+         * larger the thing you pick up, the further you must move it before anything reacts. That
+         * is defensible in a uniform list, where every row is the same height, and wrong here: a
+         * 4x2 widget is 464px tall, so nothing could move until the drag had travelled 232px, by
+         * which point the widget had entirely covered the row beneath it.
+         *
+         * This gate sits UPSTREAM of [chooseDropTarget], which is why the coverage rule there
+         * appeared to do nothing. Measured on the emulator, dragging a 4x2 widget down over a row
+         * of icons: displacement fired between 200px and 250px of travel both before and after the
+         * coverage rule was added -- 232px, exactly half the widget's height, every time.
+         *
+         * A widget therefore asks almost immediately and lets the coverage rule decide.
+         * Icons keep stock's 0.5: on a 1x1 tile half a tile's travel is a small, deliberate
+         * movement, and lowering it there would make ordinary reordering twitchy.
+         */
+        override fun getMoveThreshold(viewHolder: RecyclerView.ViewHolder): Float {
+            val info = list.aresAdapter.itemAt(viewHolder.bindingAdapterPosition)
+            return if (info?.itemType == Favorites.ITEM_TYPE_APPWIDGET) {
+                0.02f
+            } else {
+                super.getMoveThreshold(viewHolder)
+            }
+        }
+
         override fun chooseDropTarget(
             selected: RecyclerView.ViewHolder,
             dropTargets: MutableList<RecyclerView.ViewHolder>,
@@ -292,8 +319,25 @@ object AresHomeReorder {
                 val dragBottom = curY + selected.itemView.height
                 var best: RecyclerView.ViewHolder? = null
                 var bestCover = 0f
-                dropTargets.forEach { target ->
-                    val v = target.itemView
+
+                // Deliberately NOT `dropTargets`. That list is `ItemTouchHelper.findSwapTargets`'
+                // output, and its pre-filter assumes a uniform list: for a downward drag it will
+                // not nominate a target until the dragged view's own bounds have passed it. A 4x2
+                // widget passes a 1x1 icon only once it has *entirely* covered it, so the coverage
+                // test below never saw those icons and the grid appeared to wait for the centres to
+                // meet after all.
+                //
+                // Measured on the emulator, dragging a 4x2 widget down over a row of icons:
+                // covered 25% - nothing; 51% - nothing; 77% - nothing; 103% - displaced. The
+                // threshold was never being applied, because the candidates never arrived.
+                //
+                // Walking the attached children instead asks the question the masonry grid actually
+                // has -- "what is underneath this thing" -- rather than the one a uniform list asks.
+                for (i in 0 until list.childCount) {
+                    val v = list.getChildAt(i) ?: continue
+                    if (v === selected.itemView) continue
+                    val holder = list.getChildViewHolder(v) ?: continue
+                    if (holder.bindingAdapterPosition == RecyclerView.NO_POSITION) continue
                     val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
                     val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
                     val area = (v.width * v.height).toFloat()
@@ -301,7 +345,7 @@ object AresHomeReorder {
                         val cover = (overlapW * overlapH) / area
                         if (cover >= WIDGET_COVER_FRACTION && cover > bestCover) {
                             bestCover = cover
-                            best = target
+                            best = holder
                         }
                     }
                 }

@@ -147,15 +147,20 @@ object AresWidgetResize {
     ): View {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
-        val glyph = res.getDimensionPixelSize(R.dimen.ares_widget_resize_chevron_size)
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
-        val inset = ((touch - glyph) / 2).coerceAtLeast(0)
 
         return ImageView(container.context).apply {
             tag = CHEVRON_TAG
-            setImageResource(R.drawable.ares_widget_resize_chevron)
-            setPadding(inset, inset, inset, inset)
-            setBackgroundResource(R.drawable.ares_widget_resize_background)
+            // A corner HOOK, not a chevron on a filled circle. The old treatment read as a button,
+            // which is now the wrong promise -- this is dragged, not tapped. "right now it looks
+            // like a buttom. Maybe a corner hook would be better? ... like a curved L traciong the
+            // boarder of the corner of the square".
+            //
+            // FIT_END pins the drawing to the view's bottom-end corner, so the L traces the tile's
+            // corner rather than floating in the middle of its own touch target. The 48dp target is
+            // untouched -- only what is painted moved, exactly as the x and ! badges do it.
+            setImageResource(R.drawable.ares_widget_resize_hook)
+            scaleType = ImageView.ScaleType.FIT_END
             isClickable = true
             isFocusable = true
             contentDescription = if (label.isNullOrBlank()) {

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher - the widget resize handle (S3): an L tracing the tile's bottom-end corner.
+
+     Replaces a chevron on a filled circle. That read as a BUTTON, which is now the wrong promise:
+     the affordance no longer advances through sizes on a tap, it is dragged. "right now it looks
+     like a buttom. Maybe a corner hook would be better? ... like a curved L traciong the boarder of
+     the corner of the square".
+
+     The elbow is a quarter-circle rather than a mitre so it follows the same curve the tile's own
+     corner has (ares_edit_cell_outline_radius), which is what makes it read as part of the tile's
+     edge rather than as a glyph parked near it. Round caps for the same reason - a square-cut arm
+     ends in a hard tick that reads as a separate mark.
+
+     Stroke, no fill, and no backdrop: a filled shape here would be the button we are getting away
+     from. In edit mode this always sits on the frost box, which is what it reads against.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp"
+    android:height="26dp"
+    android:viewportWidth="26"
+    android:viewportHeight="26"
+    android:tint="?android:attr/textColorPrimary">
+
+    <path
+        android:pathData="M5,22 H16 A6,6 0 0 0 22,16 V5"
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
