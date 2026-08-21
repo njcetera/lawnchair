@@ -413,19 +413,35 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             // its own translucent panel, so this is frost over frost. If it reads muddy the answer
             // is a lower alpha here, not removing it -- the box is load-bearing for the badges now.
             //
-            // NOT an InsetDrawable, and this is a trap worth stating. Wrapping the frost in one to
-            // give neighbouring boxes a gap looks harmless and is not: `View.setBackground` applies
-            // a background's `getPadding` through `internalSetPadding`, which does **not** route
-            // through the overridable `setPadding` that [EditCell] deliberately no-ops. So the
-            // drawable's 10px inset silently became 10px of real cell padding, the two badges' own
-            // margins stacked on top of it, and two 91px badges stopped fitting across a 202px
-            // cell -- measured, they overlapped by 20x91px, and the ! (added second) stole that
-            // strip from the ×, making the remove control smaller than it should be.
+            // Inset so neighbouring frost boxes do not touch, WITHOUT reporting padding.
             //
-            // If a visual gap between boxes is wanted again, it has to come from something that
-            // reports no padding -- a smaller drawn shape, or a child view with margins -- never
-            // from a background wrapper.
-            cell.background = AresEditGrid.cellOutline(cell.context)
+            // Folder cells are laid out edge to edge and the frost is the cell's background, so it
+            // fills that rect exactly; during a reorder the cells follow their icons past one
+            // another and the boxes visibly collide.
+            //
+            // A plain InsetDrawable is the obvious fix and it is a trap. `View.setBackground`
+            // applies a background's `getPadding` through `internalSetPadding`, which does NOT
+            // route through the overridable `setPadding` that [EditCell] no-ops for exactly this
+            // reason — so the inset became real cell padding, the badges' own margins stacked on
+            // it, and two 91px badges stopped fitting across a 202px cell (measured: 20x91px of
+            // overlap, the ! stealing that strip from the ×).
+            //
+            // Declining to report padding keeps the visual inset and leaves the cell's own box
+            // alone, so the badges still size and place against the full cell.
+            val frostInset =
+                cell.resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset) / 2
+            cell.background = object : android.graphics.drawable.InsetDrawable(
+                AresEditGrid.cellOutline(cell.context),
+                frostInset,
+                frostInset,
+                frostInset,
+                frostInset,
+            ) {
+                override fun getPadding(padding: android.graphics.Rect): Boolean {
+                    padding.set(0, 0, 0, 0)
+                    return false
+                }
+            }
 
             // Both badges take a REDUCED target here. A folder cell is ~83dp (202x240px measured):
             // two 48dp targets side by side need 234px of a 202px width and would overlap by about
