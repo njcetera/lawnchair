@@ -169,6 +169,8 @@ object AresFolderDrag {
      * **Not stealing the × badge's tap.** The badge is a 48dp target on a ~83dp cell, so it covers
      * a large share of the icon; a gesture that starts on it is a tap on a control, never a drag
      * handle. Same carve-out the grid makes for the resize chevron.
+     *
+     * **Surviving being installed half way through a gesture** — see [haveOrigin]. This is D4.
      */
     class DragStarter(private val folder: Folder) : View.OnTouchListener {
 
@@ -177,22 +179,68 @@ object AresFolderDrag {
         private var startedOnBadge = false
         private var dragging = false
 
+        /**
+         * Whether [downX]/[downY] describe a press this listener actually saw (D4).
+         *
+         * ## The defect this exists to stop, measured
+         *
+         * The slop test below is a distance *from the press point*, and until this flag existed it
+         * silently used `0f, 0f` — the icon's top-left corner — whenever no ACTION_DOWN had been
+         * seen. That is not a rare case, it is **the owner's reported sequence**: open a folder in
+         * normal mode, then press and hold an app inside it. The long-press enters edit mode, which
+         * attaches [AresFolderEdit], whose `sync()` installs this listener on every icon — *during*
+         * the gesture, long after its DOWN. `View.dispatchTouchEvent` reads `mOnTouchListener` at
+         * dispatch time, so this listener then receives the MOVEs of a gesture whose press it never
+         * saw.
+         *
+         * Measured on emulator-5554, holding an app inside a folder and jittering the finger 5px —
+         * a twentieth of the touch slop:
+         *
+         * ```
+         * DragStarter.startDrag v=230641199 down=0.0,0.0 now=107.03613,119.53516
+         * ```
+         *
+         * `hypot(107, 119)` is 160px from a phantom origin, so the drag armed on the first jitter.
+         * `Folder.onDragStart` then lifted that icon out of the container into a `DragView`, and
+         * [AresFolderEdit] correctly hid the vacated cell's chrome — giving exactly the reported
+         * symptom: every other app gets its frost box, × and !, and the one being held does not.
+         * The tree mid-hold read `icons=2 EditCells=2 DragViews=1` on a three-app folder.
+         *
+         * The chrome was never the bug. **The drag was.**
+         *
+         * ## Why the first MOVE becomes the origin rather than the DOWN being recovered
+         *
+         * There is no DOWN left to recover — it was dispatched before this listener existed, and
+         * nothing retains it. The press point is nevertheless known to within the touch slop, for
+         * free: `CheckLongPressHelper` cancels the long-press the moment the finger travels past
+         * slop, so a long-press that *fired* proves the finger was still within slop of its press
+         * point, and the first MOVE after it arrives a frame later. Adopting it costs one event and
+         * keeps the gesture continuous, which is the point — `AresHomeListView.enterEditMode`
+         * claims the rest of this gesture precisely so a long-press can run straight on into a drag
+         * without lifting.
+         *
+         * So the rule is unchanged and now actually holds: **a drag inside a folder starts when the
+         * finger travels past the slop, and never from a press alone.** Two other files state that
+         * guarantee as the reason an app can no longer leave a folder by accident
+         * ([AresHomeDrop.handleExternalDrop] and `Workspace.acceptDrop`); before this it was not
+         * true on the one path that mattered.
+         */
+        private var haveOrigin = false
+
         override fun onTouch(v: View, e: MotionEvent): Boolean {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.x
-                    downY = e.y
-                    dragging = false
-                    // The badge is a sibling cell drawn over the icon, so its bounds are in the
-                    // icon's coordinate space already -- no transform mapping needed, unlike the
-                    // grid, whose tiles carry edit mode's scale.
-                    startedOnBadge = AresFolderEdit.isPointOnBadgeFor(folder, v, e.x, e.y)
-                    if (!startedOnBadge) {
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
+                    takeOrigin(v, e)
                 }
 
                 MotionEvent.ACTION_MOVE -> {
+                    // Installed mid-gesture (see haveOrigin): this is the first event of a press
+                    // that already happened, so it sets the reference point instead of being
+                    // measured against one that does not exist.
+                    if (!haveOrigin) {
+                        takeOrigin(v, e)
+                        return false
+                    }
                     if (dragging || startedOnBadge) return false
                     val slop = ViewConfiguration.get(v.context).scaledTouchSlop
                     if (hypot(e.x - downX, e.y - downY) <= slop) return false
@@ -216,12 +264,47 @@ object AresFolderDrag {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     dragging = false
                     startedOnBadge = false
+                    // Cleared with the rest of the per-gesture state, so the NEXT gesture is
+                    // measured from its own press and not from this one's.
+                    haveOrigin = false
                     v.parent?.requestDisallowInterceptTouchEvent(false)
                 }
             }
             // Never consumed: the icon still needs its own click and long-press handling, and
             // DragController owns the stream from the moment the drag starts.
             return false
+        }
+
+        /**
+         * Anchors the slop test at [e], decides whether the gesture began on the × badge, and — the
+         * part that is easy to leave out — claims the rest of the gesture from `FolderPagedView`.
+         *
+         * The claim has to happen wherever the origin is taken, not only at ACTION_DOWN. Measured
+         * on emulator-5554 with it in the DOWN branch alone: holding an app inside a folder to
+         * enter edit mode and then dragging **without lifting** produced `DragViews=0` after 100px
+         * of travel — the drag never started. `FolderPagedView` is a `PagedView`, its
+         * `determineScrollingStart` claims any horizontal move past the same slop this uses, and
+         * with no disallow flag set it won the race and starved the icon of the moves that would
+         * have armed the drag. That gesture is the whole reason
+         * `AresHomeListView.enterEditMode` claims the gesture on its own side, and it is a gesture
+         * the owner performs: press to enter the mode, carry straight on into the move.
+         *
+         * (`enterEditMode`'s claim does not cover this. It is issued on the home list's parent
+         * chain, and an open folder hangs off the `DragLayer` on a different branch — so nothing it
+         * sets is ever consulted by the folder's own `PagedView`.)
+         */
+        private fun takeOrigin(v: View, e: MotionEvent) {
+            downX = e.x
+            downY = e.y
+            dragging = false
+            haveOrigin = true
+            // The badge is a sibling cell drawn over the icon, so its bounds are in the icon's
+            // coordinate space already -- no transform mapping needed, unlike the grid, whose
+            // tiles carry edit mode's scale.
+            startedOnBadge = AresFolderEdit.isPointOnBadgeFor(folder, v, e.x, e.y)
+            if (!startedOnBadge) {
+                v.parent?.requestDisallowInterceptTouchEvent(true)
+            }
         }
     }
 }

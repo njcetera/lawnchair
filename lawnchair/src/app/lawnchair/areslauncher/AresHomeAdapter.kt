@@ -112,7 +112,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * Operates on the live view rather than rebinding, for the reason in [setEditMode].
      */
     fun syncAffordances(container: FrameLayout, position: Int) {
-        syncAffordancesFor(container, items.getOrNull(position))
+        // The drop slot (§C4) is a hole, not an item: no ×, no !, no outline, no chevron. Filtered
+        // here rather than at each caller because BOTH of them -- onChildAttachedToWindow and
+        // applyEditModeVisual -- run while a drag is over the grid, and syncAffordancesFor already
+        // reads a null item as "this row carries nothing".
+        syncAffordancesFor(container, items.getOrNull(position)?.takeIf { it !== dropSlot })
     }
 
     /**
@@ -484,8 +488,83 @@ class AresHomeAdapter(private val launcher: Launcher) :
         return true
     }
 
-    /** Current visual order, for persisting `rank`. */
-    fun snapshot(): List<ItemInfo> = items.toList()
+    /**
+     * Current visual order, for persisting `rank`.
+     *
+     * The §C4 drop slot is filtered out **here**, at the single point every persist path goes
+     * through, rather than at each of the six call sites. It is a view-level hole with no database
+     * row behind it; letting one reach [AresHomeReorder.persistOrder] would renumber the whole grid
+     * around a thing that does not exist and leave a gap in the ranks when it vanished. Six callers
+     * and a mid-drag lifetime is exactly the shape that gets missed at one of them.
+     */
+    fun snapshot(): List<ItemInfo> = items.filter { it !== dropSlot }
+
+    // ------------------------------------------------------------------ §C4 drop slot ---
+    //
+    // A drag that arrives from OUTSIDE the grid -- out of an open folder, chiefly -- is a
+    // `DragController` drag, not the `ItemTouchHelper` one that drives the masonry reflow, so
+    // nothing was asking the grid to make room and it only readjusted on release. Measured on
+    // emulator-5554 before this existed: mid-drag the tile signature was byte-identical to at
+    // rest, and a fourth tile appeared only after the finger came up.
+    //
+    // The grid's position model is an ordered sequence, so "make room" has exactly one
+    // representation: an extra entry. This is that entry -- an item that renders nothing, so the
+    // packer lays out a gap the size of a cell and the tiles after it slide down, animated by
+    // RecyclerView exactly as an in-grid reorder is. [AresHomeDropPreview] drives it.
+
+    /** The in-flight gap, or null. Identity, never id: it has no row and no meaningful id. */
+    private var dropSlot: ItemInfo? = null
+
+    /** True when [info] is the gap rather than a real item. */
+    fun isDropSlot(info: ItemInfo?): Boolean = info != null && info === dropSlot
+
+    /**
+     * Opens a gap at [index] and returns it.
+     *
+     * Not the dragged item itself, which is the obvious choice and wrong twice over: it would
+     * render a second copy of the icon already under the finger, and stable ids would then have two
+     * holders claiming one id at the moment the real insert lands.
+     */
+    fun showDropSlot(index: Int): ItemInfo {
+        clearDropSlot()
+        val slot = ItemInfo().apply {
+            // Unique by construction: database ids are positive and NO_ID is -1, so nothing else
+            // can collide with this under setHasStableIds(true).
+            id = DROP_SLOT_ID
+            itemType = Favorites.ITEM_TYPE_APPLICATION
+            spanX = 1
+            spanY = 1
+        }
+        dropSlot = slot
+        val at = index.coerceIn(0, items.size)
+        items.add(at, slot)
+        notifyItemInserted(at)
+        return slot
+    }
+
+    /** Slides the gap to [index]. The same `notifyItemMoved` an in-grid reorder uses. */
+    fun moveDropSlot(index: Int) {
+        val slot = dropSlot ?: return
+        val from = items.indexOfFirst { it === slot }
+        if (from < 0) return
+        moveItem(from, index.coerceIn(0, items.size - 1))
+    }
+
+    /**
+     * Closes the gap, returning the index it occupied, or -1 if there was none.
+     *
+     * The index is the return value because it is the answer to "where does this land": it is what
+     * the user has been looking at for the whole drag.
+     */
+    fun clearDropSlot(): Int {
+        val slot = dropSlot ?: return -1
+        dropSlot = null
+        val at = items.indexOfFirst { it === slot }
+        if (at < 0) return -1
+        items.removeAt(at)
+        notifyItemRemoved(at)
+        return at
+    }
 
     /**
      * The item at [index], or null when [index] is out of range.
@@ -545,6 +624,12 @@ class AresHomeAdapter(private val launcher: Launcher) :
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val info = items[position]
         holder.container.removeAllViews()
+
+        // The §C4 drop slot renders NOTHING. It exists so the packer allocates a cell and the
+        // tiles after it move aside while the item is still held; an empty container is the whole
+        // implementation. Returning here also skips the long-press listener, the affordance sync
+        // and the arrival animation below, none of which have anything to act on.
+        if (info === dropSlot) return
 
         // inflateItem() uses attachToRoot=false, so the view is ours to add. It returns null when
         // the model decides an item should be dropped (e.g. a widget pending deletion).
@@ -746,6 +831,9 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private companion object {
         const val TYPE_ICON = 0
         const val TYPE_WIDGET = 1
+
+        /** Stable id for the §C4 drop slot. Nothing else can hold it: real ids are positive. */
+        const val DROP_SLOT_ID = Int.MIN_VALUE
         const val DUPLICATE_WIDGET_REASON =
             "AresLauncher: second database row for an appWidgetId already on the home grid"
     }

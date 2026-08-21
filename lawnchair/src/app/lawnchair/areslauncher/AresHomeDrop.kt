@@ -112,6 +112,13 @@ object AresHomeDrop {
         if (!AresWidgetAdd.isAresHome(launcher)) return false
         val dragged = d.dragInfo ?: return false
 
+        // FIRST, before anything reads or writes the grid (§C4). The live gap
+        // ([AresHomeDropPreview]) is a view-level entry with no database row, so it must be gone
+        // before `commitDrop` or `addDraggedItem` renumbers anything -- and its index is a better
+        // answer than re-deriving one from the release point, because it is the position the user
+        // has been watching open up for the whole drag.
+        val slotIndex = AresHomeDropPreview.take()
+
         // Converted up front because both destinations need the same object: an All Apps drag
         // carries an AppInfo, and only ItemInflater's type dispatch turns one into the
         // WorkspaceItemInfo the model -- and a FolderInfo's contents -- can actually hold.
@@ -132,7 +139,8 @@ object AresHomeDrop {
             // item is not ready to persist yet. That is exactly what addToHomeList wraps.
             dragged is PendingAddItemInfo ->
                 AresWidgetAdd.addToHomeList(launcher, dragged, dropIndex(launcher, d))
-            converted != null -> addDraggedItem(launcher, converted, dropIndex(launcher, d))
+            converted != null ->
+                addDraggedItem(launcher, converted, if (slotIndex >= 0) slotIndex else dropIndex(launcher, d))
             else -> false
         }
         if (!added) {
