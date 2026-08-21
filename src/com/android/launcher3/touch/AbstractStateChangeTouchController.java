@@ -370,19 +370,28 @@ public abstract class AbstractStateChangeTouchController
         anim.setFloatValues(startProgress, endProgress);
         updateSwipeCompleteAnimation(anim, duration, targetState, velocity, fling);
         mCurrentAnimation.dispatchOnStart();
-        if (targetState == LauncherState.ALL_APPS) {
-            if (mAllAppsOvershootStarted) {
-                // NEVER gated. This is not a spring — it is the RELEASE of an overscroll pull that
-                // onDrag already started. An EdgeEffect leaves STATE_PULL only via onRelease() or
-                // onAbsorb(), and this is the only call to onRelease() in the whole tree, so
-                // skipping it leaves the app list permanently stretched and re-entering the effect
-                // on every draw. An earlier revision gated the whole block to remove the settle
-                // spring and took this with it.
-                mLauncher.getAppsView().onRelease();
-                mAllAppsOvershootStarted = false;
-            } else if (aresWantsAllAppsSpring()) {
-                mLauncher.getAppsView().addSpringFromFlingUpdateListener(anim, velocity, progress);
-            }
+        // NEVER gated — not on the spring preference, and (AresLauncher) not on the target state
+        // either. This is not a spring; it is the RELEASE of an overscroll pull that onDrag already
+        // started. An EdgeEffect leaves STATE_PULL only via onRelease() or onAbsorb(), and this is
+        // the only call to onRelease() in the whole tree, so skipping it leaves the app list
+        // permanently stretched and re-entering the effect on every draw.
+        //
+        // It has now been lost twice, both times by being nested inside a condition that describes
+        // something else. An earlier revision gated the whole block on the spring preference to
+        // remove the settle spring and took this with it. The `targetState == ALL_APPS` wrapper
+        // that replaced it was the same mistake one level out: the flag is set in onDrag when
+        // `progress <= 0 && mFromState == ALL_APPS`, which says where the gesture CAME FROM, and
+        // releasing was gated on where it ENDED. Overscroll leftward past the app list, then
+        // reverse and complete to home: targetState is NORMAL, the block was skipped, and the pull
+        // stayed held.
+        //
+        // So the release is now keyed on the same thing that armed it — the flag — and nothing
+        // else. The spring genuinely is an ALL_APPS-arrival effect and stays gated.
+        if (mAllAppsOvershootStarted) {
+            mLauncher.getAppsView().onRelease();
+            mAllAppsOvershootStarted = false;
+        } else if (targetState == LauncherState.ALL_APPS && aresWantsAllAppsSpring()) {
+            mLauncher.getAppsView().addSpringFromFlingUpdateListener(anim, velocity, progress);
         }
         anim.start();
     }
