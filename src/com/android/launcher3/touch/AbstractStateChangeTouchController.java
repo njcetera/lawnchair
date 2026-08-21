@@ -370,11 +370,17 @@ public abstract class AbstractStateChangeTouchController
         anim.setFloatValues(startProgress, endProgress);
         updateSwipeCompleteAnimation(anim, duration, targetState, velocity, fling);
         mCurrentAnimation.dispatchOnStart();
-        if (targetState == LauncherState.ALL_APPS && aresWantsAllAppsSpring()) {
+        if (targetState == LauncherState.ALL_APPS) {
             if (mAllAppsOvershootStarted) {
+                // NEVER gated. This is not a spring — it is the RELEASE of an overscroll pull that
+                // onDrag already started. An EdgeEffect leaves STATE_PULL only via onRelease() or
+                // onAbsorb(), and this is the only call to onRelease() in the whole tree, so
+                // skipping it leaves the app list permanently stretched and re-entering the effect
+                // on every draw. An earlier revision gated the whole block to remove the settle
+                // spring and took this with it.
                 mLauncher.getAppsView().onRelease();
                 mAllAppsOvershootStarted = false;
-            } else {
+            } else if (aresWantsAllAppsSpring()) {
                 mLauncher.getAppsView().addSpringFromFlingUpdateListener(anim, velocity, progress);
             }
         }
