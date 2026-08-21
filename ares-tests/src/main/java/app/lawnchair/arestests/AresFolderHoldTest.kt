@@ -97,6 +97,16 @@ class AresFolderHoldTest {
         var counts = listOf<Triple<Int, Int, Boolean>>()
         var armed = false
         for (attempt in 1..MAX_ATTEMPTS) {
+            // The state this attempt requires: folder open, edit mode NOT yet active. If a prior
+            // attempt armed undetected, holding again exercises the attached-up-front
+            // configuration the class doc records as the historical false pass -- so that is a
+            // scenario failure, said out loud, not a silent go-around.
+            val pre = ares.folderIcons()
+            check(pre.size >= 3 && pre.none { it.stateLift > 0f }) {
+                "attempt $attempt precondition broken: icons=${pre.size}, " +
+                    "lifted=${pre.count { it.stateLift > 0f }} -- a previous attempt likely " +
+                    "armed undetected"
+            }
             val tryCounts = mutableListOf<Triple<Int, Int, Boolean>>()
             AresGestures.pressHoldDragRelease(
                 start = held.center(),

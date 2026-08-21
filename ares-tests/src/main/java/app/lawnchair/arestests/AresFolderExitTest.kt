@@ -77,6 +77,7 @@ class AresFolderExitTest {
 
     @After
     fun tearDown() {
+        runCatching { AresGestures.cancelStuckPointer() }
         runCatching { ares.setFolderEdit(false) }
         runCatching { ares.pressBack() }
     }

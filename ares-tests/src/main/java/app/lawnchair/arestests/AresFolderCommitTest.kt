@@ -78,28 +78,68 @@ class AresFolderCommitTest {
                 "exit via widget@${widget.position}, topLevel=$topLevelBefore",
         )
 
-        var sawPreview = false
-        val sampler = AresSampler(intervalMs = 40L) {
-            ares.folderIcons().isNotEmpty().also { if (it) sawPreview = true }
+        // The SCENARIO needs two witnesses, and the whole gesture is retried until both hold
+        // (assertions below are never retried). sawPreview: the folder actually opened under the
+        // dwell. The decline counter: the S4 branch actually RAN -- commitDrop fires ~250ms of
+        // settle after the UP, and the 400ms grace started mid-exit-leg, so the branch's window
+        // is tens of milliseconds wide and one loaded-emulator stutter pushes the release past
+        // it; the preview self-closes, the item lands on the grid for the WRONG reason, and
+        // every outcome assertion would pass (adversarial review, 2026-08-21 -- and the very
+        // first suite run with the counter caught exactly that slip). The launcher counts the
+        // branch; the scenario requires the count to move.
+        var exercised = false
+        for (attempt in 1..MAX_ATTEMPTS) {
+            ares.exitEditMode()
+            Thread.sleep(400)
+            val tries = ares.tiles()
+            val tFolder = tries.first { it.itemType == 2 }
+            val tWidget = tries.first { it.isWidget && it.position != tFolder.position }
+            val tDragged = tries.first {
+                !it.isWidget && it.itemType != 2 && it.position != tFolder.position
+            }
+            val declinedBefore = ares.folderDropDeclinedCount()
+            var sawPreview = false
+            val sampler = AresSampler(intervalMs = 40L) {
+                ares.folderIcons().isNotEmpty().also { if (it) sawPreview = true }
+            }
+            sampler.start()
+            ares.enterEditModeAndDrag(
+                fromIndex = tDragged.position,
+                toIndex = tFolder.position,
+                holdMs = 700,
+                travelMs = 600,
+                // Long enough for the 500ms dwell plus the open animation, with margin.
+                hangMs = DWELL_HANG_MS,
+                // Then OUT, and release on arrival -- inside the 400ms grace, which is the point.
+                secondTargetIndex = tWidget.position,
+                secondTravelMs = EXIT_TRAVEL_MS,
+            )
+            sampler.stop()
+            // commitDrop runs from clearView, ~250ms of settle AFTER the UP the gesture just
+            // returned from -- reading the counter immediately races it (measured: three
+            // attempts in a row declined 0->1->2 each just after their read said unchanged). A
+            // bounded poll is a precondition-wait, not an assertion retry.
+            var declinedAfter = declinedBefore
+            repeat(12) {
+                declinedAfter = ares.folderDropDeclinedCount()
+                if (declinedAfter > declinedBefore) return@repeat
+                Thread.sleep(100)
+            }
+            Log.i(
+                TAG,
+                "s4 attempt $attempt: sawPreview=$sawPreview " +
+                    "declined=$declinedBefore->$declinedAfter",
+            )
+            if (sawPreview && declinedBefore >= 0 && declinedAfter > declinedBefore) {
+                exercised = true
+                break
+            }
+            Thread.sleep(400)
         }
-        sampler.start()
-        ares.enterEditModeAndDrag(
-            fromIndex = dragged.position,
-            toIndex = folder.position,
-            holdMs = 700,
-            travelMs = 600,
-            // Long enough for the 500ms dwell plus the open animation, with margin.
-            hangMs = DWELL_HANG_MS,
-            // Then OUT, and release on arrival -- well inside the 400ms grace, which is the point.
-            secondTargetIndex = widget.position,
-            secondTravelMs = EXIT_TRAVEL_MS,
-        )
-        sampler.stop()
-        Log.i(TAG, "s4 sawPreview=$sawPreview")
-
-        // Precondition: the folder actually opened under the dwell. A drag that never opened it
-        // exercises nothing -- the D4 vacuity lesson, applied forward.
-        assertThat(sawPreview).isTrue()
+        check(exercised) {
+            "the S4 scenario could not be produced in $MAX_ATTEMPTS attempts (preview open AND " +
+                "decline branch run); nothing about S4 was measured"
+        }
 
         // The assertion, from both sides of the would-be write. Edit mode is still active from the
         // drag and a tap routes differently under it, so leave it before reopening the folder.
@@ -118,6 +158,16 @@ class AresFolderCommitTest {
 
     private companion object {
         const val DWELL_HANG_MS = 1_400L
-        const val EXIT_TRAVEL_MS = 110L
+
+        /**
+         * The exit leg's duration. The decline moment is `exit + ~250ms settle`, and the grace
+         * expires at `exit + 400ms`, so the margin is roughly `400 - travel - 250`. At 110ms that
+         * was ~40ms and one loaded-emulator stutter blew it; 60ms doubles it while still giving
+         * the injected stream a handful of MOVEs to register the exit.
+         */
+        const val EXIT_TRAVEL_MS = 60L
+
+        /** Scenario attempts, NOT assertion retries. See AresFolderExitTest. */
+        const val MAX_ATTEMPTS = 3
     }
 }

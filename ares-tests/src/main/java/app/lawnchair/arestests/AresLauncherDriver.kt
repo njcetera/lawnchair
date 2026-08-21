@@ -130,6 +130,10 @@ class AresLauncherDriver {
 
     fun isEditMode(): Boolean = call("ares-edit-mode")?.getBoolean("response") ?: false
 
+    /** Monotonic S4 decline-branch counter; -1 when the channel cannot answer. */
+    fun folderDropDeclinedCount(): Long =
+        call("ares-folder-drop-stats")?.getLong("response") ?: -1L
+
     fun tiles(): List<Tile> =
         (call("ares-tile-metrics")?.getStringArray("response") ?: emptyArray())
             .map { Tile.parse(it) }
@@ -200,8 +204,16 @@ class AresLauncherDriver {
     }
 
     fun exitEditMode() {
-        if (!isEditMode()) return
-        device.pressBack()
+        // BACK peels one layer at a time: an open folder or popup consumes the first press and
+        // leaves edit mode standing, which is exactly the state a failed folder-drag attempt
+        // leaves behind. One press followed by a 30s wait therefore hung an entire run. Press,
+        // give the dismissal a beat, and press again -- bounded, and each press is what a person
+        // would do.
+        repeat(4) {
+            if (!isEditMode()) return
+            device.pressBack()
+            SystemClock.sleep(600)
+        }
         waitFor("edit mode to end") { !isEditMode() }
     }
 

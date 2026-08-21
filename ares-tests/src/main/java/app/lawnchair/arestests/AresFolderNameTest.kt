@@ -127,9 +127,13 @@ class AresFolderNameTest {
                 "ever observed, so nothing about D9 was measured"
         }
 
-        // Drift is measured only while the drag existed -- from the first armed sample on. The
-        // name legitimately relayouts once the finger lifts and the icon returns.
-        val during = samples.dropWhile { it.second == 0 }.takeWhile { it.second == 1 }
+        // Drift is measured only while the drag existed. Filtered on the armed samples directly:
+        // the first version windowed with dropWhile/takeWhile, and a single out-of-band sample
+        // (dragViewCount answers -1 when the metrics line is absent) emptied the window while the
+        // armed precondition still passed -- a full vacuous pass with D9 present (adversarial
+        // review, 2026-08-21).
+        val during = samples.filter { it.second == 1 }
+        check(during.isNotEmpty()) { "sawDrag was true but no armed sample survived filtering" }
         val moved = during.map { it.first }.filter { it > 0 }.map { abs(it - nameAtRest) }
         val worst = moved.maxOrNull() ?: 0
         Log.i(TAG, "d9 nameTop drift: worst=$worst over ${moved.size} samples")
