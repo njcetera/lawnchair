@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Matrix
 import android.os.SystemClock
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -13,7 +14,9 @@ import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
+import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherState
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.folder.FolderIcon
@@ -1385,8 +1388,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * rather than re-hosting: decline the gesture when it isn't on a row, and let it bubble up to
      * Workspace. Touches on rows are unaffected, so row taps and row long-press still work.
      *
-     * Empty space only exists when the content doesn't fill the viewport -- in which case there is
-     * nothing to scroll -- so declining it costs no scrolling behaviour.
+     * ## The assumption this used to rest on, and why it was wrong
+     *
+     * It said: *"Empty space only exists when the content doesn't fill the viewport -- in which case
+     * there is nothing to scroll -- so declining it costs no scrolling behaviour."* That is false,
+     * and the owner found the counter-example: *"swipping vertically on homepage doesnt work on a
+     * blank space (no app icon, folder, or widget)"*.
+     *
+     * A **masonry** grid has empty space at any content height. A final row that does not divide by
+     * the column count leaves a gap beside it; [AresPacker]'s first-fit leaves holes next to any
+     * item wider than one cell; and scrolled to the bottom there is whatever the last row does not
+     * fill. Declining all of it meant a page tall enough to scroll could only be scrolled by
+     * starting the drag *on a tile* -- and the taller the page, the more of it was dead.
+     *
+     * So the decline is now conditional on there being nothing to scroll, which is what the comment
+     * above always claimed it was. When the list **can** scroll it keeps the gesture, and raises the
+     * workspace popup itself -- see [armEmptySpaceLongPress]. On a short page nothing changes at
+     * all: the same decline, the same bubble up to Workspace, the same popup from the same code.
      *
      * ## Why edit mode is excluded
      *
@@ -1399,6 +1417,109 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * anyway, and outside edit mode the behaviour is unchanged.
      */
     private var gestureStartedOnEmptySpace = false
+
+    /** Armed while a hold on scrollable empty space might still become the workspace popup. */
+    private var emptySpaceLongPress: Runnable? = null
+
+    private var emptySpaceDownX = 0f
+    private var emptySpaceDownY = 0f
+
+    /** True when the content is taller than the viewport, whichever end it is currently at. */
+    private fun canScrollTheGrid(): Boolean = canScrollVertically(-1) || canScrollVertically(1)
+
+    /**
+     * Arms the workspace popup for a hold that began on empty space the list is *keeping*.
+     *
+     * This is the other half of the [gestureStartedOnEmptySpace] change. Once the list stops
+     * declining empty-space gestures on a scrollable page, `WorkspaceTouchListener` never sees them
+     * -- it is an `OnTouchListener` on Workspace, and a listener only runs when no descendant
+     * consumed the event -- so the wallpaper/widgets/settings popup would go with the fix, taking
+     * launcher settings and the §7 widget picker with it. That trade was put to the owner, who
+     * chose to keep both.
+     *
+     * Both is possible because the two gestures separate cleanly *after* the DOWN: a scroll crosses
+     * touch slop, a long-press does not. So the list consumes the DOWN (it must, or it receives
+     * nothing further and cannot scroll) and starts this timer; slop cancels it, and the timer
+     * firing cancels the scroll.
+     *
+     * Deliberately a copy of `WorkspaceTouchListener.maybeShowMenu`'s *decisions* rather than a
+     * call into it -- that method is driven by a GestureDetector fed from Workspace's own touch
+     * stream, which by construction is not running here. What is copied is the part that matters
+     * and would be wrong to reinvent: the same `canHandleLongPress` guard (no floating view already
+     * open, launcher in NORMAL), the same haptic, and the same `Launcher.showDefaultOptions` entry
+     * point, so the popup that appears is the stock one with the stock options.
+     */
+    private fun armEmptySpaceLongPress(e: MotionEvent) {
+        cancelEmptySpaceLongPress()
+        emptySpaceDownX = e.x
+        emptySpaceDownY = e.y
+        val armed = Runnable {
+            emptySpaceLongPress = null
+            fireEmptySpaceLongPress()
+        }
+        emptySpaceLongPress = armed
+        postDelayed(armed, ViewConfiguration.getLongPressTimeout().toLong())
+    }
+
+    private fun cancelEmptySpaceLongPress() {
+        emptySpaceLongPress?.let { removeCallbacks(it) }
+        emptySpaceLongPress = null
+    }
+
+    private fun fireEmptySpaceLongPress() {
+        // Stock's own precondition. Without it a hold behind an open folder or mid-transition pops
+        // a second floating view on top of the first -- the "two floating states raised by one
+        // gesture" this project already refused once, in the long-press that enters edit mode.
+        if (AbstractFloatingView.getTopOpenView(launcher) != null ||
+            !launcher.isInState(LauncherState.NORMAL)
+        ) {
+            return
+        }
+
+        // DragLayer space, not ours. `Launcher.getPopupTarget` measures the anchor against
+        // `mDragLayer.getWidth()`, and this view is several parents down (ShortcutAndWidgetContainer
+        // -> CellLayout -> Workspace) and carries the workspace's own scale and page translation.
+        // Stock gets away with passing raw coordinates because its listener sits on Workspace, which
+        // is effectively the DragLayer's own box; ours does not, so it has to be mapped.
+        val point = floatArrayOf(emptySpaceDownX, emptySpaceDownY)
+        launcher.dragLayer.getDescendantCoordRelativeToSelf(this, point)
+
+        performHapticFeedback(
+            HapticFeedbackConstants.LONG_PRESS,
+            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
+        )
+        launcher.showDefaultOptions(point[0], point[1])
+
+        // Take the gesture back off RecyclerView, or the finger that is still down keeps scrolling
+        // the grid underneath the popup it just opened. `super` deliberately: our own override
+        // would read this as a real cancel and abandon a folder drop that is not happening.
+        val now = SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
+    }
+
+    /**
+     * Keeps the empty-space long-press in step with the gesture.
+     *
+     * In `dispatchTouchEvent` rather than `onTouchEvent` because of how `ViewGroup` routes a touch
+     * that no child claimed: with `mFirstTouchTarget` null, `onInterceptTouchEvent` is called on the
+     * DOWN and **never again** for that gesture, so a MOVE-based cancel written there would never
+     * run. `dispatchTouchEvent` sees every event unconditionally.
+     */
+    private fun trackEmptySpaceLongPress(ev: MotionEvent) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (emptySpaceLongPress == null) return
+                val slop = ViewConfiguration.get(context).scaledTouchSlop
+                val dx = ev.x - emptySpaceDownX
+                val dy = ev.y - emptySpaceDownY
+                if (dx * dx + dy * dy > (slop * slop).toFloat()) cancelEmptySpaceLongPress()
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> cancelEmptySpaceLongPress()
+        }
+    }
 
     /**
      * Observes every event this view receives, and abandons a pending folder drop on a CANCEL.
@@ -1426,12 +1547,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_CANCEL) AresFolderDrop.cancel()
+        trackEmptySpaceLongPress(ev)
         return super.dispatchTouchEvent(ev)
     }
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN) {
-            gestureStartedOnEmptySpace = !editMode && findChildViewUnder(e.x, e.y) == null
+            val onEmptySpace = !editMode && findChildViewUnder(e.x, e.y) == null
+            // Decline ONLY when there is genuinely nothing to scroll, which is what this guard
+            // always claimed to be doing. See [gestureStartedOnEmptySpace].
+            gestureStartedOnEmptySpace = onEmptySpace && !canScrollTheGrid()
+            if (onEmptySpace && !gestureStartedOnEmptySpace) armEmptySpaceLongPress(e)
         }
         if (gestureStartedOnEmptySpace) return false
         return super.onInterceptTouchEvent(e)
