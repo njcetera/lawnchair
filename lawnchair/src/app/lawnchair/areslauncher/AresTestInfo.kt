@@ -12,6 +12,7 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.Reorderable
 import com.android.launcher3.testing.TestInformationHandler
+import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.R
 import com.android.launcher3.folder.Folder
@@ -190,6 +191,29 @@ object AresTestInfo {
     const val REQUEST_FOLDER_EDIT = "ares-folder-edit"
 
     /**
+     * The surface at a glance: `state|inTransition|optionsPopup|scrollOffset`.
+     *
+     * Exists for two defects that are invisible to layout bounds. Ledger row 25: while the
+     * empty-space popup is up, a sideways drag must NOT pan the app-list pane -- pane movement is a
+     * state transition, so `inTransition` going true with `optionsPopup` still open IS the bug.
+     * Ledger row 27: the stock `onMoved` default called `scrollToPosition`, an ABSOLUTE jump of the
+     * masonry scroll offset mid-drag; `scrollOffset` sampled across a swap is the number that
+     * moves. Sampled, both of them -- each defect exists only while a finger is down.
+     */
+    const val REQUEST_SURFACE_STATE = "ares-surface-state"
+
+    /**
+     * The app list's edge-glow state: `topFinished|bottomFinished`.
+     *
+     * Ledger row 29: `mAllAppsOvershootStarted` armed by an overscroll pull was only released when
+     * the gesture settled on ALL_APPS -- reverse to home and the `EdgeEffect` stayed in STATE_PULL
+     * forever. An `EdgeEffect` leaves that state only via `onRelease()`/`onAbsorb()`, and
+     * `isFinished` is the observable. Read by reflection on `SpringRelativeLayout`'s private
+     * fields: our own APK, so no hidden-API concern, and no product accessor added for a test.
+     */
+    const val REQUEST_OVERSCROLL_STATE = "ares-overscroll-state"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -223,6 +247,14 @@ object AresTestInfo {
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> setFolderEdit(launcher, arg) },
+        )
+        REQUEST_SURFACE_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> surfaceState(launcher) },
+        )
+        REQUEST_OVERSCROLL_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> overscrollState(launcher) },
         )
         REQUEST_FOLDER_METRICS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
@@ -337,6 +369,36 @@ object AresTestInfo {
      * `VIEW_TRANSLATE_X` -- so it is not wrong for a single view. It is only a partial answer
      * because on this grid two different views carry two different contributions.
      */
+    /** See [REQUEST_SURFACE_STATE]. */
+    private fun surfaceState(launcher: Launcher): String {
+        val state = launcher.stateManager.state.toString().substringAfterLast('.')
+        val inTransition = launcher.stateManager.isInTransition
+        val popup = AbstractFloatingView.getOpenView<AbstractFloatingView>(
+            launcher, AbstractFloatingView.TYPE_OPTIONS_POPUP,
+        ) != null
+        val offset = (launcher.workspace?.aresHomeList?.layoutManager as? AresMasonryLayoutManager)
+            ?.currentScrollOffset() ?: -1
+        return "$state|$inTransition|$popup|$offset"
+    }
+
+    /** See [REQUEST_OVERSCROLL_STATE]. Reads SpringRelativeLayout's private glows by reflection. */
+    private fun overscrollState(launcher: Launcher): String {
+        val apps: View = launcher.appsView
+        fun finished(name: String): Boolean = try {
+            var c: Class<*>? = apps.javaClass
+            var f: java.lang.reflect.Field? = null
+            while (c != null && f == null) {
+                f = try { c.getDeclaredField(name) } catch (e: NoSuchFieldException) { null }
+                c = c.superclass
+            }
+            f?.isAccessible = true
+            (f?.get(apps) as? android.widget.EdgeEffect)?.isFinished ?: true
+        } catch (e: Exception) {
+            true
+        }
+        return "${finished("mEdgeGlowTop")}|${finished("mEdgeGlowBottom")}"
+    }
+
     /** See [REQUEST_OPEN_FOLDER]. */
     private fun openFirstFolder(launcher: Launcher): Boolean {
         val list = launcher.workspace?.aresHomeList ?: return false

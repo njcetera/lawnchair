@@ -312,6 +312,30 @@ class AresLauncherDriver {
         }
     }
 
+    /** `state|inTransition|optionsPopup|scrollOffset`. See `AresTestInfo.REQUEST_SURFACE_STATE`. */
+    data class SurfaceState(
+        val state: String,
+        val inTransition: Boolean,
+        val optionsPopupOpen: Boolean,
+        val scrollOffset: Int,
+    )
+
+    fun surfaceState(): SurfaceState {
+        val p = (call("ares-surface-state")?.getString("response") ?: "?|false|false|-1").split("|")
+        return SurfaceState(
+            p.getOrElse(0) { "?" },
+            p.getOrNull(1)?.toBoolean() ?: false,
+            p.getOrNull(2)?.toBoolean() ?: false,
+            p.getOrNull(3)?.toIntOrNull() ?: -1,
+        )
+    }
+
+    /** True when BOTH app-list edge glows are finished (no held overscroll pull). */
+    fun overscrollFinished(): Boolean {
+        val p = (call("ares-overscroll-state")?.getString("response") ?: "true|true").split("|")
+        return p.all { it.toBoolean() }
+    }
+
     fun pressBack() = device.pressBack()
 
     private fun shell(cmd: String): String = device.executeShellCommand(cmd)

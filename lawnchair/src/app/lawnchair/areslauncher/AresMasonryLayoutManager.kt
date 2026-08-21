@@ -64,6 +64,10 @@ class AresMasonryLayoutManager(
     private var layout: AresPacker.Layout? = null
     private var scrollOffset = 0
 
+    /** Read-only view of [scrollOffset], for the test channel. The §4 grid-jump defect (ledger
+     * row 27) is an absolute jump of this value mid-drag, which layout bounds cannot show. */
+    internal fun currentScrollOffset(): Int = scrollOffset
+
     /**
      * The scale items rest at when nothing is animating; the host keeps it in step with edit mode,
      * which shrinks every tile slightly.
