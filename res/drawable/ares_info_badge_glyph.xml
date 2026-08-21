@@ -1,17 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-     AresLauncher - the exclamation mark itself. Composed into a backdrop by ares_info_badge.xml;
+     AresLauncher - the information "i" itself. Composed into a backdrop by ares_info_badge.xml;
      that file is what callers reference, this one is only its top layer.
 
-     An exclamation mark because the owner asked for one by name - "add another option in the top
-     right with a ! icon". The obvious alternatives were considered and are worse here: a lowercase
-     "i" in a circle is the Android convention for App info specifically, but this control opens the
-     whole context menu (shortcuts, App info, Uninstall, Widgets) and naming only one of those
-     entries would under-promise; a vertical ellipsis reads as "more of this list" rather than
-     "more about this item", and would sit oddly beside the x, which is a glyph rather than a menu
-     affordance.
+     REVERSED (2026-08-20). This was an exclamation mark, drawn that way because the owner asked
+     for one by name - "add another option in the top right with a ! icon" - and this file used to
+     argue the case against an "i" at some length: that the lowercase i in a circle is the Android
+     convention for App info *specifically*, while this control opens the whole context menu
+     (shortcuts, App info, Uninstall, Widgets), so naming only one of those entries under-promises.
 
-     Drawn as a rounded bar over a separate dot, matching the x's stroke weight, so the two badges
-     read as one family at a glance on opposite corners of the same tile.
+     The owner corrected it after living with it: "the menu icon on apps should be an !, its shoild
+     be the i in a circle as the information icon". Their call, and the reasoning above was in any
+     case the weaker half of the argument. An exclamation mark is the universal glyph for a WARNING
+     - it is what sits on error dialogs and on a widget that failed to load - so on a tile it reads
+     as "something is wrong with this app" rather than "there is more to know about it". Promising
+     slightly less than the menu delivers costs far less than a badge that looks like an alert on
+     every icon on the home screen.
+
+     Only the glyph changes. The backdrop, both sizes and the centred composition are untouched, so
+     it still matches the x on the opposite corner exactly - see ares_info_badge.xml.
+
+     Drawn as a dot over a rounded stem, mirroring the exclamation's own construction: the stem is
+     the same 10.5-unit rounded bar at the same 3-unit weight as the x's strokes, and the dot is the
+     same r=1.6 circle, so the swap changes the meaning without changing the weight.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -22,9 +32,9 @@
 
     <path
         android:fillColor="@android:color/white"
-        android:pathData="M12,4.5c-0.83,0 -1.5,0.67 -1.5,1.5v7.5c0,0.83 0.67,1.5 1.5,1.5s1.5,-0.67 1.5,-1.5V6c0,-0.83 -0.67,-1.5 -1.5,-1.5z" />
+        android:pathData="M12,3.9c-0.88,0 -1.6,0.72 -1.6,1.6s0.72,1.6 1.6,1.6 1.6,-0.72 1.6,-1.6 -0.72,-1.6 -1.6,-1.6z" />
 
     <path
         android:fillColor="@android:color/white"
-        android:pathData="M12,17.2c-0.88,0 -1.6,0.72 -1.6,1.6s0.72,1.6 1.6,1.6 1.6,-0.72 1.6,-1.6 -0.72,-1.6 -1.6,-1.6z" />
+        android:pathData="M12,9.3c-0.83,0 -1.5,0.67 -1.5,1.5v7.5c0,0.83 0.67,1.5 1.5,1.5s1.5,-0.67 1.5,-1.5V10.8c0,-0.83 -0.67,-1.5 -1.5,-1.5z" />
 </vector>

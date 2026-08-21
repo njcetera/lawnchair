@@ -23,6 +23,19 @@ import com.android.launcher3.model.data.ItemInfo
  * > *"for icons and widgets, add another option in the top right with a ! icon and when clicked, it
  * > pulls up the app menu... this will allow us to maintain that menu functionality"*
  *
+ * ## The glyph is an information "i", not the exclamation that was asked for
+ *
+ * Reversed by the owner after use — *"the menu icon on apps should be an !, its shoild be the i in
+ * a circle as the information icon"*. An exclamation mark is the universal glyph for a **warning**,
+ * so a tile wearing one reads as "something is wrong with this app" rather than "there is more to
+ * know about it". `ares_info_badge_glyph.xml` carries the full note, including the argument this
+ * project originally made *against* the i and why it was the weaker half.
+ *
+ * Nothing but the glyph changed: same backdrop, same sizes, same centred composition, so the badge
+ * still matches the × on the opposite corner. The spoken label was already glyph-agnostic
+ * (`ares_open_item_menu`, "More options"), so it needed no revision — which is the argument for
+ * naming a string after what a control *does* rather than what it looks like.
+ *
  * ## App icons only
  *
  * Not widgets. The first cut gave them one too — the ask said "for icons and widgets" — and it was
