@@ -197,7 +197,7 @@ object AresHomeReorder {
         private var lastSwapY = Float.NaN
 
         /**
-         * The adapter position the dragged widget **came from** in the last swap, or NO_POSITION.
+         * The **item** the dragged widget last swapped with, or null.
          *
          * Refusing to nominate this again is what actually breaks the loop, and travel alone does
          * not. Measured with the travel guard alone at 24dp and a slow sweep: one tile still
@@ -209,8 +209,29 @@ object AresHomeReorder {
          * The loop exists because a swap MOVES THE BOUNDS the next decision is measured against --
          * covering A swaps A away, which slides B under the widget, which covers B, which swaps
          * back. Blocking the immediate return leg is the smallest thing that cannot cycle.
+         *
+         * **Identity, not an index.** This held the dragged item's old adapter position until an
+         * adversarial review traced what that actually guards. [AresHomeAdapter.moveItem] is
+         * remove-then-insert, so only for an ADJACENT swap does the old position end up holding the
+         * item we just swapped with. For `from=0, to=2` the list goes `[W,X,A] -> [X,A,W]`: the
+         * guarded index 0 now holds X, a bystander, while the real return-leg target A sits
+         * unguarded at 1. So it blocked a legitimate swap and let the one it exists for through.
+         *
+         * Non-adjacent is the normal case here, not an edge: [chooseDropTarget]'s widget branch
+         * scans every attached child and returns the most-covered one anywhere on the grid, and
+         * [getMoveThreshold] is 0.02 for widgets, so it is asked almost immediately.
+         *
+         * An identity also survives the reindexing that a `notifyItemMoved` or an external adapter
+         * change (`bindItemsUpdated`, `PackageUpdatedTask`) does underneath a live drag, which an
+         * index does not -- it was left pointing at whatever slid into that slot.
+         *
+         * Residual, deliberately left: this is one deep, so a genuine 3-cycle
+         * (`[W,X,A] -> [X,A,W] -> [X,W,A] -> [W,X,A]`) can still alternate targets past it. That
+         * needs the finger to keep travelling, where the hysteresis above applies, and closing it
+         * properly means remembering the last N targets -- more state than is worth adding without
+         * a device to measure it on.
          */
-        private var lastSwapFrom = RecyclerView.NO_POSITION
+        private var lastSwapTarget: ItemInfo? = null
 
         /** The dragged tile's current top-left, sampled by [chooseDropTarget] for [onMove]. */
         private var curDragX = 0
@@ -399,8 +420,9 @@ object AresHomeReorder {
                     if (v === selected.itemView) continue
                     val holder = list.getChildViewHolder(v) ?: continue
                     if (holder.bindingAdapterPosition == RecyclerView.NO_POSITION) continue
-                    // The return leg of the A -> B -> A cycle. See [lastSwapFrom].
-                    if (holder.bindingAdapterPosition == lastSwapFrom) continue
+                    // The return leg of the A -> B -> A cycle. See [lastSwapTarget].
+                    val info = list.aresAdapter.itemAt(holder.bindingAdapterPosition)
+                    if (info != null && info === lastSwapTarget) continue
                     val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
                     val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
                     // Normalised by the SMALLER of the two, not by the target.
@@ -516,16 +538,57 @@ object AresHomeReorder {
             val from = viewHolder.bindingAdapterPosition
             val to = target.bindingAdapterPosition
             if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
+            // Read BEFORE the move: afterwards `to` holds the dragged item, not the target.
+            val targetInfo = list.aresAdapter.itemAt(to)
             val moved = list.aresAdapter.moveItem(from, to)
             // Arm the hysteresis from where the drag actually was when this swap committed, so the
             // next one needs real travel rather than another lap of the feedback loop.
             if (moved && draggedInfo?.itemType == Favorites.ITEM_TYPE_APPWIDGET) {
                 lastSwapX = curDragX.toFloat()
                 lastSwapY = curDragY.toFloat()
-                lastSwapFrom = from
+                lastSwapTarget = targetInfo
             }
             return moved
         }
+
+        /**
+         * Deliberately empty, overriding a stock default that jumps the grid mid-drag.
+         *
+         * `ItemTouchHelper.moveIfNecessary` calls this after every successful [onMove]. The base
+         * implementation (`ItemTouchHelper.java:1952-1984`) takes the `ViewDropHandler` path only
+         * for layout managers that implement it -- [AresMasonryLayoutManager] does not -- and
+         * otherwise, for a vertically scrolling list, calls
+         * `recyclerView.scrollToPosition(toPos)` when the target sits at either edge.
+         *
+         * Two things make that wrong here rather than merely unnecessary. Our padding is
+         * `0, top, 0, 0`, so the bottom test reduces to `child.bottom >= height` -- true for the
+         * partially visible bottom row of any grid taller than the viewport, and true from much
+         * higher up beside a tall widget. And [AresMasonryLayoutManager.scrollToPosition] is an
+         * ABSOLUTE jump that puts the target's row at the top of the viewport, not the small
+         * keep-it-visible nudge the stock default assumes. It is also computed against the
+         * pre-move packing and a pre-move index, because `onItemsMoved` does not run until the next
+         * layout pass.
+         *
+         * The result was a third, undamped feedback path into the loop this class already fights:
+         * the jump changes every child's top and bottom, so [chooseDropTarget]'s coverage test is
+         * re-evaluated against wholly different bounds -- and neither [lastSwapTarget] nor the
+         * travel hysteresis damps it, since `curDragX/Y` do not move when the GRID scrolls.
+         *
+         * Dropping it loses nothing: `ItemTouchHelper.scrollIfNecessary` already does edge
+         * auto-scroll during a drag, on its own schedule.
+         *
+         * Invisible on the three-tile fixture, where `maxScroll == 0` makes `scrollToPosition` a
+         * no-op -- which is why the measurements behind the earlier swap fixes never saw it.
+         */
+        override fun onMoved(
+            recyclerView: RecyclerView,
+            viewHolder: RecyclerView.ViewHolder,
+            fromPos: Int,
+            target: RecyclerView.ViewHolder,
+            toPos: Int,
+            x: Int,
+            y: Int,
+        ) = Unit
 
         override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
@@ -536,7 +599,7 @@ object AresHomeReorder {
             draggedInfo = viewHolder?.let { list.aresAdapter.itemAt(it.bindingAdapterPosition) }
             lastSwapX = Float.NaN
             lastSwapY = Float.NaN
-            lastSwapFrom = RecyclerView.NO_POSITION
+            lastSwapTarget = null
             list.setReorderInProgress(true)
 
             // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
@@ -562,7 +625,7 @@ object AresHomeReorder {
             // Hysteresis is per-drag: the next one must start unarmed or its first swap is blocked.
             lastSwapX = Float.NaN
             lastSwapY = Float.NaN
-            lastSwapFrom = RecyclerView.NO_POSITION
+            lastSwapTarget = null
             list.setFloatSuspendedFor(null)
             // Back to the mode's resting size -- which is read from the mode, not from a constant,
             // so a drag that outlived edit mode settles at 1.0 rather than snapping to 0.92.

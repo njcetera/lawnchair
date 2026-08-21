@@ -1536,6 +1536,27 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         super.dispatchTouchEvent(cancel)
         cancel.recycle()
 
+        // Re-assert, because the cancel above just cleared it. The dispatch lands in
+        // editModeTouchListener.onInterceptTouchEvent's ACTION_CANCEL branch, whose whole job is to
+        // let go of a gesture -- including `rv.parent?.requestDisallowInterceptTouchEvent(false)`.
+        // So the claim made before showDefaultOptions survived exactly thirteen lines, and
+        // BaseDragLayer's FLAG_DISALLOW_INTERCEPT was cleared with it (the call propagates up the
+        // whole chain).
+        //
+        // The consequence is the precise failure the first claim exists to prevent, so it read as
+        // fixed while still being broken: hold empty space until the popup opens, keep the finger
+        // down, drag sideways, and BaseDragLayer.onInterceptTouchEvent resumes on the next MOVE.
+        // AresPaneSwipeController latched mNoIntercept = false at a DOWN taken before the popup
+        // existed and is not re-consulted mid-gesture, so the app-list pane pans in underneath the
+        // open popup. emptySpacePopupTook does not help: it guards onTouchEvent, which runs after
+        // the DragLayer has already claimed the gesture.
+        //
+        // Re-asserting rather than reordering, deliberately. Moving the claim below the cancel
+        // would work too, but it would also move it below showDefaultOptions, leaving the
+        // popup-raising window uncovered -- and that window is why stock pairs the two in the first
+        // place. Two calls, both idempotent, each covering a different half of the gesture.
+        parent?.requestDisallowInterceptTouchEvent(true)
+
         // ...and the cancel alone is NOT enough, which is the correction to this function's first
         // cut. It resets RecyclerView's scroll state, but this view is still the parent's touch
         // target and real MOVEs keep arriving; the recorded down point is still inside slop (that is
