@@ -1631,7 +1631,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * expand-notifications` did **not** reproduce a CANCEL against injected input, and reading that
      * run as a failed fix would have been wrong.)
      */
+    /** See [GESTURE_END_NONE]/[GESTURE_END_UP]/[GESTURE_END_CANCEL] on the companion. */
+    internal var lastGestureEnd = GESTURE_END_NONE
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> lastGestureEnd = GESTURE_END_NONE
+            MotionEvent.ACTION_UP -> lastGestureEnd = GESTURE_END_UP
+            MotionEvent.ACTION_CANCEL -> lastGestureEnd = GESTURE_END_CANCEL
+        }
         if (ev.actionMasked == MotionEvent.ACTION_CANCEL) AresFolderDrop.cancel()
         trackEmptySpaceLongPress(ev)
         return super.dispatchTouchEvent(ev)
@@ -1787,7 +1795,35 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         return 0
     }
 
-    private companion object {
+    companion object {
+        /**
+         * How the most recent gesture on this list ended. [AresHomeReorder]'s `clearView` reads
+         * this to tell a real drop from everything else, because `ItemTouchHelper` calls
+         * `clearView` for all of them identically (S3):
+         *
+         *  - [GESTURE_END_UP] -- the user released. The only ending that may commit into a folder
+         *    (spec B3: only a manual release adds an item) and the only one that reflects intent.
+         *  - [GESTURE_END_CANCEL] -- the system took the gesture. Nothing was released, so nothing
+         *    is committed; the adapter's moves already happened and are on screen, so the order IS
+         *    persisted.
+         *  - [GESTURE_END_NONE] -- no end event at all: the dragged holder was DETACHED mid-drag
+         *    (a rebind, a model update retiring it). `clearView` fires from RecyclerView's
+         *    child-detach path with the finger still down, and before this existed an armed dwell
+         *    then filed the item into a folder with no release having happened. Nothing is
+         *    committed and nothing is persisted.
+         *
+         * Maintained by [dispatchTouchEvent], which sees every event unconditionally. The
+         * empty-space popup's synthetic CANCEL deliberately bypasses it by dispatching through
+         * `super`, so it cannot masquerade as a real ending here either.
+         *
+         * Known, accepted imprecision: a new DOWN that lands during a previous drop's settle
+         * animation resets this to NONE before that drop's `clearView` runs, which skips one
+         * persistOrder. The next completed drag persists the same ranks; nothing is lost.
+         */
+        const val GESTURE_END_NONE = 0
+        const val GESTURE_END_UP = 1
+        const val GESTURE_END_CANCEL = 2
+
         const val TAG = "AresHomeGrid"
 
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */

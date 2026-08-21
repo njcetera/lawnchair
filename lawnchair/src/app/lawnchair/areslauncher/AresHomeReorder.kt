@@ -671,11 +671,34 @@ object AresHomeReorder {
             // A dwell that armed resolves as a folder drop instead of a reorder, and it renumbers
             // the grid itself once the item has left it -- so persisting the current order here as
             // well would write ranks that are about to change again.
+            //
+            // GATED ON HOW THE GESTURE ENDED (S3, spec B3). ItemTouchHelper calls clearView
+            // identically for a real drop, a system CANCEL, and a holder DETACHED mid-drag by a
+            // rebind or model update -- and only the first is a release. An armed dwell resolved
+            // here on a detach filed the item into a folder while the finger was still down and
+            // nothing had been let go of. The rule is the user's own: only a manual release adds
+            // an item to a folder. So:
+            //
+            //   UP     -> the release: commit if armed, else persist. The normal path, unchanged.
+            //   CANCEL -> no release, so no folder commit -- but the adapter's moves already
+            //             happened and are what is on screen, so the order IS persisted.
+            //   NONE   -> a detach: no end event ever arrived. Nothing is committed and nothing is
+            //             persisted; the model update that retired the holder is the authority on
+            //             what the grid holds now, and writing mid-drag ranks over it would race
+            //             the very rebind that got us here.
+            //
+            // The non-UP endings still clear the dwell's state explicitly -- commitDrop would have
+            // done it, and a timer left armed past the drag is S1, already paid for once.
             val item = draggedInfo
             draggedInfo = null
-            val consumed = item != null && AresFolderDrop.commitDrop(launcher, item)
+            val end = list.lastGestureEnd
+            val consumed = end == AresHomeListView.GESTURE_END_UP &&
+                item != null && AresFolderDrop.commitDrop(launcher, item)
+            if (end != AresHomeListView.GESTURE_END_UP) AresFolderDrop.cancel()
             list.setFolderDropTarget(null)
-            if (!consumed) persistOrder(launcher, list.aresAdapter.snapshot())
+            if (!consumed && end != AresHomeListView.GESTURE_END_NONE) {
+                persistOrder(launcher, list.aresAdapter.snapshot())
+            }
         }
     }
 }
