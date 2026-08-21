@@ -241,6 +241,20 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                         live.add(it)
                         it.visibility = View.INVISIBLE
                     }
+                    // Keep the tree drawing while anything is lifted, or this pass may be the LAST
+                    // one and the icon's return is never noticed.
+                    //
+                    // sync() is a pre-draw listener: it runs when the folder draws, and nothing
+                    // else. Releasing an icon without having moved it puts it back with no reorder,
+                    // no layout and therefore no draw -- so sync never runs again and the cell is
+                    // never rebuilt. Nudge it first and the reorder forces a layout, sync runs, and
+                    // the chrome appears. That is exactly the reported behaviour: "if I let go
+                    // without miving it, it will NOT have frost, but if I move it a tad and then
+                    // let go, it will have frost".
+                    //
+                    // One scheduled frame per lifted icon, and it stops as soon as nothing is
+                    // lifted, so this cannot spin: a drag is already producing frames of its own.
+                    folder.postInvalidateOnAnimation()
                     return@forEachIndexed
                 }
                 val parent = held
@@ -363,7 +377,26 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             // Watch the layering rather than assuming this is free: an open folder already draws
             // its own translucent panel, so this is frost over frost. If it reads muddy the answer
             // is a lower alpha here, not removing it -- the box is load-bearing for the badges now.
-            cell.background = AresEditGrid.cellOutline(cell.context)
+            //
+            // INSET, unlike the home grid's. Folder cells are laid out edge to edge -- measured
+            // 0,0-202,240 beside 202,0-404,240 -- and the frost is the cell's background, so it
+            // fills that rect exactly. At rest two boxes share a seam; during a reorder stock
+            // animates the icons past one another and the cells follow, so the boxes visibly run
+            // into each other: "apps in folders will have their blur backgrounds overlap and
+            // collide while moving".
+            //
+            // Half an inset each side gives neighbours a full one between them, the same
+            // arrangement widgets use on the home grid (§23). It cannot crowd the icon: the box is
+            // still 182px around a 158px icon.
+            val frostInset =
+                cell.resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset) / 2
+            cell.background = android.graphics.drawable.InsetDrawable(
+                AresEditGrid.cellOutline(cell.context),
+                frostInset,
+                frostInset,
+                frostInset,
+                frostInset,
+            )
 
             // Both badges take a REDUCED target here. A folder cell is ~83dp (202x240px measured):
             // two 48dp targets side by side need 234px of a 202px width and would overlap by about
