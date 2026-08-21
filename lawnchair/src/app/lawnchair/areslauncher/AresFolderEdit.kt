@@ -388,6 +388,9 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // there while the icon moves to the middle of it.
                 AresEditLabel.setItem(icon, true)
 
+                // VERIFIER PROBE (S12, independent pass 2026-08-21) -- remove with AresVerifyMarker.
+                AresVerifyProbe.folderIcon(icon, index, info.title)
+
                 // ...and share the slide, during a rearrangement. `animateChildToPosition` moves
                 // the icon with a translation while leaving its layout params at the old cell, and
                 // the badge's bounds are copied from those layout params -- so without this the ×
