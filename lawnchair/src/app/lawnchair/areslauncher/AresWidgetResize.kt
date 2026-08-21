@@ -147,7 +147,11 @@ object AresWidgetResize {
     ): View {
         val res = container.resources
         val touch = res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
-        val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        // No margin, unlike the x and the chevron before it. The hook is meant to sit ON the
+        // tile's border -- "lets move it to the boarder" -- and a margin holds it inside the edge
+        // it is supposed to be tracing. The badges keep theirs because they are marks placed near
+        // a corner, not part of the outline.
+        val margin = 0
 
         return ImageView(container.context).apply {
             tag = CHEVRON_TAG

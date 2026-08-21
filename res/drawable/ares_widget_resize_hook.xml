@@ -1,30 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?><!--
      AresLauncher - the widget resize handle (S3): an L tracing the tile's bottom-end corner.
 
-     Replaces a chevron on a filled circle. That read as a BUTTON, which is now the wrong promise:
-     the affordance no longer advances through sizes on a tap, it is dragged. "right now it looks
-     like a buttom. Maybe a corner hook would be better? ... like a curved L traciong the boarder of
-     the corner of the square".
+     Replaces a chevron on a filled circle. That read as a BUTTON, which is the wrong promise now
+     that the affordance is dragged rather than tapped: "right now it looks like a buttom. Maybe a
+     corner hook would be better? ... like a curved L traciong the boarder of the corner of the
+     square".
+
+     Arms deliberately SHORT. The first cut ran them 11 units into a 26-unit box and read as a
+     bracket framing the corner rather than a mark sitting on it - "Id like to make it a tad smaller
+     or shorter, and lets move it to the boarder". They are now 6 units in a 22-unit box, and the
+     view's margin was dropped so the whole thing sits on the tile's edge instead of inside it.
 
      The elbow is a quarter-circle rather than a mitre so it follows the same curve the tile's own
-     corner has (ares_edit_cell_outline_radius), which is what makes it read as part of the tile's
-     edge rather than as a glyph parked near it. Round caps for the same reason - a square-cut arm
-     ends in a hard tick that reads as a separate mark.
+     corner has (ares_edit_cell_outline_radius), which is what makes it read as part of the edge.
+     Round caps for the same reason - a square-cut arm ends in a hard tick that reads as a separate
+     mark.
 
-     Stroke, no fill, and no backdrop: a filled shape here would be the button we are getting away
-     from. In edit mode this always sits on the frost box, which is what it reads against.
+     Stroke, no fill, no backdrop: a filled shape here would be the button we are getting away from.
+     In edit mode this always sits on the frost box, which is what it reads against.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="26dp"
-    android:height="26dp"
-    android:viewportWidth="26"
-    android:viewportHeight="26"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="22"
+    android:viewportHeight="22"
     android:tint="?android:attr/textColorPrimary">
 
     <path
-        android:pathData="M5,22 H16 A6,6 0 0 0 22,16 V5"
+        android:pathData="M8,19 H13 A6,6 0 0 0 19,13 V8"
         android:strokeColor="@android:color/white"
-        android:strokeWidth="2.5"
+        android:strokeWidth="2.25"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
 </vector>
