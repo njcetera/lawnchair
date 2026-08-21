@@ -875,7 +875,23 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
      * @return true when the folder actually opened.
      */
     public boolean aresBeginPreviewDrag() {
-        if (isInAppDrawer() || mIsOpen || mInfo.getContents().isEmpty()) {
+        // STATE_ANIMATING is refused, not just mIsOpen.
+        //
+        // handleClose sets mIsOpen = false immediately and the close animation then runs on with
+        // getParent() != null. Re-dwelling inside that window passed this guard, and animateOpen
+        // then took its "already parented" branch — so it never re-registered the drop target, and
+        // cancelRunningAnimations() dispatched animateClosed's end listener SYNCHRONOUSLY, running
+        // closeComplete() from inside animateOpen: the folder was removed from its parent while
+        // mIsOpen had just been set true.
+        //
+        // The folder was then invisible for the rest of the preview, and aresRestoreDropTarget's
+        // `mIsOpen && getParent() != null` guard silently declined — so the app-dragged-out-of-a-
+        // folder defect returned through exactly the door aresRestoreDropTarget was added to shut.
+        //
+        // B2 makes dwelling in and out repeatedly the specified use, and EXIT_CLOSE_MS + DWELL_MS
+        // lands the re-open squarely inside a few-hundred-ms close animation, so this window is
+        // normal use rather than a corner.
+        if (isInAppDrawer() || mIsOpen || mState == STATE_ANIMATING || mInfo.getContents().isEmpty()) {
             return false;
         }
         mPrevTargetRank = -1;
