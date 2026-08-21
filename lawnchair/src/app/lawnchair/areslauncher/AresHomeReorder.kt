@@ -163,7 +163,58 @@ object AresHomeReorder {
              * which is a *distance* threshold for icon drags; this is an *area* one.
              */
             const val WIDGET_COVER_FRACTION = 0.5f
+
+            /**
+             * How far the drag must travel between two widget swaps, in dp.
+             *
+             * Hysteresis, and it exists because the coverage rule is otherwise a **feedback loop**.
+             * [chooseDropTarget]'s widget branch measures overlap against the targets' LIVE layout
+             * bounds, and a swap is precisely what changes those bounds — so covering A swaps A
+             * away, which slides B under the widget, which covers B, which swaps back. Nothing
+             * damps it, so it runs for as long as the widget is held.
+             *
+             * Measured on emulator-5554 with a 2x2 widget held motionless over a 4x3, animators
+             * ON: one tile alternating between box `0,1177-260,1409` and `520,945-780,1177` every
+             * ~220ms, its reflow displacement flipping `+369,-164` -> `-367,+164` -> `+367,-164`,
+             * five tiles thrown ~402px on every flip. That is the owner's report of *"rendering
+             * issues when holding one widget over another"* -- the grid was not corrupt, it was
+             * oscillating.
+             *
+             * Keyed to the DRAG's travel rather than to time, because the pathological case is a
+             * finger that is not moving at all: the tiles move, the finger does not, so any
+             * positive threshold breaks the loop while leaving a deliberate sweep untouched. This
+             * is the same shape as the folder's reorder alarm ([AresEditMotion.FOLDER_REORDER_DELAY_MS]),
+             * which exists because `Folder.onDragOver` re-arms on every change of target.
+             *
+             * 24dp is a little under a quarter of a cell, so a sweep across a row still displaces
+             * continuously and only a *stationary* widget is held still.
+             */
+            const val WIDGET_SWAP_HYSTERESIS_DP = 24f
         }
+
+        /** Where the dragged tile sat when the last widget swap was committed; NaN before any. */
+        private var lastSwapX = Float.NaN
+        private var lastSwapY = Float.NaN
+
+        /**
+         * The adapter position the dragged widget **came from** in the last swap, or NO_POSITION.
+         *
+         * Refusing to nominate this again is what actually breaks the loop, and travel alone does
+         * not. Measured with the travel guard alone at 24dp and a slow sweep: one tile still
+         * alternating between box `520,945-780,1177` and `0,1177-260,1409`, displacement flipping
+         * `-519,231` -> `+519,-231` -> `-518,231`, merely slower (~700-850ms a lap instead of
+         * ~350ms). Of course it did: the cycle is A -> B -> A, and a finger that is still moving
+         * keeps paying the travel toll on every lap.
+         *
+         * The loop exists because a swap MOVES THE BOUNDS the next decision is measured against --
+         * covering A swaps A away, which slides B under the widget, which covers B, which swaps
+         * back. Blocking the immediate return leg is the smallest thing that cannot cycle.
+         */
+        private var lastSwapFrom = RecyclerView.NO_POSITION
+
+        /** The dragged tile's current top-left, sampled by [chooseDropTarget] for [onMove]. */
+        private var curDragX = 0
+        private var curDragY = 0
 
         /**
          * False: edit mode starts drags, not long-press.
@@ -315,6 +366,16 @@ object AresHomeReorder {
             // reflow settles, which is what makes a sweep push a whole row rather than one tile.
             val draggedIsWidget = draggedInfo?.itemType == Favorites.ITEM_TYPE_APPWIDGET
             if (draggedIsWidget) {
+                curDragX = curX
+                curDragY = curY
+                // Hysteresis. Nominate nothing until the drag has actually travelled since the last
+                // swap, or the coverage rule oscillates against the bounds its own swap moved.
+                // See [WIDGET_SWAP_HYSTERESIS_DP].
+                if (!lastSwapX.isNaN()) {
+                    val density = list.resources.displayMetrics.density
+                    val need = WIDGET_SWAP_HYSTERESIS_DP * density
+                    if (kotlin.math.hypot(curX - lastSwapX, curY - lastSwapY) < need) return null
+                }
                 val dragRight = curX + selected.itemView.width
                 val dragBottom = curY + selected.itemView.height
                 var best: RecyclerView.ViewHolder? = null
@@ -338,6 +399,8 @@ object AresHomeReorder {
                     if (v === selected.itemView) continue
                     val holder = list.getChildViewHolder(v) ?: continue
                     if (holder.bindingAdapterPosition == RecyclerView.NO_POSITION) continue
+                    // The return leg of the A -> B -> A cycle. See [lastSwapFrom].
+                    if (holder.bindingAdapterPosition == lastSwapFrom) continue
                     val overlapW = minOf(dragRight, v.right) - maxOf(curX, v.left)
                     val overlapH = minOf(dragBottom, v.bottom) - maxOf(curY, v.top)
                     // Normalised by the SMALLER of the two, not by the target.
@@ -453,7 +516,15 @@ object AresHomeReorder {
             val from = viewHolder.bindingAdapterPosition
             val to = target.bindingAdapterPosition
             if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
-            return list.aresAdapter.moveItem(from, to)
+            val moved = list.aresAdapter.moveItem(from, to)
+            // Arm the hysteresis from where the drag actually was when this swap committed, so the
+            // next one needs real travel rather than another lap of the feedback loop.
+            if (moved && draggedInfo?.itemType == Favorites.ITEM_TYPE_APPWIDGET) {
+                lastSwapX = curDragX.toFloat()
+                lastSwapY = curDragY.toFloat()
+                lastSwapFrom = from
+            }
+            return moved
         }
 
         override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
@@ -463,6 +534,9 @@ object AresHomeReorder {
             if (actionState != ItemTouchHelper.ACTION_STATE_DRAG) return
 
             draggedInfo = viewHolder?.let { list.aresAdapter.itemAt(it.bindingAdapterPosition) }
+            lastSwapX = Float.NaN
+            lastSwapY = Float.NaN
+            lastSwapFrom = RecyclerView.NO_POSITION
             list.setReorderInProgress(true)
 
             // ItemTouchHelper owns this view's translationX/Y until the drop settles, and so does
@@ -485,6 +559,10 @@ object AresHomeReorder {
             // Runs first: the superclass clears ItemTouchHelper's own translation, so the float
             // below restarts from rest rather than from wherever the drop settled.
             super.clearView(recyclerView, viewHolder)
+            // Hysteresis is per-drag: the next one must start unarmed or its first swap is blocked.
+            lastSwapX = Float.NaN
+            lastSwapY = Float.NaN
+            lastSwapFrom = RecyclerView.NO_POSITION
             list.setFloatSuspendedFor(null)
             // Back to the mode's resting size -- which is read from the mode, not from a constant,
             // so a drag that outlived edit mode settles at 1.0 rather than snapping to 0.92.

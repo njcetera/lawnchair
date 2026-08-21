@@ -267,6 +267,33 @@ class AresMasonryLayoutManager(
         // fast to see, and that ambiguity has cost this project a verification pass before.
         if (moved > 0) {
             android.util.Log.d(TAG, "reflow: $moved tile(s), furthest ${furthest.toInt()}px")
+            // Per-tile detail behind the summary line, because the summary alone cannot tell a
+            // reflow that is SETTLING from one that is OSCILLATING -- both print the same count and
+            // a similar distance. The pair of numbers that distinguishes them is each tile's box
+            // against its live displacement, over consecutive passes.
+            //
+            // That is not hypothetical: it is what identified the widget-swap feedback loop. A 2x2
+            // widget held motionless over a 4x3 produced one tile alternating between box
+            // `0,1177-260,1409` and `520,945-780,1177` every ~220ms with its displacement flipping
+            // `+369,-164` -> `-367,+164` -> `+367,-164`, which reads as a loop at a glance and as
+            // "reflow: 5 tile(s), furthest 402px" repeated -- indistinguishable from healthy work --
+            // in the summary. See AresHomeReorder.WIDGET_SWAP_HYSTERESIS_DP.
+            //
+            // Bounded: only fires on a pass that actually moved something, and only for tiles
+            // displaced by more than a pixel.
+            for (i in 0 until childCount) {
+                val c = getChildAt(i) ?: continue
+                val rx = AresEditMotion.reflowX(c)
+                val ry = AresEditMotion.reflowY(c)
+                if (kotlin.math.abs(rx) > 1f || kotlin.math.abs(ry) > 1f) {
+                    android.util.Log.d(
+                        TAG,
+                        "  pos=${getPosition(c)} box=${c.left},${c.top}-${c.right},${c.bottom} " +
+                            "displaced=${rx.toInt()},${ry.toInt()} " +
+                            "exempt=${c === reflowExempt}",
+                    )
+                }
+            }
         }
     }
 
