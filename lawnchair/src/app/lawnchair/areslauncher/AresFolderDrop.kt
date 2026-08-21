@@ -479,6 +479,27 @@ object AresFolderDrop {
         // dwell originally locked onto -- the folder covers the grid by then, so there is no
         // meaningful tile any more.
         if (AresFolderPreview.isOpen()) {
+            // UNLESS the finger is currently OUTSIDE it (S4, spec B2/B3). Leaving the folder posts
+            // a 400ms grace before it closes, so the interaction stays reversible -- but the grace
+            // is about whether the FOLDER stays open, not about where a release lands. A release
+            // during that window used to take this branch and file the item into a folder the
+            // finger had already left: `AresFolderPreview.commit` does not hit-test, it files at
+            // the preview rank unconditionally. Measured on the pre-fix build -- "dropped item 710
+            // into folder 40 at rank 3" on a release over a WIDGET two tiles away.
+            //
+            // The in-grid pipeline partially masks this by accident: commitDrop runs from
+            // clearView, which fires only after the settle animation (~250ms), so only a fast
+            // release lands inside the grace. The external pipeline commits synchronously at the
+            // drop and had the full 400ms exposed.
+            //
+            // `previewExiting` is exactly "the drag's last known point was outside the open
+            // folder", maintained per move by onDragPoint. Outside means the release belongs to
+            // the grid: close the preview and decline, and the ordinary placement path takes it.
+            if (previewExiting) {
+                closePreview()
+                clear()
+                return false
+            }
             cancelPreviewExit()
             val done = AresFolderPreview.commit(launcher, item)
             clear()
