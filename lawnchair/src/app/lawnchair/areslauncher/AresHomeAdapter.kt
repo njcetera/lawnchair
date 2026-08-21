@@ -489,8 +489,16 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private fun dropDuplicateWidgetRow(info: ItemInfo): Boolean {
         if (info !is LauncherAppWidgetInfo) return false
+        // An UNALLOCATED id is not an identity. Every restore placeholder carries
+        // `appWidgetId = NO_ID`, so two seeded-but-not-yet-bound widgets "share" -1 without
+        // sharing anything -- and when the bind race resolves slowly enough for both to arrive
+        // here still unallocated, matching on it deleted a real row from the database. Measured
+        // as the intermittent "fewer than 2 widgets survived" seed failure: the same two rows
+        // bind fine on the next relaunch. The heal below exists for rows that share a REAL id.
+        if (!info.isWidgetIdAllocated) return false
         val index = items.indexOfFirst {
-            it is LauncherAppWidgetInfo && it.appWidgetId == info.appWidgetId
+            it is LauncherAppWidgetInfo && it.isWidgetIdAllocated &&
+                it.appWidgetId == info.appWidgetId
         }
         if (index < 0) return false
 
