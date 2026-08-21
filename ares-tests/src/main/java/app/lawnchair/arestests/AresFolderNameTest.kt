@@ -89,22 +89,48 @@ class AresFolderNameTest {
         Log.i(TAG, "d9 nameTop at rest: $nameAtRest")
         assertThat(nameAtRest).isGreaterThan(0)
 
-        val samples = mutableListOf<Int>()
+        // Sampling on its own thread (AresSampler), never from onStep: an IPC per injected MOVE
+        // stalls the event stream and measurably LOWERS the arm rate. And the SCENARIO -- the
+        // drag actually arming, a DragView existing -- is retried; the drift assertion never is.
+        // Without the armed precondition, ~3 runs in 5 measured a folder sitting perfectly still
+        // and called that a pass (adversarial-review finding, 2026-08-21).
         val start = last.center()
-        AresGestures.pressHoldDragRelease(
-            start = start,
-            holdMs = HOLD_MS,
-            travelMs = TRAVEL_MS,
-            // Straight up, and only far enough to clear the touch slop and let the drag arm. Kept
-            // well inside the folder: leaving it would hand the item to the home grid, which is a
-            // different behaviour (§C4) and not what this measures.
-            target = { PointF(start.x, start.y - TRAVEL_PX) },
-            onStep = { _, _ -> samples += ares.folderNameTop() },
-            hangMs = HANG_MS,
-            onHangStep = { samples += ares.folderNameTop() },
-        )
+        var samples = listOf<Pair<Int, Int>>()
+        var armed = false
+        for (attempt in 1..MAX_ATTEMPTS) {
+            val sampler = AresSampler(intervalMs = 40L) {
+                Pair(ares.folderNameTop(), ares.dragViewCount())
+            }
+            sampler.start()
+            AresGestures.pressHoldDragRelease(
+                start = start,
+                holdMs = HOLD_MS,
+                travelMs = TRAVEL_MS,
+                // Straight up, and only far enough to clear the touch slop and let the drag arm.
+                // Kept well inside the folder: leaving it would hand the item to the home grid,
+                // which is a different behaviour (§C4) and not what this measures.
+                target = { PointF(start.x, start.y - TRAVEL_PX) },
+                hangMs = HANG_MS,
+            )
+            val trySamples = sampler.stop()
+            val sawDrag = trySamples.any { it.second == 1 }
+            Log.i(TAG, "d9 attempt $attempt: samples=${trySamples.size} sawDrag=$sawDrag")
+            if (sawDrag) {
+                samples = trySamples
+                armed = true
+                break
+            }
+            Thread.sleep(400)
+        }
+        check(armed) {
+            "a folder drag could not be reproduced in $MAX_ATTEMPTS attempts -- no DragView was " +
+                "ever observed, so nothing about D9 was measured"
+        }
 
-        val moved = samples.filter { it > 0 }.map { abs(it - nameAtRest) }
+        // Drift is measured only while the drag existed -- from the first armed sample on. The
+        // name legitimately relayouts once the finger lifts and the icon returns.
+        val during = samples.dropWhile { it.second == 0 }.takeWhile { it.second == 1 }
+        val moved = during.map { it.first }.filter { it > 0 }.map { abs(it - nameAtRest) }
         val worst = moved.maxOrNull() ?: 0
         Log.i(TAG, "d9 nameTop drift: worst=$worst over ${moved.size} samples")
 
@@ -120,5 +146,8 @@ class AresFolderNameTest {
         const val HANG_MS = 500L
         const val TRAVEL_PX = 130f
         const val MAX_DRIFT_PX = 40
+
+        /** Scenario attempts, NOT assertion retries. See AresFolderExitTest. */
+        const val MAX_ATTEMPTS = 5
     }
 }

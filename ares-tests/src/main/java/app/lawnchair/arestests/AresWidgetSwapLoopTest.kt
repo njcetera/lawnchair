@@ -132,6 +132,11 @@ class AresWidgetSwapLoopTest {
         )
         Log.i(TAG, "SWAP-LOOP startOrder=$startOrder")
 
+        // Precondition first: the swap actually happened. Ceilings alone pass on a drag that
+        // armed edit mode and displaced nothing -- zero transitions clears any isAtMost
+        // (adversarial-review finding, 2026-08-21).
+        assertThat(dragTransitions).isGreaterThan(0)
+
         // THE ASSERTION. Bounds sit an order of magnitude from both measured populations, so this
         // is a separation and not a fitted threshold. Fixed build measured 1-2 revisits / 3-4
         // transitions across six runs; the reverted one measured 23 / 25 in every run.

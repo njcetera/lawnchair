@@ -40,7 +40,7 @@ import org.junit.runner.RunWith
  * Measured 2026-08-21: 0 pulled samples in 101, across extreme over-pulls both starting FROM a
  * settled ALL_APPS and crossing full open in one gesture (which would need the mid-flight
  * from-state reinit). The overshoot is a stock path built for the VERTICAL all-apps swipe; this
- * fork opens the app list with the ง10 horizontal pane, and nothing reachable by injection drives
+ * fork opens the app list with the ยง10 horizontal pane, and nothing reachable by injection drives
  * `progress <= 0` with `mFromState == ALL_APPS`. The row-29 fix stands as hardening -- strictly
  * more release, never less -- but a check that cannot observe the armed state cannot falsify
  * anything, so it earns no place in the runner. If the owner ever SEES a stuck stretch on the app

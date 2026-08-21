@@ -87,33 +87,53 @@ class AresFolderHoldTest {
         assertThat(ares.dragViewCount()).isEqualTo(0)
 
         val held = before.first()
-        val counts = mutableListOf<Triple<Int, Int, Boolean>>()
-        AresGestures.pressHoldDragRelease(
-            start = held.center(),
-            holdMs = HOLD_MS,
-            travelMs = 0,
-            // Zero travel: MOVEs at the press point. See the class doc -- this is the case, not a
-            // weaker version of it.
-            target = { held.center() },
-            hangMs = HANG_MS,
-            onHangStep = {
-                val icons = ares.folderIcons()
-                counts += Triple(
-                    icons.size,
-                    ares.dragViewCount(),
-                    icons.any { it.stateLift > 0f },
-                )
-            },
-        )
 
-        Log.i(TAG, "d4 during hold: ${counts.distinct()}")
-        assertThat(counts).isNotEmpty()
+        // The SCENARIO is retried; the assertions never are (the AresFolderExitTest discipline).
+        // The synthetic long-press arms folder edit mode only some of the time -- measured at
+        // roughly 2-in-5 for folder drags -- and an unarmed hold exercises nothing, so attempts
+        // continue until one arms or the budget runs out. Each attempt's counts are kept only if
+        // it armed; a run that never arms fails on the words "could not be reproduced", which is
+        // a different statement from "a drag started on a bare hold".
+        var counts = listOf<Triple<Int, Int, Boolean>>()
+        var armed = false
+        for (attempt in 1..MAX_ATTEMPTS) {
+            val tryCounts = mutableListOf<Triple<Int, Int, Boolean>>()
+            AresGestures.pressHoldDragRelease(
+                start = held.center(),
+                holdMs = HOLD_MS,
+                travelMs = 0,
+                // Zero travel: MOVEs at the press point. See the class doc -- this is the case,
+                // not a weaker version of it.
+                target = { held.center() },
+                hangMs = HANG_MS,
+                onHangStep = {
+                    val icons = ares.folderIcons()
+                    tryCounts += Triple(
+                        icons.size,
+                        ares.dragViewCount(),
+                        icons.any { it.stateLift > 0f },
+                    )
+                },
+            )
+            Log.i(TAG, "d4 attempt $attempt: ${tryCounts.distinct()}")
+            if (tryCounts.any { it.third }) {
+                counts = tryCounts
+                armed = true
+                break
+            }
+            // Not armed: nothing happened at all. Settle and go again.
+            Thread.sleep(400)
+        }
 
         // THE PRECONDITION, and the reason this test is not vacuous: the long-press must actually
         // have entered folder edit mode DURING the gesture. That is what installs DragStarter
         // mid-gesture, which is the only situation in which D4 exists. Without this assertion a
         // gesture that quietly did nothing would report a clean pass.
-        assertThat(counts.any { it.third }).isTrue()
+        check(armed) {
+            "folder edit mode could not be reproduced in $MAX_ATTEMPTS synthetic holds -- " +
+                "the scenario never armed, so nothing about D4 was measured"
+        }
+        assertThat(counts).isNotEmpty()
 
         counts.forEach { (icons, dragViews, _) ->
             assertThat(icons).isEqualTo(before.size)
@@ -133,5 +153,8 @@ class AresFolderHoldTest {
     private companion object {
         const val HOLD_MS = 900L
         const val HANG_MS = 1_200L
+
+        /** Scenario attempts, NOT assertion retries. See the loop and AresFolderExitTest. */
+        const val MAX_ATTEMPTS = 5
     }
 }

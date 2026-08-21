@@ -88,9 +88,17 @@ class AresSwapGeometryTest {
         val seen = mutableSetOf<List<String>>()
         var prev: List<String>? = null
         for (s in samples) {
-            if (prev != null && s != prev) {
+            val p = prev
+            if (p != null && s != p) {
                 transitions++
                 if (s in seen) revisits++
+                // Which items actually moved, so a churny run names its cycle in the log.
+                val moved = s.indices.filter { it < p.size && s[it] != p[it] }
+                Log.i(
+                    TAG,
+                    "swap-geometry non-adjacent: shift@$transitions " +
+                        moved.joinToString(prefix = "[", postfix = "]") { "$it:${p[it]}->${s[it]}" },
+                )
             }
             seen += s
             prev = s
@@ -111,6 +119,7 @@ class AresSwapGeometryTest {
         val target = tiles.maxBy { it.containerOnScreen.y }
         Log.i(TAG, "swap-geometry bottom-row: ${dragged.title}@${dragged.position} -> ${target.title}@${target.position}")
 
+        val orderBefore = ares.homeOrder()
         val offsets = mutableListOf<Int>()
         val sampler = AresSampler(intervalMs = 40L) { ares.surfaceState().scrollOffset }
         sampler.start()
@@ -128,6 +137,11 @@ class AresSwapGeometryTest {
         Log.i(TAG, "swap-geometry bottom-row: offsets=${samples.distinct()} worstJump=$worst")
 
         assertThat(samples).isNotEmpty()
+        // Precondition: the SWAP actually happened. A drag that armed edit mode but never
+        // displaced anything produces a flat offset trace and, without this, a vacuous pass --
+        // its sibling test asserts `transitions > 0` for the same reason
+        // (adversarial-review finding, 2026-08-21). The order is the direct witness.
+        assertThat(ares.homeOrder()).isNotEqualTo(orderBefore)
         // One cell row is 231px here. The defect is a single absolute jump that puts the target's
         // row at the viewport top — hundreds of px in one layout pass. Edge auto-scroll, which is
         // legitimate and stays, moves far less than a row between 40ms samples.

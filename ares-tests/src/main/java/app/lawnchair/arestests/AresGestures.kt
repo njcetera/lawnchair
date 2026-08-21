@@ -81,6 +81,11 @@ object AresGestures {
         onStep: (step: Int, at: PointF) -> Unit = { _, _ -> },
         hangMs: Long = 0,
         onHangStep: (step: Int) -> Unit = { },
+        // A second travel leg AFTER the hang, still inside the same gesture. Exists for the
+        // dwell-then-leave shapes: hold over a folder until it opens, then pull OUT and release.
+        // Evaluated late for the same reason `target` is -- the surface has moved by then.
+        secondTarget: (() -> PointF)? = null,
+        secondTravelMs: Long = 0,
     ) {
         val downTime = SystemClock.uptimeMillis()
         var now = downTime
@@ -116,17 +121,21 @@ object AresGestures {
             onHangStep(i)
         }
 
-        send(downTime, now, MotionEvent.ACTION_UP, end.x, end.y)
+        var lift = end
+        if (secondTarget != null) {
+            val to = secondTarget()
+            val steps = (secondTravelMs / GESTURE_STEP_MS).toInt().coerceAtLeast(1)
+            for (i in 1..steps) {
+                SystemClock.sleep(GESTURE_STEP_MS)
+                now += GESTURE_STEP_MS
+                val p = i.toFloat() / steps
+                lift = PointF(end.x + p * (to.x - end.x), end.y + p * (to.y - end.y))
+                send(downTime, now, MotionEvent.ACTION_MOVE, lift.x, lift.y)
+            }
+        }
+        send(downTime, now, MotionEvent.ACTION_UP, lift.x, lift.y)
     }
 
-    /**
-     * One continuous gesture through [points], no hold: DOWN at the first, interpolated MOVEs
-     * through each leg, UP at the last.
-     *
-     * For pane pans and overscrolls, which need travel that REVERSES — something
-     * [pressHoldDragRelease]'s single destination cannot express. No hold on purpose: a pan must
-     * start moving before the long-press timeout or it becomes a long-press.
-     */
     /**
      * Injects a lone ACTION_CANCEL, clearing any pointer a crashed gesture left mid-stream.
      * A test that throws between DOWN and UP strands the injected pointer, and every later
@@ -138,6 +147,14 @@ object AresGestures {
         send(now, now, MotionEvent.ACTION_CANCEL, 1f, 1f)
     }
 
+    /**
+     * One continuous gesture through [points], no hold: DOWN at the first, interpolated MOVEs
+     * through each leg, UP at the last.
+     *
+     * For pane pans and overscrolls, which need travel that REVERSES — something
+     * [pressHoldDragRelease]'s single destination cannot express. No hold on purpose: a pan must
+     * start moving before the long-press timeout or it becomes a long-press.
+     */
     fun dragPath(points: List<PointF>, legMs: Long, onStep: (at: PointF) -> Unit = { }) {
         require(points.size >= 2) { "a path needs at least two points" }
         val downTime = SystemClock.uptimeMillis()

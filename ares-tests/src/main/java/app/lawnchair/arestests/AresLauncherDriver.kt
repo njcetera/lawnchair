@@ -8,6 +8,7 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
@@ -70,15 +71,16 @@ class AresLauncherDriver {
     // ------------------------------------------------------------------ channel
 
     /**
-     * Enables the launcher's `TestInformationProvider` and waits for it to answer.
+     * Waits for the launcher's `TestInformationProvider` to answer, permissioning this APK first.
      *
-     * Two things have to happen and neither is optional:
-     *  - the provider is `android:enabled="false"` in the manifest, so it must be enabled with
-     *    `pm enable`. **That restarts the launcher process**, so this waits for the new pid.
-     *  - its read/write permission is `WRITE_SECURE_SETTINGS`, a `development` permission, so
-     *    `pm grant` can hand it to this test APK -- which declares it in its own manifest.
-     *
-     * Both steps are TAPL's, kept because they are the parts that actually took experimentation.
+     * What actually enables the provider is the LAUNCHER ITSELF: `pm enable` from here fails --
+     * measured as `SecurityException: Shell cannot change component state` (see `e132886f6d`) --
+     * and the launcher self-enables the component at startup when it is `FLAG_DEBUGGABLE`. So the
+     * enable block below is a best-effort no-op kept from TAPL, and what makes this method work
+     * is the `pressHome()` (starting the launcher, which self-enables) plus the wait. The one
+     * step that IS load-bearing from this side: `WRITE_SECURE_SETTINGS` is a `development`
+     * permission, so `pm grant` can hand it to this test APK -- which declares it in its own
+     * manifest -- and without it every provider call is refused.
      */
     fun openTestChannel() {
         device.executeShellCommand(
@@ -377,9 +379,18 @@ class AresLauncherDriver {
      * earn.
      */
     fun requireWidgetFixture() {
-        val widgets = homeOrder().count { it.substringAfter("/") == "type4" }
+        var widgets = homeOrder().count { it.substringAfter("/") == "type4" }
+        if (widgets < 2) {
+            // Seen once, right after the widget-swap stress class: the db held both rows but the
+            // fresh bind surfaced only one, and an ordinary force-stop + relaunch bound both again
+            // from the very same bytes. A precondition may retry through a restart; an assertion
+            // never retries at all.
+            Log.w("AresSpike", "widget fixture short ($widgets); restarting launcher once")
+            restartLauncher()
+            widgets = homeOrder().count { it.substringAfter("/") == "type4" }
+        }
         check(widgets >= 2) {
-            "FIXTURE MISSING: this test needs 2 widgets on the grid, found . " +
+            "FIXTURE MISSING: this test needs 2 widgets on the grid, found $widgets. " +
                 "Re-seed with: design/scripts/seed-widget-fixture.sh emulator-5554 " +
                 "(or run the whole suite via design/scripts/run-ares-tests.sh, which seeds " +
                 "before every class -- AresGhostWidgetTest deletes a widget by design)."
@@ -423,6 +434,10 @@ class AresLauncherDriver {
         hangMs: Long = 0,
         onDragStep: (Int) -> Unit = {},
         onHangStep: (Int) -> Unit = {},
+        // Second leg after the hang, by adapter index, resolved late like toIndex. For the
+        // dwell-then-leave shapes; see AresGestures.pressHoldDragRelease.
+        secondTargetIndex: Int = -1,
+        secondTravelMs: Long = 0,
     ) {
         val start = tiles().first { it.position == fromIndex }.screenCenter()
         AresGestures.pressHoldDragRelease(
@@ -438,6 +453,11 @@ class AresLauncherDriver {
             onStep = { i, _ -> onDragStep(i) },
             hangMs = hangMs,
             onHangStep = onHangStep,
+            secondTarget = if (secondTargetIndex < 0) null else ({
+                val t = tiles().first { it.position == secondTargetIndex }
+                aimPoint(start, t)
+            }),
+            secondTravelMs = secondTravelMs,
         )
     }
 
