@@ -111,8 +111,9 @@ object AresTestInfo {
     /**
      * One line per attached home tile describing **where it is drawn**, not where it is laid out.
      *
-     * Format, pipe separated:
-     * `pos|title|left,top,right,bottom|containerTx,containerTy|reflowX,reflowY|itemTx,itemTy|drawnLeft,drawnTop`
+     * Format, pipe separated (12 fields; the emitter in `tileMetrics` is the authority):
+     * `pos|title|left,top,right,bottom|containerTx,containerTy|reflowX,reflowY|itemTx,itemTy|`
+     * `containerScreenX,containerScreenY|itemScreenX,itemScreenY|width,height|scaleX|itemType|spanX,spanY`
      *
      * The container and the item view are reported separately on purpose. On the home grid the
      * orbit, the reflow and the follow are written to the **holder container** (a plain
@@ -361,14 +362,6 @@ object AresTestInfo {
         return out.toTypedArray()
     }
 
-    /**
-     * A view's live translation, taking the [Reorderable] channel into account.
-     *
-     * `View.getTranslationX()` on a `Reorderable` is in fact the *sum* every
-     * `MultiTranslateDelegate` channel aggregates to -- the delegate writes the aggregate through
-     * `VIEW_TRANSLATE_X` -- so it is not wrong for a single view. It is only a partial answer
-     * because on this grid two different views carry two different contributions.
-     */
     /** See [REQUEST_SURFACE_STATE]. */
     private fun surfaceState(launcher: Launcher): String {
         val state = launcher.stateManager.state.toString().substringAfterLast('.')

@@ -528,15 +528,19 @@ class AresHomeAdapter(private val launcher: Launcher) :
         for (i in 0 until size) releaseForRemoval(i)
         items.clear()
         // The §C4 gap is a view-level entry with no row behind it, and `items.clear()` does not
-        // reach the field that points at it. Leaving it set orphans the slot: every later guard
-        // then misfires by identity -- `moveDropSlot` finds `from < 0` and returns for the rest of
-        // the drag, `AresHomeDropPreview.onExternalDragOver` still sees `list === grid` so it never
-        // calls `showDropSlot` again, and `take()` returns -1 so the drop falls back to a
-        // re-derived release point instead of the gap the user watched. The trigger is a rebind
-        // landing mid-drag -- `Workspace.removeAllWorkspaceScreens` calls this from
-        // `ModelCallbacks.startBinding`, which a HOME press or a finishing package install can
-        // raise while an app is being dragged out of a folder. Nothing throws and the next drag is
-        // fine, which is the intermittent-with-no-visible-cause shape this project keeps hitting.
+        // reach the field that points at it. Nulling it here removes the DANGLING REFERENCE only:
+        // without it, the field kept pointing at an item no list contained, and every later
+        // identity guard answered for a ghost. What this does NOT do -- adversarial-review
+        // finding, 2026-08-21 -- is restore the gap after a mid-drag rebind. The behaviour is the
+        // same on either side of this line: `AresHomeDropPreview.onExternalDragOver` still sees
+        // `list === grid`, so it never calls `showDropSlot` again (`moveDropSlot` just returns on
+        // the null now instead of on `from < 0`), and `take()` still answers -1, so the drop
+        // falls back to a re-derived release point instead of the gap the user watched. Ledger
+        // row 21 stays open on that behaviour; fixing it needs a re-show path in the preview,
+        // which does not exist yet. The trigger is a rebind landing mid-drag --
+        // `Workspace.removeAllWorkspaceScreens` calls this from `ModelCallbacks.startBinding`,
+        // which a HOME press or a finishing package install can raise while an app is being
+        // dragged out of a folder.
         dropSlot = null
         notifyItemRangeRemoved(0, size)
     }
@@ -720,6 +724,19 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val info = items[position]
+        // Re-assert the widget recycling opt-out on every bind, because onCreateViewHolder is not
+        // on every path to one. releaseForRemoval balances the opt-out before a holder leaves --
+        // including clear()'s sweep, which runs on EVERY full rebind (a HOME press reaches it via
+        // startBinding) -- and both reuse routes back skip creation: stable-id scrap rebinds the
+        // same holder, and RecycledViewPool.resetInternal() zeroes the recyclable counter before
+        // a pooled one is handed back. Without this, one rebind left every widget holder
+        // recyclable, and scrolling detached and re-inflated live AppWidgetHostViews -- the exact
+        // disruption the opt-out exists to prevent. Adversarial-review finding (2026-08-21).
+        // Balanced: setIsRecyclable is a counter, so the flag is only pushed when it is not
+        // already holding.
+        if (getItemViewType(position) == TYPE_WIDGET && holder.isRecyclable) {
+            holder.setIsRecyclable(false)
+        }
         holder.container.removeAllViews()
 
         // The §C4 drop slot renders NOTHING. It exists so the packer allocates a cell and the
