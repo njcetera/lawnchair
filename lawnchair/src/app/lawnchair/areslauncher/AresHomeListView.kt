@@ -1421,6 +1421,19 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     /** Armed while a hold on scrollable empty space might still become the workspace popup. */
     private var emptySpaceLongPress: Runnable? = null
 
+    /**
+     * True once the workspace popup has claimed this gesture; everything left of it is swallowed.
+     *
+     * Stock's equivalent is `WorkspaceTouchListener`'s `STATE_COMPLETED`, which returns true for
+     * every remaining event. This exists because the synthetic `ACTION_CANCEL` alone does **not**
+     * end the gesture, which the commit that added the popup wrongly claimed it did: the cancel
+     * resets `RecyclerView`'s scroll *state* to IDLE, but this view is still the parent's touch
+     * target, so real MOVEs keep arriving — and since the timer only fires while the finger is
+     * inside touch slop, the recorded down point is still valid, so further travel simply re-enters
+     * a drag and scrolls the grid underneath the popup that just opened.
+     */
+    private var emptySpacePopupTook = false
+
     private var emptySpaceDownX = 0f
     private var emptySpaceDownY = 0f
 
@@ -1484,6 +1497,27 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val point = floatArrayOf(emptySpaceDownX, emptySpaceDownY)
         launcher.dragLayer.getDescendantCoordRelativeToSelf(this, point)
 
+        // Stock's edge-margin refusal, which the first cut dropped.
+        // `WorkspaceTouchListener` declines the long press when the down point falls within
+        // `edgeMarginPx` of the drag layer, because that band belongs to the gestures that START at
+        // an edge -- here the §10 Pivot pan and the edge-back that §20 routes out of edit mode. A
+        // hesitation at the bezel should begin a pan, not raise the wallpaper popup.
+        val edge = launcher.deviceProfile.edgeMarginPx
+        val dl = launcher.dragLayer
+        if (point[0] < edge || point[1] < edge ||
+            point[0] > dl.width - edge || point[1] > dl.height - edge
+        ) {
+            return
+        }
+
+        // The other half of taking the gesture, and it is not optional: stock pairs showing the
+        // menu with `requestDisallowInterceptTouchEvent(true)` for a reason. Without it
+        // `BaseDragLayer.onInterceptTouchEvent` keeps running on every MOVE, and
+        // AresPaneSwipeController latched its decision at a DOWN taken before the popup existed --
+        // so a sideways drag would pan the app-list pane with the popup still up. This file already
+        // uses exactly this call, for exactly this reason, when entering edit mode.
+        parent?.requestDisallowInterceptTouchEvent(true)
+
         performHapticFeedback(
             HapticFeedbackConstants.LONG_PRESS,
             HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
@@ -1497,6 +1531,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
         super.dispatchTouchEvent(cancel)
         cancel.recycle()
+
+        // ...and the cancel alone is NOT enough, which is the correction to this function's first
+        // cut. It resets RecyclerView's scroll state, but this view is still the parent's touch
+        // target and real MOVEs keep arriving; the recorded down point is still inside slop (that is
+        // the only reason the timer fired), so further travel just starts a fresh drag under the
+        // open popup. Swallowing the remainder is what actually ends the gesture, and it is what
+        // stock's STATE_COMPLETED does.
+        emptySpacePopupTook = true
     }
 
     /**
@@ -1509,6 +1551,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     private fun trackEmptySpaceLongPress(ev: MotionEvent) {
         when (ev.actionMasked) {
+            // A new gesture always starts clean, however the last one ended.
+            MotionEvent.ACTION_DOWN -> emptySpacePopupTook = false
+
             MotionEvent.ACTION_MOVE -> {
                 if (emptySpaceLongPress == null) return
                 val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -1517,8 +1562,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 if (dx * dx + dy * dy > (slop * slop).toFloat()) cancelEmptySpaceLongPress()
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> cancelEmptySpaceLongPress()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                cancelEmptySpaceLongPress()
+                emptySpacePopupTook = false
+            }
         }
+    }
+
+    /**
+     * Drops a pending empty-space long-press when this view leaves the window.
+     *
+     * The timer is posted on the view, and nothing else takes it down: a fold, a configuration
+     * change or any teardown between the finger landing and the timeout would otherwise fire it
+     * against a `Launcher` that is no longer the live one.
+     */
+    override fun onDetachedFromWindow() {
+        cancelEmptySpaceLongPress()
+        emptySpacePopupTook = false
+        super.onDetachedFromWindow()
     }
 
     /**
@@ -1564,6 +1625,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        // The popup owns the rest of this gesture. Consume rather than decline: returning false
+        // would hand the remainder up to Workspace, which is no better than scrolling it here.
+        if (emptySpacePopupTook) return true
         if (gestureStartedOnEmptySpace) return false
         val handled = super.onTouchEvent(e)
         // A grid whose content is shorter than the viewport has nothing to scroll, and a view that
