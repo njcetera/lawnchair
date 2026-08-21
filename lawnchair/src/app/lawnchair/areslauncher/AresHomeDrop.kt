@@ -112,6 +112,15 @@ object AresHomeDrop {
         if (!AresWidgetAdd.isAresHome(launcher)) return false
         val dragged = d.dragInfo ?: return false
 
+        // A handed-off drag (rows 31/32) is already a grid tile being driven by ItemTouchHelper;
+        // the real placement happens through that pipeline's clearView when the relay delivers
+        // the synthetic UP. The DragController drop is consumed as a no-op so nothing here adds
+        // the item a second time.
+        if (AresFolderExitHandoff.consumeDrop()) {
+            finishDrop(launcher, d)
+            return true
+        }
+
         // FIRST, before anything reads or writes the grid (§C4). The live gap
         // ([AresHomeDropPreview]) is a view-level entry with no database row, so it must be gone
         // before `commitDrop` or `addDraggedItem` renumbers anything -- and its index is a better

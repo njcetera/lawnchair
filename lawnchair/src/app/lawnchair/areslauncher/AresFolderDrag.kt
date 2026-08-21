@@ -1,5 +1,6 @@
 package app.lawnchair.areslauncher
 
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -44,6 +45,8 @@ import kotlin.math.hypot
  * still a long-press away, made deliberately from a surface that is already in the mode.
  */
 object AresFolderDrag {
+
+    private const val TAG = "AresFolderDrag"
 
     /**
      * True when [dragSource] is a **home-screen folder on the Ares home surface** — i.e. this drag
@@ -130,10 +133,25 @@ object AresFolderDrag {
         val grid = launcher.workspace?.aresHomeList ?: return false
 
         if (grid.isEditMode()) {
+            // Diagnostic (2026-08-21): this branch raises the POPUP, not a drag -- a long-press
+            // landing here with edit mode already on is the invisible arming killer.
+            Log.d(TAG, "folder long-press: grid already editing -> popup on $v")
             (v as? BubbleTextView)?.startLongPressAction()
         } else {
+            Log.d(TAG, "folder long-press: entering edit mode; pressed=${System.identityHashCode(v)}")
             grid.enterEditMode()
             folder.folderIcon?.let { AresFolderEdit.attach(launcher, it) }
+            // Claim the rest of THIS gesture for the icon -- the folder-chain mirror of the claim
+            // grid.enterEditMode() makes for grid gestures, and it exists for a measured reason:
+            // entering edit mode re-lays the folder sheet, which SHIFTS FolderPagedView under the
+            // stationary finger, and the next MOVE's local X then differs from the DOWN's by the
+            // sheet shift -- `determineScrollingStart` reads that as a past-slop scroll, claims
+            // the gesture, and the icon receives an event-less CANCEL before the DragStarter has
+            // seen a single MOVE. That was the entire folder-exit arming lottery (historically
+            // ~2-in-5, measured at 0-for-5 whenever the shift beat the slop): startDrag only ever
+            // armed when the shift happened to be small. The DragStarter releases this claim
+            // itself right before `folder.startDrag`, and on UP/CANCEL -- both already there.
+            v.parent?.requestDisallowInterceptTouchEvent(true)
         }
         // Consumed either way. Falling through would arm the drag this whole object exists to
         // stop, and would raise the popup a second time on the editing branch.
@@ -226,8 +244,14 @@ object AresFolderDrag {
          * true on the one path that mattered.
          */
         private var haveOrigin = false
+        private var loggedThisGesture = false
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
+            if (!loggedThisGesture || e.actionMasked != MotionEvent.ACTION_MOVE) {
+                loggedThisGesture = true
+                Log.d(TAG, "DragStarter.onTouch a=${e.actionMasked} v=${System.identityHashCode(v)} at ${e.x},${e.y}")
+                if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) loggedThisGesture = false
+            }
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     takeOrigin(v, e)
@@ -238,6 +262,7 @@ object AresFolderDrag {
                     // that already happened, so it sets the reference point instead of being
                     // measured against one that does not exist.
                     if (!haveOrigin) {
+                        Log.d(TAG, "DragStarter: mid-gesture origin at ${e.x},${e.y}")
                         takeOrigin(v, e)
                         return false
                     }
@@ -245,6 +270,7 @@ object AresFolderDrag {
                     val slop = ViewConfiguration.get(v.context).scaledTouchSlop
                     if (hypot(e.x - downX, e.y - downY) <= slop) return false
                     dragging = true
+                    Log.d(TAG, "DragStarter: slop crossed, starting drag of $v")
                     // Released before starting, so the DragLayer can intercept the next MOVE and
                     // hand the gesture to DragController. Held any longer, the drag view is created
                     // and then never receives a single move.

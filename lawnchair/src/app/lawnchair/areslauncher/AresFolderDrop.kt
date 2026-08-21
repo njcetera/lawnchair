@@ -110,6 +110,13 @@ object AresFolderDrop {
      */
     private const val DWELL_SLOP_PX = 18f
 
+    /**
+     * A same-tile jump past this in ONE frame is a layout reframe of the reporting view, not a
+     * finger move -- fingers are continuous, frames are not. Well above any real inter-frame
+     * travel during a hold, well below the measured reframe (180px).
+     */
+    private const val REFRAME_JUMP_PX = 60f
+
     /** The grid the current drag is over, or null when nothing is being tracked. */
     private var grid: AresHomeListView? = null
 
@@ -211,12 +218,20 @@ object AresFolderDrop {
         val info = view?.let { list.aresAdapter.itemAt(list.getChildAdapterPosition(it)) }
         val kind = if (info == null) Kind.NONE else kindOf(info, item)
         if (view == null || info == null || kind == Kind.NONE) {
+            if (candidateInfo != null) {
+                Log.d(TAG, "dwell lost at (${x.toInt()},${y.toInt()}): view=${view != null} info=${info?.id} kind=$kind")
+            }
             clearTarget()
             return
         }
         candidateKind = kind
 
-        if (info !== candidateInfo) {
+        // By ID, not instance. A model write landing mid-hold (the folder-exit handoff persists
+        // at crossing time; any package event does it too) rebinds the grid and every ItemInfo is
+        // a fresh object -- an `!==` check then read the SAME tile as a new target and restarted
+        // the dwell, so a hold across any rebind could never complete. Same id = same tile; the
+        // instances are refreshed below so the eventual commit acts on the live objects.
+        if (info.id != candidateInfo?.id) {
             // NOTE candidateKind is re-asserted below, after clearTarget(). It is set here too
             // because the same-tile path falls through to the slop check and needs it.
             // Logged on change only -- this runs on every frame of a drag, so per-frame logging is
@@ -237,6 +252,10 @@ object AresFolderDrop {
             restart(list, x, y)
             return
         }
+        // Same tile: refresh the instances (a mid-hold rebind swaps them; see the id check above)
+        // so the commit resolves against the live view and item.
+        candidate = view
+        candidateInfo = info
         // Same tile. Only a real move restarts the count -- see DWELL_SLOP_PX.
         //
         // A move restarts the count even when the dwell has already ARMED, and the `!armed` guard
@@ -251,7 +270,20 @@ object AresFolderDrop {
         // a handful of discrete `input motionevent` calls hundreds of milliseconds apart, so an
         // automated drag looks like a sequence of half-second holds and can arm on any tile it
         // passes over. Disarming on movement is what keeps a scripted reorder a reorder.
-        if (hypot(x - anchorX, y - anchorY) > DWELL_SLOP_PX) {
+        val drift = hypot(x - anchorX, y - anchorY)
+        if (drift > REFRAME_JUMP_PX) {
+            // A REFRAME, not a move. The in-grid feed reports the dragged VIEW's position, and a
+            // mid-hold rank change re-homes that view's layout frame -- the reported point then
+            // teleports (measured: 180px in one frame) while the finger, and the visual locked to
+            // it, never moved. A finger cannot teleport, so a same-tile jump past this bound is
+            // the frame changing under the point: the anchor rebases and the timer KEEPS COUNTING.
+            // Without this, any relayout during a hold restarted the dwell forever, and a dwell
+            // over a tile that reflow touches could never complete.
+            Log.d(TAG, "dwell rebase: drift=${drift.toInt()} at (${x.toInt()},${y.toInt()})")
+            anchorX = x
+            anchorY = y
+        } else if (drift > DWELL_SLOP_PX) {
+            Log.d(TAG, "dwell slip: drift=${drift.toInt()} at (${x.toInt()},${y.toInt()})")
             if (armed) {
                 armed = false
                 list.setFolderDropTarget(null)
@@ -302,6 +334,17 @@ object AresFolderDrop {
     /** True once the dwell has elapsed: the target is highlighted and a release drops into it. */
     @JvmStatic
     fun isArmed(): Boolean = armed
+
+    /**
+     * True while ANY dwell candidate is held — armed or still counting. The edge auto-scroll
+     * consults this: a grid that scrolls under a finger deliberately holding still over a tile
+     * moves the list-space anchor past [DWELL_SLOP_PX] every frame, so the timer restarts forever
+     * and a dwell near the screen edge can never complete (measured: list-local y walked 232 →
+     * 52 across one still hold while the target stayed the same tile). Holding still over a
+     * target is the user saying "this one" — scrolling them away from it is never what they meant.
+     */
+    @JvmStatic
+    fun hasCandidate(): Boolean = candidateInfo != null
 
     /** Forgets everything about the current drag. Safe to call at any time. */
     @JvmStatic
@@ -803,6 +846,9 @@ object AresFolderDrop {
      */
     @JvmStatic
     fun onExternalDragOver(launcher: Launcher, d: DropTarget.DragObject) {
+        // A handed-off drag (rows 31/32) is an in-grid drag now; its dwell is fed by the in-grid
+        // pipeline like any other, and feeding it a second time from here would double-drive it.
+        if (AresFolderExitHandoff.isActive()) return
         val list = launcher.workspace?.aresHomeList ?: return
         val local = toListSpace(launcher, list, d.x.toFloat(), d.y.toFloat())
         onDragPoint(list, d.dragInfo, local[0], local[1], fromGrid = false)

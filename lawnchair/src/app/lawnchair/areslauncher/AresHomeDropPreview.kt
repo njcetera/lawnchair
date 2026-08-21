@@ -85,6 +85,11 @@ object AresHomeDropPreview : DragController.DragListener {
 
         val local = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
 
+        // Rows 31/32: a qualifying folder-exit drag is handed to the in-grid pipeline outright —
+        // the item becomes a real tile under the finger and ItemTouchHelper drives. The slot
+        // machinery below is then not mimicking anything; it simply never runs for this drag.
+        if (AresFolderExitHandoff.maybeTakeOver(launcher, grid, d, local[0], local[1])) return
+
         var index = grid.dropIndexAt(local[0], local[1])
 
         // Never displace the tile the finger is INSIDE when a dwell over it could arm (row 32).

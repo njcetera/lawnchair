@@ -82,8 +82,12 @@ private const val CELL_TAG = "ares_folder_edit_cell"
     fun attach(launcher: Launcher, folderIcon: FolderIcon) {
         val folder = folderIcon.folder ?: return
         if (folder.isDestroyed) return
-        if (session?.folder === folder) return
+        if (session?.folder === folder) {
+            android.util.Log.d("AresFolderEdit", "attach: session already live for this folder")
+            return
+        }
         detach()
+        android.util.Log.d("AresFolderEdit", "attach: new session for folder=${System.identityHashCode(folder)}")
         session = Session(launcher, folder).also { it.start() }
     }
 
@@ -343,6 +347,7 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // and re-adds the icons, and a recycled BubbleTextView comes back without it.
                 // setOnTouchListener is idempotent for a listener already installed.
                 icon.setOnTouchListener(dragStarter)
+                android.util.Log.d("AresFolderEdit", "starter installed on ${System.identityHashCode(icon)}")
 
                 // A tap inside an open folder must not launch anything either (§4/§18: "tapping an
                 // item in edit mode does NOT launch it"). The grid has done this since the mode

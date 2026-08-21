@@ -788,7 +788,14 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // AresLauncher: the dwell that arms a folder as a drop target (AresFolderDrop) cannot be
         // torn down in onDragExit -- DragController.drop calls that BEFORE onDrop, so the arm has
         // to survive it. This is the one hook that always runs and always runs last.
-        AresFolderDrop.cancel();
+        //
+        // UNLESS the drag was handed off to the in-grid pipeline (rows 31/32): its commit runs
+        // from ItemTouchHelper's clearView ~250ms of settle AFTER this hook, and cancelling here
+        // was measured wiping the armed target in that gap -- dwell armed, reflow froze, nothing
+        // committed. Every in-grid ending clears the dwell itself.
+        if (!app.lawnchair.areslauncher.AresFolderExitHandoff.ownsDwellTeardown()) {
+            AresFolderDrop.cancel();
+        }
         mDragInfo = null;
         mDragSourceInternal = null;
     }

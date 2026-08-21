@@ -649,6 +649,27 @@ object AresHomeReorder {
 
         override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
+        /**
+         * Edge auto-scroll stands down while a dwell candidate is held. A finger deliberately
+         * holding still over a tile near the screen edge is the dwell's whole gesture -- and the
+         * auto-scroll moved the grid under that still finger, which walked the dwell's
+         * list-space anchor past its slop every frame and restarted the timer forever (measured:
+         * anchor y 232 -> 52 across one motionless hold). Scrolling resumes the moment the
+         * finger moves off the candidate, which is also the moment scrolling could be meant.
+         */
+        override fun interpolateOutOfBoundsScroll(
+            recyclerView: RecyclerView,
+            viewSize: Int,
+            viewSizeOutOfBounds: Int,
+            totalSize: Int,
+            msSinceStartScroll: Long,
+        ): Int {
+            if (AresFolderDrop.hasCandidate()) return 0
+            return super.interpolateOutOfBoundsScroll(
+                recyclerView, viewSize, viewSizeOutOfBounds, totalSize, msSinceStartScroll,
+            )
+        }
+
         override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
             super.onSelectedChanged(viewHolder, actionState)
             if (actionState != ItemTouchHelper.ACTION_STATE_DRAG) return

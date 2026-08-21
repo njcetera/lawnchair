@@ -128,9 +128,21 @@ class AresFolderExitCreateTest {
             start = held.center(),
             holdMs = HOLD_MS,
             travelMs = TRAVEL_MS,
+            // The BALLISTIC leg: aim where the target was seen before the folder opened. The live
+            // reflow legitimately moves tiles during the approach, so this may land beside it.
             target = { target.screenCenter() },
-            // Long enough for DWELL_MS (500) plus the slide-vs-still question to answer itself.
-            hangMs = HANG_MS,
+            // Let the reflow settle where it will.
+            hangMs = SETTLE_MS,
+            // The CORRECTIVE leg -- what a human's eyes do. Re-resolve the target's LIVE centre
+            // (one channel round-trip, at leg start only) and make a short second approach, then
+            // hold still there for the dwell. Without this, a static aim measured the target
+            // 259px away from the finger under the in-grid reflow and called creation broken.
+            secondTarget = {
+                ares.tiles().firstOrNull { it.title.startsWith("$targetId/") }?.screenCenter()
+                    ?: target.screenCenter()
+            },
+            secondTravelMs = CORRECT_MS,
+            secondHangMs = DWELL_HOLD_MS,
         )
         sampler.stop()
 
@@ -178,7 +190,15 @@ class AresFolderExitCreateTest {
     private companion object {
         const val HOLD_MS = 900L
         const val TRAVEL_MS = 900L
-        const val HANG_MS = 1_600L
+
+        /** Reflow settle after the ballistic leg, before the corrective one. */
+        const val SETTLE_MS = 400L
+
+        /** The corrective leg to the target's LIVE centre. */
+        const val CORRECT_MS = 200L
+
+        /** Still hold at the live centre: DWELL_MS (500) plus margin. */
+        const val DWELL_HOLD_MS = 1_200L
         const val MAX_ATTEMPTS = 5
 
         /** The folder sheet's top when open; targets above this stay reachable. */

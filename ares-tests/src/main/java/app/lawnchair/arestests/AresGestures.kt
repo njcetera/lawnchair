@@ -86,6 +86,7 @@ object AresGestures {
         // Evaluated late for the same reason `target` is -- the surface has moved by then.
         secondTarget: (() -> PointF)? = null,
         secondTravelMs: Long = 0,
+        secondHangMs: Long = 0,
     ) {
         val downTime = SystemClock.uptimeMillis()
         var now = downTime
@@ -130,6 +131,16 @@ object AresGestures {
                 now += GESTURE_STEP_MS
                 val p = i.toFloat() / steps
                 lift = PointF(end.x + p * (to.x - end.x), end.y + p * (to.y - end.y))
+                send(downTime, now, MotionEvent.ACTION_MOVE, lift.x, lift.y)
+            }
+            // A still hold AT the second leg's end, for dwells that must complete there -- the
+            // human shape is ballistic approach, visual correction, then the deliberate hold, and
+            // the corrective leg is what [secondTarget]'s late evaluation exists for.
+            var held = 0L
+            while (held < secondHangMs) {
+                SystemClock.sleep(GESTURE_STEP_MS)
+                now += GESTURE_STEP_MS
+                held += GESTURE_STEP_MS
                 send(downTime, now, MotionEvent.ACTION_MOVE, lift.x, lift.y)
             }
         }
