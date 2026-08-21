@@ -78,15 +78,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
     /**
      * Whether the surface is currently in edit mode.
      *
-     * Consulted by **every** edit-mode affordance this adapter owns — the resize chevron, the ×
-     * remove badge and the §21 cell outline — all of which funnel through [syncAffordancesFor]. The
-     * host keeps this in step via [setEditMode]; the adapter deliberately does not observe edit
-     * state itself.
+     * Consulted by **every** edit-mode visual this adapter owns — the resize chevron, the × remove
+     * badge, the ! menu badge, the §21 cell outline and the hidden label ([AresEditLabel]) — all of
+     * which funnel through [syncEditVisualsFor]. The host keeps this in step via [setEditMode]; the
+     * adapter deliberately does not observe edit state itself.
      *
      * It used to say "only consulted to decide whether a widget row shows its resize chevron",
      * which was true when written and false the moment the × was added to every item. A comment of
-     * exactly that shape already shipped a bug here (`1c4a4f33bc`), so: **if you add a fourth
-     * affordance, this list and the funnel's name are part of the change.**
+     * exactly that shape already shipped a bug here (`1c4a4f33bc`), so: **if you add another one,
+     * this list and the funnel's name are part of the change.** They already have been twice — the
+     * funnel was called `syncAffordances` until the frost box and the label treatment, neither of
+     * which is a tap target, made that name a third stale comment waiting to mislead someone.
      */
     private var editMode = false
 
@@ -98,7 +100,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * attached. Toggling edit mode that way leaked a widget host view per widget per toggle
      * (observed: four host views for two widgets, one still drawn at its pre-resize size).
      *
-     * The host adds and removes affordances on already-attached rows itself via [syncAffordances],
+     * The host adds and removes affordances on already-attached rows itself via [syncEditVisuals],
      * which it does while walking children for the edit-mode scale anyway.
      */
     fun setEditMode(enabled: Boolean) {
@@ -106,17 +108,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
-     * Brings an attached row's edit-mode affordances -- × badge, resize chevron and cell outline
-     * -- in line with the current mode.
+     * Brings an attached row's edit-mode visuals -- × badge, resize chevron, cell outline and the
+     * hidden label -- in line with the current mode.
      *
      * Operates on the live view rather than rebinding, for the reason in [setEditMode].
      */
-    fun syncAffordances(container: FrameLayout, position: Int) {
-        syncAffordancesFor(container, items.getOrNull(position))
+    fun syncEditVisuals(container: FrameLayout, position: Int) {
+        syncEditVisualsFor(container, items.getOrNull(position))
     }
 
     /**
-     * The single place a row's edit-mode affordances are brought in line with the current mode.
+     * The single place a row's edit-mode visuals are brought in line with the current mode.
      *
      * Every entry point funnels through here — the host's edit-mode walk, its child-attach hook and
      * [onBindViewHolder] — so the "already has one" case is handled once. That matters because
@@ -145,8 +147,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
      *    scales and rotates `getChildAt(i)` (the container) and so carries these along with it.
      *
      * So: keep animating the container. Do not move these into the item view to make them wiggle.
+     *
+     * ## The label treatment is the one thing here that writes the ITEM view
+     *
+     * [AresEditLabel] fades the caption and slides the icon down to the cell's centre, and it must
+     * touch the item view rather than the container for exactly the reason above, read backwards:
+     * the badges and the frost describe the **cell**, so they have to stay where the cell is while
+     * the icon moves inside it. See that file — it also records why an open folder is excluded.
      */
-    private fun syncAffordancesFor(container: FrameLayout, info: ItemInfo?) {
+    private fun syncEditVisualsFor(container: FrameLayout, info: ItemInfo?) {
         val existing = container.findViewWithTag<View>(AresWidgetResize.CHEVRON_TAG)
         val target = info?.takeIf { editMode && isWidget(it) && isResizable(it) }
         if (target != null && existing == null) {
@@ -161,6 +170,9 @@ class AresHomeAdapter(private val launcher: Launcher) :
         syncRemoveBadgeFor(container, info)
         syncInfoBadgeFor(container, info)
         syncCellOutlineFor(container, info)
+        // A null info means the row has left the adapter, and it gets its label back for the same
+        // reason it loses its ×: it is no longer editable, whatever the mode says.
+        AresEditLabel.set(container, editMode && info != null)
     }
 
     /**
@@ -631,8 +643,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // home screen can be taken off it -- and while this was gated on AppWidgetHostView, an icon
         // or folder bound during edit mode (scrolled in, or delivered by a late bind) came up with
         // no badge at all and could not be removed without leaving and re-entering the mode.
-        // syncAffordancesFor decides what this particular item is entitled to.
-        syncAffordancesFor(holder.container, info)
+        // syncEditVisualsFor decides what this particular item is entitled to.
+        syncEditVisualsFor(holder.container, info)
 
         // Last, so the host sees a fully-built row. This is the one deterministic moment a
         // newly-inserted item exists: `onChildAttachedToWindow` is not, because RecyclerView

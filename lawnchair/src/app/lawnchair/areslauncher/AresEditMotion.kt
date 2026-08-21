@@ -27,6 +27,7 @@ import kotlin.math.exp
  * | reflow (this file) | during a drag, on **displaced** tiles | summed here, via [displaceTo] |
  * | `ItemTouchHelper` | the dragged tile only, for the drag's life | **exclusive** — the host suspends the float and the layout manager exempts the tile ([AresHomeListView.setFloatSuspendedFor]), so nothing here writes to it at all |
  * | [AresMasonryLayoutManager.animateFromPreviousBounds] | a resize or a removal, 200ms | **exclusive for that tile** — it calls [clearReflow] first and owns the property until it ends. It cannot overlap a drag: its two triggers are affordance taps, and a gesture that starts on an affordance can never become a drag |
+ * | lift ([AresEditLabel]) | whole of edit mode, per **item view** | summed here, via [setLift] — and it is the one row of this table that writes the item view rather than the holder container, so it shares a view with none of the others |
  *
  * The scale is a separate property with a separate, simpler story: the edit-mode 0.92, the
  * pick-up bump ([PICKUP_SCALE_FACTOR]) and the repack's size animation all multiply through
@@ -156,6 +157,12 @@ object AresEditMotion {
         var followX = 0f
         var followY = 0f
 
+        /**
+         * A vertical offset that centres a labelless icon in its cell. Y only — nothing about
+         * dropping a label moves a tile sideways. See [setLift].
+         */
+        var liftY = 0f
+
         val settled: Boolean
             get() = dx == 0f && dy == 0f && vx == 0f && vy == 0f
     }
@@ -200,6 +207,34 @@ object AresEditMotion {
         if (m.followX == x && m.followY == y) return
         m.followX = x
         m.followY = y
+        apply(view, m)
+    }
+
+    /**
+     * Slides [view] down by [y] so its icon sits in the visual centre of the cell.
+     *
+     * The one user is [AresEditLabel], which hides a home tile's label while editing. An icon sits
+     * high in its cell precisely to leave room for the text underneath it; with the text gone it
+     * reads as hanging off the top, so the icon has to come down to where the whole cell's centre
+     * is.
+     *
+     * A fixed offset with no motion of its own, like [setFollow] — [AresEditLabel] drives its own
+     * animator and calls this each frame, rather than a second animator appearing here.
+     *
+     * **This is the one contribution written to the ITEM view rather than the holder container.**
+     * Everything else in this file moves the container, because that is what carries the badges and
+     * the frost with it. The lift must not: the badges mark the *cell*, and the frost outlines it
+     * (§21), so both stay put while only the icon moves. That also means the lift never shares a
+     * view with the orbit or the reflow on the home grid, and inside an open folder nothing lifts
+     * at all — see [AresEditLabel] for why folders are excluded.
+     */
+    fun setLift(view: View, y: Float) {
+        // Nothing to record, and no reason to create an entry, for the resting case.
+        val existing = motions[view]
+        if (existing == null && y == 0f) return
+        val m = existing ?: motions.getOrPut(view) { Motion() }
+        if (m.liftY == y) return
+        m.liftY = y
         apply(view, m)
     }
 
@@ -254,7 +289,7 @@ object AresEditMotion {
     }
 
     private fun apply(view: View, m: Motion) {
-        write(view, m.orbitX + m.dx + m.followX, m.orbitY + m.dy + m.followY)
+        write(view, m.orbitX + m.dx + m.followX, m.orbitY + m.dy + m.followY + m.liftY)
     }
 
     /**
