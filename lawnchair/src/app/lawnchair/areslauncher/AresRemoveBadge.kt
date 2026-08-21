@@ -77,7 +77,7 @@ object AresRemoveBadge {
         // Pull the drawn circle into the top-start corner, away from the centre of its own touch
         // target, by padding the two FAR sides. The 48dp view stays fully touchable; only the
         // CENTER-scaled drawable moves. Centred it landed on the app icon rather than beside it.
-        val pull = res.getDimensionPixelSize(R.dimen.ares_badge_corner_pull)
+        val pull = cornerPullFor(res, touch)
 
         return ImageView(container.context).apply {
             tag = BADGE_TAG
@@ -106,6 +106,32 @@ object AresRemoveBadge {
     }
 
     /**
+     * How far to pull the drawn badge into its corner, in px, for a touch target of [touchPx].
+     *
+     * `ares_badge_corner_pull` is the *wish*; this is what the target can actually afford. The
+     * badge is rendered `CENTER` at its intrinsic 28dp inside the content box left by the padding,
+     * so its offset from the corner is `(touch - pull - badge) / 2` — and once `pull` exceeds
+     * `touch - badge`, that offset goes **negative** and the circle is drawn outside the view and
+     * clipped by it.
+     *
+     * That is not hypothetical, and it is why this clamp exists rather than a bigger constant. A
+     * home tile hosts a 48dp target, which affords 20dp of pull. **A folder cell does not**: its
+     * badges are sized to half the cell (91px on a 202px cell, ~37dp), which affords only ~9dp — so
+     * the 15dp this used to apply unconditionally already computed a **-7px** offset in every open
+     * folder, clipping the top-start of both glyphs. That matches the report that *"the X and !
+     * icons in the folder dont render correctly"*, which had been read as a sizing problem.
+     *
+     * Clamping fixes both surfaces with one rule: the grid gets the full pull it asked for, and a
+     * folder gets the most its smaller target allows, which lands the badge flush in the corner
+     * instead of over the edge of it.
+     */
+    internal fun cornerPullFor(res: android.content.res.Resources, touchPx: Int): Int {
+        val wish = res.getDimensionPixelSize(R.dimen.ares_badge_corner_pull)
+        val drawn = res.getDimensionPixelSize(R.dimen.ares_remove_badge_size)
+        return wish.coerceAtMost((touchPx - drawn).coerceAtLeast(0))
+    }
+
+    /**
      * True when [x],[y] fall on the badge.
      *
      * The host's edit-mode touch listener consumes taps on items so tiles stay inert, which would
@@ -116,6 +142,10 @@ object AresRemoveBadge {
      * transform**, for the reason spelled out on [AresWidgetResize.isPointOnChevron]:
      * `AresHomeListView.toChildLocal` produces them, and subtracting `container.left` alone does
      * not, because edit mode scales the container.
+     *
+     * Note this tests the 48dp **touch target**, not the drawn circle, and that stays true however
+     * far [cornerPullFor] moves the glyph — the padding shifts what is painted and never the view's
+     * own bounds. Reachability is therefore independent of the visual nudge.
      */
     fun isPointOnBadge(container: View, x: Float, y: Float): Boolean {
         val badge = container.findViewWithTag<View>(BADGE_TAG) ?: return false

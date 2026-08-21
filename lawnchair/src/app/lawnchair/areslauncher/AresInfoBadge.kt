@@ -88,8 +88,10 @@ object AresInfoBadge {
         }
         val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
         // Mirror of the ×: pull the drawn circle into the top-END corner by padding the far sides,
-        // leaving the whole 48dp view touchable. See AresRemoveBadge.
-        val pull = res.getDimensionPixelSize(R.dimen.ares_badge_corner_pull)
+        // leaving the whole 48dp view touchable. Through the same clamp, so the two corners stay
+        // symmetric and a folder's smaller target cannot clip this one either -- see
+        // AresRemoveBadge.cornerPull.
+        val pull = AresRemoveBadge.cornerPullFor(res, touch)
 
         return ImageView(container.context).apply {
             tag = BADGE_TAG

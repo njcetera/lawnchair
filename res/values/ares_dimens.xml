@@ -149,7 +149,7 @@
 
          Only possible now that a tile is its whole cell again: while tiles were inset to make a
          gutter, there was no corner left to move into. -->
-    <dimen name="ares_badge_corner_pull">15dp</dimen>
+    <dimen name="ares_badge_corner_pull">19dp</dimen>
 
     <!-- §14 / §21 edit-mode grid overlay. Both are drawn by AresEditGrid and are meant to read as
          one system: dots mark where things CAN go, the outline marks what an item currently DOES
