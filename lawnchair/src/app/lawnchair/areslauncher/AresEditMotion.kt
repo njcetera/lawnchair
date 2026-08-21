@@ -26,7 +26,23 @@ import kotlin.math.exp
  * | orbit ([AresEditWiggle]) | whole of edit mode, per tile | summed here, via [setOrbit] |
  * | reflow (this file) | during a drag, on **displaced** tiles | summed here, via [displaceTo] |
  * | `ItemTouchHelper` | the dragged tile only, for the drag's life | **exclusive** — the host suspends the float and the layout manager exempts the tile ([AresHomeListView.setFloatSuspendedFor]), so nothing here writes to it at all |
- * | [AresMasonryLayoutManager.animateFromPreviousBounds] | a resize or a removal, 200ms | **exclusive for that tile** — it calls [clearReflow] first and owns the property until it ends. It cannot overlap a drag: its two triggers are affordance taps, and a gesture that starts on an affordance can never become a drag |
+ * | [AresMasonryLayoutManager.animateFromPreviousBounds] | a resize or a removal, 200ms | **contended, not exclusive** — see the note directly below. It cannot overlap a *drag*: its two triggers are affordance taps, and a gesture that starts on an affordance can never become a drag |
+ *
+ * **The repack animation is not an exclusive owner, and this table used to say it was.** It calls
+ * [clearReflow], but that zeroes only `dx/dy/vx/vy` — **the orbit survives**, and
+ * [AresEditWiggle]'s update listener keeps calling [setOrbit] → `apply` → `write` on every frame
+ * for the whole of edit mode. Meanwhile `AresMasonryLayoutManager` writes `translationX/Y`
+ * directly and starts a `ViewPropertyAnimator` on the same property. Both of that animation's
+ * triggers are edit-mode-only, so the float is *guaranteed* to be running when it starts: the two
+ * are always contending, never taking turns.
+ *
+ * In practice the `ViewPropertyAnimator` registers later in `AnimationHandler`'s callback list and
+ * wins the frame, so the visible cost is a ~200ms pause in the float rather than a fight. That is
+ * an observed ordering, not a guarantee, and no ordering in which the wiggle wins has been
+ * demonstrated — which is why this is a corrected comment rather than a code change. If §9D's
+ * repack or §11C's resize is ever seen not to play, start here: the fix is for
+ * `animateFromPreviousBounds` to suspend the float for that tile the way a drag does
+ * ([AresHomeListView.setFloatSuspendedFor]), which is what "exclusive" would actually require.
  * | lift ([AresEditLabel]) | whole of edit mode, per **item view** | summed here, via [setLift] — and it is the one row of this table that writes the item view rather than the holder container, so it shares a view with none of the others |
  *
  * The scale is a separate property with a separate, simpler story: the edit-mode 0.92, the
