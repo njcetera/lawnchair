@@ -314,6 +314,22 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
+    /**
+     * Keeps the edge back GESTURE alive while the home grid is editing.
+     *
+     * Stock excludes the back gesture whenever the launcher sits at NORMAL with nothing floating,
+     * on the reasoning that the home screen has nowhere to go back to — `updateDisallowBack` hands
+     * `SYSTEM_GESTURE_EXCLUSION_RECT` to the framework and the swipe stops being a system gesture
+     * at all. Edit mode is still NORMAL, so the exclusion applied there too and the mode could only
+     * be left with the BACK key, never the gesture. The gesture was not being ignored; it was never
+     * delivered.
+     *
+     * [onStateBack] already does the right thing once a back actually arrives, so this is the whole
+     * fix: stop suppressing it while there is something to dismiss.
+     */
+    override fun aresWantsBackGesture(): Boolean =
+        workspace?.aresHomeList?.isEditMode() == true
+
     override fun onStateBack() {
         // AresLauncher §4: back leaves the home grid's edit mode before anything else. This is the
         // #5 fallback handler in Launcher.getOnBackAnimationCallback(), so an open popup or an

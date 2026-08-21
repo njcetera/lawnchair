@@ -2749,7 +2749,20 @@ public class Launcher extends StatefulActivity<LauncherState>
         mBackPressedHandlers.remove(callback);
     }
 
-    private void updateDisallowBack() {
+    /**
+     * AresLauncher: true while something on the home surface wants the edge back GESTURE to keep
+     * working in a state where stock suppresses it. Overridden by LawnchairLauncher for edit mode.
+     *
+     * <p>Stock excludes the back gesture whenever the launcher is at NORMAL with nothing floating,
+     * on the reasoning that the home screen has nowhere to go back to. Edit mode is still NORMAL,
+     * so the exclusion suppressed the gesture there too and only the BACK key could leave the mode.
+     */
+    protected boolean aresWantsBackGesture() {
+        return false;
+    }
+
+    /** AresLauncher: public so the home surface can refresh it when edit mode toggles. */
+    public void updateDisallowBack() {
         try {
             if (BuildCompat.isAtLeastV()
                 && Flags.enableDesktopWindowingMode()
@@ -2766,7 +2779,8 @@ public class Launcher extends StatefulActivity<LauncherState>
             boolean isSplitSelectionEnabled = isSplitSelectionActive();
             boolean disableBack = getStateManager().getState() == NORMAL
                     && AbstractFloatingView.getTopOpenView(this) == null
-                    && !isSplitSelectionEnabled;
+                    && !isSplitSelectionEnabled
+                    && !aresWantsBackGesture();
             rv.setDisallowBackGesture(disableBack);
         }
     }

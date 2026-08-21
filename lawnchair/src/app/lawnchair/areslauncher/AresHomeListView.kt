@@ -403,6 +403,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // and would otherwise read the previous mode and add none (§6).
         aresAdapter.setEditMode(true)
         applyEditModeVisual()
+        // Let the edge back GESTURE through. Stock suppresses it at NORMAL with nothing floating,
+        // and edit mode is still NORMAL -- so without this the mode can only be left with the BACK
+        // key. See LawnchairLauncher.aresWantsBackGesture.
+        launcher.updateDisallowBack()
     }
 
     /** Leaves edit mode, cancelling any in-flight drag. Safe to call when not in edit mode. */
@@ -425,6 +429,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // their animators would outlive the mode.
         clearWiggles()
         applyEditModeVisual()
+        // Hand the edge back to the system again now that there is nothing here to dismiss.
+        launcher.updateDisallowBack()
         return true
     }
 
