@@ -321,13 +321,69 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private var recyclerViewWidth: Int = 0
 
+    /**
+     * The list we are attached to, held only so [releaseForRemoval] can reach a holder by position.
+     * Null between detach and the next attach.
+     */
+    private var host: RecyclerView? = null
+
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
+        host = recyclerView
         recyclerViewWidth = recyclerView.width
         // The list is typically unmeasured at attach time, so pick the width up on first layout.
         recyclerView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
             recyclerViewWidth = v.width
         }
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        host = null
+    }
+
+    /**
+     * Balances the recyclable counter for the holder at [position] **before** its removal notify.
+     * This is the fix for W1 — a deleted widget that stays on screen forever.
+     *
+     * `setIsRecyclable` is a **counter**, not a flag (`RecyclerView.java:12500-12514`), and
+     * `FLAG_NOT_RECYCLABLE` only clears when it reaches zero. [onCreateViewHolder] calls
+     * `setIsRecyclable(false)` **permanently** on every widget holder, so the count sits at 1 for
+     * the holder's whole life. That is an unbalanced decrement, and RecyclerView's removal path
+     * assumes a balanced one:
+     *
+     * ```
+     * animateDisappearance (RecyclerView.java:4976)
+     *   addAnimatingView(holder)          -> attachViewToParent(view, -1, lp, hidden = true)
+     *   holder.setIsRecyclable(false)     -> count 1 -> 2
+     * ...fade runs, DefaultItemAnimator.animateRemoveImpl leaves alpha back at 1...
+     * ItemAnimatorRestoreListener.onAnimationFinished (RecyclerView.java:13827)
+     *   item.setIsRecyclable(true)        -> count 2 -> 1, so the FLAG STAYS SET
+     *   if (!item.shouldBeKeptAsChild())  -> shouldBeKeptAsChild() is (mFlags & FLAG_NOT_RECYCLABLE) != 0
+     *       removeAnimatingView(...)      -> NEVER REACHED
+     * ```
+     *
+     * So the view is re-attached hidden and never detached. `LayoutManager.getChildCount()`
+     * subtracts hidden views, so [AresMasonryLayoutManager] cannot see it, cannot lay it out and
+     * cannot recycle it — it keeps the bounds it had at deletion until the activity is recreated.
+     *
+     * That single mechanism accounts for every symptom recorded against W1: 17 attached children
+     * against 16 database rows (`dumpsys` walks the real children, hidden ones included); drawn
+     * *behind* everything (the next `fill` re-adds every live child after it, so it sinks to index
+     * 0); cleared only by a reinstall; and unfolded-width tiles surviving a fold, because nothing
+     * ever lays it out again. It also explains why only **widgets** ghost — an icon holder's count
+     * runs 0 -> 1 -> 0, the flag clears, and cleanup happens normally.
+     *
+     * Restoring the count here rather than dropping the item animator keeps §C4's drop-slot
+     * animation and every reorder animation, which are the same `notifyItemMoved` pipeline. The
+     * holder is leaving the adapter anyway, so it has no further use for the opt-out.
+     */
+    private fun releaseForRemoval(position: Int) {
+        val holder = host?.findViewHolderForAdapterPosition(position) ?: return
+        if (holder.itemViewType != TYPE_WIDGET) return
+        // isRecyclable is false exactly when the flag is set. One matching call clears our one
+        // permanent decrement; the animation's own pair then balances to zero on its own.
+        if (!holder.isRecyclable) holder.setIsRecyclable(true)
     }
 
     init {
@@ -438,6 +494,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (isPlaceholder(existing) && !isPlaceholder(info)) {
             launcher.modelWriter.deleteItemFromDatabase(existing, DUPLICATE_WIDGET_REASON)
+            releaseForRemoval(index)
             items.removeAt(index)
             notifyItemRemoved(index)
             return false
@@ -453,7 +510,19 @@ class AresHomeAdapter(private val launcher: Launcher) :
     fun clear() {
         val size = items.size
         if (size == 0) return
+        for (i in 0 until size) releaseForRemoval(i)
         items.clear()
+        // The §C4 gap is a view-level entry with no row behind it, and `items.clear()` does not
+        // reach the field that points at it. Leaving it set orphans the slot: every later guard
+        // then misfires by identity -- `moveDropSlot` finds `from < 0` and returns for the rest of
+        // the drag, `AresHomeDropPreview.onExternalDragOver` still sees `list === grid` so it never
+        // calls `showDropSlot` again, and `take()` returns -1 so the drop falls back to a
+        // re-derived release point instead of the gap the user watched. The trigger is a rebind
+        // landing mid-drag -- `Workspace.removeAllWorkspaceScreens` calls this from
+        // `ModelCallbacks.startBinding`, which a HOME press or a finishing package install can
+        // raise while an app is being dragged out of a folder. Nothing throws and the next drag is
+        // fine, which is the intermittent-with-no-visible-cause shape this project keeps hitting.
+        dropSlot = null
         notifyItemRangeRemoved(0, size)
     }
 
@@ -479,6 +548,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         var removed = false
         for (i in items.indices.reversed()) {
             if (matcher.test(items[i])) {
+                releaseForRemoval(i)
                 items.removeAt(i)
                 notifyItemRemoved(i)
                 removed = true
