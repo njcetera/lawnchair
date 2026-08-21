@@ -1013,6 +1013,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val clearing = child == null
         dropRingAnimator = ValueAnimator.ofFloat(dropRing.progress, target).apply {
             duration = DROP_RING_FADE_MS
+            // Pop the forming shape in with an overshoot so it reads as a folder taking shape;
+            // only on the fade-IN -- an overshoot on the clear would dip the ring negative and
+            // flash it back before it vanished.
+            if (!clearing) interpolator = OvershootInterpolator(DROP_RING_FORM_TENSION)
             // The reference is dropped from the update listener rather than an end listener:
             // cancelling an animator still runs its end listener, so a fade-out cancelled by a new
             // fade-in would clear the target that had just been set.
@@ -1937,6 +1941,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
         /** Overshoot on the arrival pop. Enough to feel like a landing, short of a bounce. */
         const val FOLDER_CREATED_TENSION = 2.0f
+
+        /**
+         * Overshoot on the drop-ring's forming pop as the dwell arms. Matched to
+         * [FOLDER_CREATED_TENSION] so the shape that grows under the finger and the tile that pops
+         * in on release are the same gesture.
+         */
+        const val DROP_RING_FORM_TENSION = 2.0f
 
         /**
          * How long the arrival pop runs.

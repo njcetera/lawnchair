@@ -191,10 +191,17 @@ object AresEditGrid {
             if (lastRow < firstRow) return
 
             paint.alpha = (progress * DOT_ALPHA * 255).toInt()
+            // The perimeter columns sit on the grid's outer edges: col 0 at x=0 (paddingLeft is a
+            // deliberate 0) and col `columns` at ~the view's right edge, so half of each edge dot
+            // falls outside the view bounds and is clipped. Nudge the centre inward by the radius
+            // so the whole dot shows. Only X is clamped: it does not scroll, whereas clamping Y
+            // would pin an off-screen perimeter row to the viewport edge as the grid scrolls.
+            val maxX = parent.width - radius
             for (row in firstRow..lastRow) {
                 val y = (originY + row * cellH).toFloat()
                 for (col in 0..columns) {
-                    c.drawCircle((originX + col * cellW).toFloat(), y, radius, paint)
+                    val x = (originX + col * cellW).toFloat().coerceIn(radius, maxX)
+                    c.drawCircle(x, y, radius, paint)
                 }
             }
         }
@@ -262,32 +269,36 @@ object AresEditGrid {
             // Layout bounds, not the drawn ones: the tile is wiggling, and a ring that wobbled with
             // it would read as another moving object rather than as a target that has locked on.
             val inset = stroke.strokeWidth
-            fill.alpha = (progress * FILL_ALPHA * 255).toInt()
-            stroke.alpha = (progress * STROKE_ALPHA * 255).toInt()
-            c.drawRoundRect(
-                view.left + inset,
-                view.top + inset,
-                view.right - inset,
-                view.bottom - inset,
-                radius,
-                radius,
-                fill,
-            )
-            c.drawRoundRect(
-                view.left + inset,
-                view.top + inset,
-                view.right - inset,
-                view.bottom - inset,
-                radius,
-                radius,
-                stroke,
-            )
+            // Alpha tracks progress but clamped: the fade-in uses an overshoot interpolator (see
+            // AresHomeListView.setFolderDropTarget), so `progress` can ride briefly past 1.
+            val a = progress.coerceIn(0f, 1f)
+            fill.alpha = (a * FILL_ALPHA * 255).toInt()
+            stroke.alpha = (a * STROKE_ALPHA * 255).toInt()
+            // Grow the shape from FORM_FROM to full as it arms, scaled about the tile's centre, so
+            // it reads as a folder taking shape under the finger rather than a highlight switching
+            // on -- the owner's ask, "generate the folder before letting go". With the overshoot
+            // interpolator `progress` rides a little past 1 and settles, the same pop the release
+            // plays (AresHomeListView.popCreated), so the hold and the drop are one motion.
+            val scale = FORM_FROM + (1f - FORM_FROM) * progress
+            val cx = (view.left + view.right) / 2f
+            val cy = (view.top + view.bottom) / 2f
+            val halfW = (view.width / 2f - inset) * scale
+            val halfH = (view.height / 2f - inset) * scale
+            val l = cx - halfW
+            val t = cy - halfH
+            val r = cx + halfW
+            val b = cy + halfH
+            c.drawRoundRect(l, t, r, b, radius, radius, fill)
+            c.drawRoundRect(l, t, r, b, radius, radius, stroke)
         }
 
         private companion object {
             /** Enough to read as "this one", faint enough to leave the folder's preview visible. */
             const val FILL_ALPHA = 0.18f
             const val STROKE_ALPHA = 0.85f
+
+            /** Scale the forming shape starts at; grows to 1 as the dwell arms. Matches the pop. */
+            const val FORM_FROM = 0.55f
         }
     }
 
