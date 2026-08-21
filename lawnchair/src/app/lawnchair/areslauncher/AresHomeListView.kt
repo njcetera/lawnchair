@@ -445,7 +445,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             child.animate().scaleX(tileScale(child)).scaleY(tileScale(child))
                 .setDuration(EDIT_SCALE_MS).start()
             setItemClickable(child, !editMode)
-            syncAffordances(child)
+            syncEditVisuals(child)
             syncWiggle(child)
         }
         animateGridDots()
@@ -729,7 +729,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * Note they ride on the holder container, which is also what the edit-mode scale animates — so
      * they transform with the item rather than sitting still over it.
      */
-    private fun syncAffordances(child: View) {
+    private fun syncEditVisuals(child: View) {
         val container = child as? FrameLayout ?: return
         // Deliberately no early return on NO_POSITION. A row that has left the adapter -- removed,
         // or mid-animation on its way out -- is still an attached child carrying our × and chevron,
@@ -737,7 +737,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // reported "the x won't leave and the resize button on one won't leave but neither are
         // actually editable", with the state dump confirming mState:Normal. getOrNull(-1) resolves
         // to a null item, which the adapter already reads as "this row carries nothing".
-        aresAdapter.syncAffordances(container, getChildAdapterPosition(child))
+        aresAdapter.syncEditVisuals(container, getChildAdapterPosition(child))
     }
 
     override fun onChildAttachedToWindow(child: View) {
@@ -754,7 +754,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // onBindViewHolder running. Such a row kept whatever badge it had when it left, which
         // outlived the mode in both directions -- a stale × after exiting, and no × at all on a row
         // that scrolled in after editing began.
-        syncAffordances(child)
+        syncEditVisuals(child)
     }
 
     override fun onChildDetachedFromWindow(child: View) {
@@ -766,6 +766,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // That view carries the drag's own translation and no float, so zeroing it here would
         // snap it off the finger.
         if (child !== floatSuspendedFor) AresEditWiggle.reset(child)
+        // Same guard, same reason: the label treatment moves the ICON inside the tile, and the tile
+        // in the user's hand should not have its icon jump back up mid-drag if an auto-scroll ever
+        // detaches it. Everything else gives its caption back here, so nothing recycles carrying a
+        // half-applied one. onChildAttachedToWindow re-applies it if the row comes back.
+        if (child !== floatSuspendedFor) AresEditLabel.reset(child)
     }
 
     /**
@@ -1451,6 +1456,33 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         super.onLayout(changed, l, t, r, b)
         // Widget providers can only be told their box once the layout manager has assigned one.
         aresAdapter.reportPendingWidgetSizes()
+        // And the label lift is measured from the cell, so it is stale for exactly the same reason:
+        // a row bound or attached mid-mode has no height yet, and folding moves every cell's centre.
+        reassertLabelLift()
+    }
+
+    /**
+     * Re-measures the edit-mode label lift on every attached row.
+     *
+     * Called after layout and after each scroll — the two moments a row can acquire, or change, the
+     * height the lift is computed from. Both run before the frame is drawn, so a row that took a
+     * lift of zero at attach is corrected without ever being seen off-centre.
+     *
+     * Cheap by construction: it early-outs when not editing, and [AresEditLabel.reassert] writes
+     * nothing unless the measured value has actually moved.
+     */
+    private fun reassertLabelLift() {
+        if (!editMode) return
+        for (i in 0 until childCount) {
+            AresEditLabel.reassert(getChildAt(i))
+        }
+    }
+
+    override fun onScrolled(dx: Int, dy: Int) {
+        super.onScrolled(dx, dy)
+        // A scroll attaches and lays out rows without a layout pass (AresMasonryLayoutManager.fill
+        // is driven straight from scrollVerticallyBy), so onLayout above never sees them.
+        reassertLabelLift()
     }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
