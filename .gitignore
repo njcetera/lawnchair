@@ -20,3 +20,8 @@ __pycache__
 .vscode
 .fleet
 lawnWithQuickstep/release
+
+# Agent worktrees and local Claude Code state. Never publishable, and a stray
+# `git add -A` here would commit an entire nested worktree -- which has already
+# happened once with another agent's unfinished work.
+.claude/
