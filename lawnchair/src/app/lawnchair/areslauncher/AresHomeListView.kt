@@ -895,6 +895,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             if (x < child.left || x >= child.right || y < child.top || y >= child.bottom) continue
             val info = aresAdapter.itemAt(getChildAdapterPosition(child))
             if (info == null || (excludeId != ItemInfo.NO_ID && info.id == excludeId)) continue
+            // The §C4 drop slot is a hole. It must never be a dwell target -- otherwise hovering
+            // over the gap the drag itself opened would offer to make a folder out of nothing --
+            // and it must never be the tile a drop resolves onto.
+            if (aresAdapter.isDropSlot(info)) continue
             return child
         }
         return null

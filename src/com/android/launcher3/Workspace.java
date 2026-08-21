@@ -150,6 +150,7 @@ import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
 import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.areslauncher.AresFolderDrop;
 import app.lawnchair.areslauncher.AresHomeDrop;
+import app.lawnchair.areslauncher.AresHomeDropPreview;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -3185,6 +3186,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // It deliberately does NOT use mDragViewVisualCenter, which on this launcher lands 228px
         // above the finger; see AresFolderDrop#onExternalDragOver for the measurement.
         AresFolderDrop.onExternalDragOver(mLauncher, d);
+        // AresLauncher §C4: and the grid opens a space for it while it is still held, the same way
+        // an in-grid drag does. Also observation-only from stock's point of view -- it adds an
+        // entry to our own adapter and changes nothing below this line.
+        AresHomeDropPreview.onExternalDragOver(mLauncher, d);
 
         final View child = (mDragInfo == null) ? null : mDragInfo.cell;
         if (setDropLayoutForDragObject(d, mDragViewVisualCenter[0], mDragViewVisualCenter[1])) {

@@ -271,6 +271,9 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     /** AresLauncher: see {@link #aresIsPreviewingDrag()}. */
     private boolean mAresPreviewingDrag = false;
 
+    /** AresLauncher: see {@link #getContentAreaHeight()} (§D9). 0 when no drag is holding it. */
+    private int mAresDragContentHeight = 0;
+
     private boolean mItemAddedBackToSelfViaIcon = false;
     private boolean mIsEditingName = false;
 
@@ -532,7 +535,11 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
             // LC-Note: Do not remove item
             return;
         }
-        
+
+        // AresLauncher §D9: remember the height this folder has RIGHT NOW, before removeItem
+        // below takes the dragged icon out of the page. See getContentAreaHeight().
+        mAresDragContentHeight = getContentAreaHeight();
+
         mContent.removeItem(mCurrentDragView);
         mItemsInvalidated = true;
 
@@ -565,6 +572,11 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
             completeDragExit();
         }
         mIsDragInProgress = false;
+        // AresLauncher §D9: the drag is over however it ended -- dropped, cancelled, or the item
+        // left for the home grid -- so the folder may size itself from its contents again. This is
+        // the terminal hook rather than onDropCompleted because DragController calls it for every
+        // outcome, including a cancel that never reaches a drop target.
+        mAresDragContentHeight = 0;
         mActivityContext.getDragController().removeDragListener(this);
     }
 
@@ -1710,9 +1722,55 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mBackground.setBounds(0, 0, width, height);
     }
 
+    /**
+     * The height of the icon grid, which AresLauncher does not let shrink mid-drag (§D9).
+     *
+     * <p>Reported: <em>with three items in a folder, starting to move one in edit mode sends the
+     * folder name from the bottom to the centre.</em> Measured on emulator-5554, dragging the third
+     * icon — the only occupant of the second row — out of a three-item folder:
+     *
+     * <pre>
+     * before  Folder [26,315]-[470,973]  content [26,315]-[470,836]  name y=878
+     * mid-drag Folder [26,315]-[470,973]  content [26,315]-[470,605]  name y=647
+     * </pre>
+     *
+     * <p>The name moved 231px, exactly one cell row, and landed 332px below the folder's top and
+     * 273px above its bottom — the vertical centre. Nothing repositioned the name: the whole chain
+     * is layout.
+     *
+     * <ol>
+     *   <li>{@link #onDragStart} calls {@code mContent.removeItem}, so the dragged icon stops being
+     *       a child of the page.
+     *   <li>{@link CellLayout#getDesiredHeightForOccupiedRows()} counts <em>child views</em>, so
+     *       losing the last row's only occupant drops the content by a row.
+     *   <li>The folder is a vertical {@code LinearLayout} with default TOP gravity, so the footer —
+     *       and the name in it — is laid out immediately under the content and follows it up.
+     *   <li>The folder's own box does <em>not</em> follow, because
+     *       {@code BaseDragLayer.onLayout} lays a {@code customPosition} child at {@code lp.height},
+     *       which {@link #centerAboutIcon()} fixed when the folder opened.
+     * </ol>
+     *
+     * <p>Which row the drag starts from decides whether it shows at all: lifting an icon that is
+     * not alone on the last row leaves a hole, the row stays occupied, and nothing moves. That is
+     * why a two-item fixture cannot reproduce this, and why dragging the first of three cannot
+     * either — both were measured at 0px before the third was tried.
+     *
+     * <p>Holding the pre-drag height is the fix rather than re-running {@code centerAboutIcon()},
+     * because the box must not resize under the finger either; and it makes {@link
+     * #getFolderHeight()} agree with the {@code lp.height} the folder is actually laid out at for
+     * the duration, which is what {@code FolderAnimationManager} wants from it as well.
+     *
+     * <p>{@code Math.max} rather than an override, and the preview wins outright: a dwell that
+     * opens this folder for an incoming icon must still be able to GROW it (§B4), which
+     * {@link #aresIsPreviewingDrag()} does through {@code FolderPagedView.getDesiredHeight}.
+     * App-drawer folders never reach the freeze at all — {@link #onDragStart} returns before it.
+     */
     protected int getContentAreaHeight() {
         int height = Math.min(getMaxContentAreaHeight(),
                 mContent.getDesiredHeight());
+        if (mAresDragContentHeight > 0 && !aresIsPreviewingDrag()) {
+            height = Math.max(height, mAresDragContentHeight);
+        }
         return Math.max(height, MIN_CONTENT_DIMEN);
     }
 
