@@ -118,3 +118,5 @@ include ':concurrent'
 //include ':compose'
 include ':modules:widgetpicker'
 
+
+include ":ares-tests"

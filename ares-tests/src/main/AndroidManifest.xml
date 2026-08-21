@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The launcher's TestInformationProvider is declared with
+      android:readPermission/writePermission="android.permission.WRITE_SECURE_SETTINGS".
+      That permission's protectionLevel includes `development`, so `pm grant` can hand it to an
+      app that DECLARES it, which is why this line exists. AresLauncherDriver does the grant.
+    -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+
+    <!--
+      Package visibility. Without this the test process cannot see the launcher at all:
+      `PackageManager.resolveActivity(ACTION_MAIN/CATEGORY_HOME)` returned
+      com.android.settings/.FallbackHome and `resolveContentProvider("<launcher>.TestInfo", ...)`
+      returned null. Both measured on emulator-5554 against targetSdk 37.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+</manifest>
