@@ -102,7 +102,18 @@ object AresEditWiggle {
      */
     fun start(view: View, index: Int): ValueAnimator? {
         if (!ValueAnimator.areAnimatorsEnabled()) {
-            reset(view)
+            // clearFloat, NOT reset. The view has not stopped editing -- it is editing without
+            // motion -- and reset() is the teardown funnel: it calls AresEditMotion.clear, which
+            // drops the whole Motion entry INCLUDING §26's liftY.
+            //
+            // That was S12. Callers re-enter this path on every pre-draw (a null return means the
+            // caller never records an animator, so its "already running" early-out never fires),
+            // and AresEditLabel declines to re-write the lift because its own state still says it
+            // applied one. Steady state was: label hidden, icon sitting high in the cell, empty
+            // band underneath -- exactly what the centring exists to prevent. Only reachable at
+            // animator_duration_scale=0, which is how the harness runs, so every folder journey
+            // asserting §26 centring was asserting against the wrong state.
+            clearFloat(view)
             return null
         }
         val radius = TypedValue.applyDimension(
@@ -158,6 +169,23 @@ object AresEditWiggle {
         // -- a recycled row, a detached child, the mode ending -- and a spring left holding a
         // displacement would keep writing to whatever item was bound into the view next.
         AresEditMotion.clear(view)
+        view.rotation = 0f
+    }
+
+    /**
+     * Clears only what the float itself writes — the orbit and the tilt.
+     *
+     * The narrow counterpart to [reset], for a view that is **still editing** but will not be
+     * floating: animators are off. It must leave every other contribution alone, because
+     * [AresEditMotion] sums them and two of them belong to other owners — §26's lift, written by
+     * [AresEditLabel], and the reflow spring. Using [reset] here is what made S12 a functional
+     * defect rather than wasted work.
+     *
+     * Zeroing rather than skipping matters for a recycled row: the view may arrive still carrying
+     * the orbit of whatever was bound into it last.
+     */
+    private fun clearFloat(view: View) {
+        AresEditMotion.setOrbit(view, 0f, 0f)
         view.rotation = 0f
     }
 }
