@@ -368,11 +368,18 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * cannot recycle it — it keeps the bounds it had at deletion until the activity is recreated.
      *
      * That single mechanism accounts for every symptom recorded against W1: 17 attached children
-     * against 16 database rows (`dumpsys` walks the real children, hidden ones included); drawn
-     * *behind* everything (the next `fill` re-adds every live child after it, so it sinks to index
-     * 0); cleared only by a reinstall; and unfolded-width tiles surviving a fold, because nothing
-     * ever lays it out again. It also explains why only **widgets** ghost — an icon holder's count
-     * runs 0 -> 1 -> 0, the flag clears, and cleanup happens normally.
+     * against 16 database rows (`dumpsys` walks the real children, hidden ones included); cleared
+     * only by a reinstall; and unfolded-width tiles surviving a fold, because nothing ever lays it
+     * out again. It also explains why only **widgets** ghost — an icon holder's count runs
+     * 0 -> 1 -> 0, the flag clears, and cleanup happens normally.
+     *
+     * One earlier sentence here claimed the ghost "sinks to index 0" and draws *behind* everything.
+     * **Measured wrong by the §27 verifier**: the ghost sits as the LAST direct child (index 30 of
+     * 30 in its run) and draws ON TOP of the live widget that repacks into its cell — the
+     * screenshot shows the deleted widget rendered over the live one, × badge and all. The owner's
+     * "in the background" reading most plausibly came from the ghost's translucency (verifier's
+     * inference, flagged as such). The mechanism above is unaffected; that explanatory sentence
+     * was.
      *
      * Restoring the count here rather than dropping the item animator keeps §C4's drop-slot
      * animation and every reorder animation, which are the same `notifyItemMoved` pipeline. The
