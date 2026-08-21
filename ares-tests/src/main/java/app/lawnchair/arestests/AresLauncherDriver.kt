@@ -255,6 +255,16 @@ class AresLauncherDriver {
         override fun toString() = "$title(lift=$stateLift actual=$actualTy at=$screenX,$screenY)"
     }
 
+    /**
+     * Whether the §C4 drop slot is currently in the adapter. The C4 observable.
+     *
+     * The slot is a real adapter entry carrying `DROP_SLOT_ID` = `Int.MIN_VALUE`, so it shows up in
+     * `ares-home-order` like anything else. That is the point of the design: the gap is expressed
+     * in the ONE position model the grid has -- an ordered sequence -- rather than drawn as a second
+     * parallel layout that agrees with the packer only by luck.
+     */
+    fun hasDropSlot(): Boolean = homeOrder().any { it.startsWith("${Int.MIN_VALUE}/") }
+
     /** Number of `DragView`s in the DragLayer. The D4 observable: a bare hold must produce none. */
     fun dragViewCount(): Int = folderMetrics()
         .firstOrNull { it.startsWith("folder|") }
