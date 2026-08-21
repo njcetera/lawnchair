@@ -674,6 +674,8 @@ object AresFolderDrop {
         Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id}")
         list.post {
             list.aresAdapter.removeItems { it.id == item.id }
+            // As in createFolder: this lands after the drag, so spring the tiles closing the gap.
+            list.animateNextRelayout()
             AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
         }
         return true
@@ -788,6 +790,9 @@ object AresFolderDrop {
             if (sourceAt in 0 until at) at--
             adapter.removeItems { it.id == targetInfo.id || it.id == item.id }
             adapter.addItemAt(folderInfo, at)
+            // Spring the tiles that shift to close the two vacated slots, rather than snapping
+            // them: this post runs after the drag ended, so the drag-time reflow is already off.
+            list.animateNextRelayout()
             AresHomeReorder.persistOrder(launcher, adapter.snapshot())
             // The visible answer to "what just happened". Dropping into an EXISTING folder already
             // animates -- addFolderContent refreshes the icon's preview with animate = true -- and

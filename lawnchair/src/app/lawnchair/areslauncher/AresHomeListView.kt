@@ -288,6 +288,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     /**
+     * Animate the next relayout instead of snapping it — for a structural change that lands AFTER
+     * a drag has ended.
+     *
+     * Creating a folder, or merging an icon into one, runs from `list.post` off
+     * `ItemTouchHelper`'s `clearView`; by then [setReorderInProgress] has cleared the masonry's
+     * `reflowActive`, so the tiles that shift to close the vacated slots would snap to their new
+     * positions with no motion — the owner's report, "all the remaining apps jump to their new
+     * positions instead of doing a transition animation". This is the same one-shot
+     * animate-don't-snap path [removeFromHome] and the widget resize already use; the caller
+     * invokes it right after its adapter mutation, before the frame lays out.
+     */
+    fun animateNextRelayout() {
+        masonry.animateNextLayout()
+        masonry.invalidatePacking()
+    }
+
+    /**
      * Ends a resize: writes [target], or puts the widget back to [from].
      *
      * `persistSize` is the only writer, and it reallocates a legal `cellX/cellY` for the new
