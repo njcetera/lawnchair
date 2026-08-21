@@ -451,7 +451,22 @@ object AresFolderDrop {
             clear()
             return done
         }
-        if (!armed) return false
+        // clear(), not a bare return. Every other exit from this function clears; this one did not,
+        // and it is the one the COMMON case takes -- a drop that never armed a dwell.
+        //
+        // clear() -> clearTarget() is what removes the pending `dwellElapsed` callback. Left
+        // posted, it fires up to DWELL_MS after the drag is over, with `grid` and `candidate` still
+        // populated and no in-progress drag to guard against: arm() then raises a drop ring around
+        // a tile nobody is dragging onto (nothing takes it down again, setFolderDropTarget(null)
+        // having already run), or opens a folder by itself with a phantom empty slot in it. It
+        // self-heals on the next drag, so it presents as three unrelated intermittent reports
+        // rather than one bug.
+        //
+        // Everyone decelerates before releasing, so a move within the last DWELL_MS is the norm.
+        if (!armed) {
+            clear()
+            return false
+        }
         val list = grid
         val view = candidate
         val info = candidateInfo
