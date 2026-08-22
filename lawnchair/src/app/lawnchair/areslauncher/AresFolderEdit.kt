@@ -13,6 +13,7 @@ import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.folder.Folder
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.util.MultiTranslateDelegate.INDEX_REORDER_BOUNCE_OFFSET
 import com.android.launcher3.util.MultiTranslateDelegate.INDEX_REORDER_PREVIEW_OFFSET
 
 /**
@@ -99,6 +100,50 @@ private const val CELL_TAG = "ares_folder_edit_cell"
     }
 
     /**
+     * The folder behind [folder] has begun its close animation, and the grid is still editing.
+     *
+     * The close animation scales the whole folder *content* down into the folder-icon preview; it
+     * does **not** write per-icon translation. Our §26 lift and the wiggle live on exactly the
+     * per-icon channel ([INDEX_REORDER_BOUNCE_OFFSET]), so an icon left lifted rides the scale down
+     * and lands `lift * scale` px below where the preview drawable is about to draw — then
+     * [Session.stop] zeroes it the instant the animation ends. That one-frame handoff is the owner's
+     * "the small icons flicker, re-render, and move to their expected spots once the close animation
+     * completes."
+     *
+     * Clearing the lift and wiggle *now*, at close-start, drops every icon back to its non-edit
+     * resting position — which is precisely the layout a normal, seamless folder close scales — and
+     * setting `closing` stops [Session.sync] from re-asserting them on the next pre-draw. Called from
+     * `Folder.animateClosed`, before the animator set is built, so the animation begins from the
+     * cleared positions. A no-op when nothing is editing this folder.
+     */
+    @JvmStatic
+    fun onClosing(folder: Folder) {
+        session?.takeIf { it.folder === folder }?.onClosing()
+    }
+
+    /**
+     * The folder has finished closing (`Folder.closeComplete`), and this runs at the very end of it.
+     *
+     * closeComplete un-hides the folder-icon caption on its way out —
+     * `mFolderIcon.mFolderName.setTextVisibility(true)` — on the most ordinary path there is, since
+     * §18 makes tapping a folder the one tap edit mode does not make inert. The session's own restore
+     * hook can only *post* the re-hide, because it fires from `removeView` several lines earlier than
+     * that write and a synchronous re-assert there would be overwritten by it (see
+     * `AresHomeListView.reassertLabels`). A posted re-hide lands a frame later — the caption flash the
+     * owner sees when a folder closes mid-edit.
+     *
+     * Called from the end of closeComplete, this runs *after* the un-hide, in the same frame, so the
+     * caption is re-hidden before it is ever drawn. `reassertLabels` early-outs when the grid is not
+     * editing, so this is a no-op on the close that happens *because* edit mode ended, and the
+     * ordinary restore stands. No session needed — it is already gone by now — so it goes through the
+     * launcher directly, exactly as the posted path does.
+     */
+    @JvmStatic
+    fun onClosed(folder: Folder) {
+        Launcher.getLauncher(folder.context).workspace?.aresHomeList?.reassertLabels()
+    }
+
+    /**
      * How long [folder] should wait over a new target position before rearranging, in ms.
      *
      * Called from `Folder.onDragOver` in place of the bare `REORDER_DELAY`. Returns the Ares value
@@ -177,6 +222,12 @@ private const val CELL_TAG = "ares_folder_edit_cell"
         private val wiggles = mutableMapOf<View, ValueAnimator>()
 
         /**
+         * Set once the folder starts its close animation. [sync] then stops re-asserting the lift
+         * and wiggle it just cleared, so the close scales clean, non-edit positions. @see onClosing.
+         */
+        private var closing = false
+
+        /**
          * Turns a plain touch-and-drag on any of this folder's icons into a folder drag.
          *
          * One instance for the session rather than one per icon: it holds only per-gesture state,
@@ -239,6 +290,22 @@ private const val CELL_TAG = "ares_folder_edit_cell"
             launcher.workspace?.aresHomeList?.let { list -> list.post { list.reassertLabels() } }
         }
 
+        /**
+         * Drops the edit chrome the instant the folder starts closing, so the close animation
+         * scales non-edit positions. @see AresFolderEdit.onClosing for the full rationale.
+         *
+         * Stopping each wiggle clears its icon's lift and orbit through [AresEditWiggle.stop] ->
+         * [AresEditMotion.clear], returning the icon to where a stock close expects it. The frost
+         * cells are only hidden, not removed: [stop] still walks `cells` at closeComplete to restore
+         * every icon's label and launch listener, which a recycled BubbleTextView must get back.
+         */
+        fun onClosing() {
+            closing = true
+            for ((view, animator) in wiggles) AresEditWiggle.stop(view, animator)
+            wiggles.clear()
+            for (cell in cells.values) cell.visibility = View.INVISIBLE
+        }
+
         override fun onPreDraw(): Boolean {
             sync()
             return true
@@ -260,6 +327,10 @@ private const val CELL_TAG = "ares_folder_edit_cell"
          * that actually differ, so running it every frame costs a walk and nothing else.
          */
         private fun sync() {
+            // Once the folder is closing, its edit chrome is already cleared and must stay cleared:
+            // re-asserting the lift here would put the icons back above the preview for the rest of
+            // the close animation, which is the flicker onClosing exists to remove.
+            if (closing) return
             val icons = folder.iconsInReadingOrder
             val live = mutableSetOf<View>()
 
@@ -347,7 +418,6 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // and re-adds the icons, and a recycled BubbleTextView comes back without it.
                 // setOnTouchListener is idempotent for a listener already installed.
                 icon.setOnTouchListener(dragStarter)
-                android.util.Log.d("AresFolderEdit", "starter installed on ${System.identityHashCode(icon)}")
 
                 // A tap inside an open folder must not launch anything either (§4/§18: "tapping an
                 // item in edit mode does NOT launch it"). The grid has done this since the mode

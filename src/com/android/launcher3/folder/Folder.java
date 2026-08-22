@@ -1327,6 +1327,12 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
             return;
         }
 
+        // If the grid is editing, drop this folder's lift and wiggle before the close animation is
+        // built, so it scales non-edit icon positions into the preview instead of lifted ones. See
+        // AresFolderEdit.onClosing — without this the icons flicker to their spots when the close
+        // completes and the edit chrome is finally torn down.
+        AresFolderEdit.onClosing(this);
+
         mContent.completePendingPageChanges();
         mContent.snapToPageImmediately(mContent.getDestinationPage());
 
@@ -1418,6 +1424,12 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // folder is dismissed without running the close animation (e.g. launching an app), those
         // effects are not cleared by FolderScrimAnimationListener — restore them here.
         restoreLauncherAfterFolderDismissed();
+
+        // We just ran mFolderIcon.mFolderName.setTextVisibility(true) above. If the grid is still
+        // editing, re-hide that caption now, in this same frame, so it is never drawn visible — the
+        // posted re-assert from AresFolderEdit's detach lands a frame later and flashes. No-op when
+        // not editing.
+        AresFolderEdit.onClosed(this);
     }
 
     /**
