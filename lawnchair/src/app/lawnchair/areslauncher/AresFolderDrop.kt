@@ -513,6 +513,14 @@ object AresFolderDrop {
         candidate = null
         candidateInfo = null
         candidateKind = Kind.NONE
+        // Failsafe reset for the live-create latch (adversarial re-review 2026-08-21, N1). commitDrop
+        // clears it on the normal UP path, but if the armed in-grid drag ends via a NON-UP clearView
+        // (a system CANCEL racing the synthetic UP, or dragGestureEnd already latched non-UP),
+        // commitDrop never runs. A stuck flag forces getAnimationDuration=0 on EVERY later grid drop
+        // (all reorders lose their settle) and commitDrop's liveArming branch does not re-check the
+        // gate -- so it would hijack the next drop even with live-create OFF. Resetting here, the
+        // fundamental teardown that every non-UP end routes through, makes it invariant-by-construction.
+        liveArming = false
     }
 
     private fun clear() {
@@ -521,7 +529,7 @@ object AresFolderDrop {
         // that reaches here: a CANCEL, a new drag, or the end of one. The user's rule is that only
         // a manual release adds an item to a folder.
         AresFolderPreview.close()
-        clearTarget()
+        clearTarget() // also resets the live-create latch (see clearTarget, N1)
         grid = null
         dragged = null
     }
@@ -601,10 +609,16 @@ object AresFolderDrop {
             liveArming = false
             val list = grid
             val target = candidateInfo
-            val done = if (list != null && target != null && candidateKind == Kind.CREATE) {
-                createLiveFolder(launcher, list, target, item) != null ||
-                    createFolder(launcher, list, target, item)
-            } else {
+            val done = try {
+                list != null && target != null && candidateKind == Kind.CREATE &&
+                    (createLiveFolder(launcher, list, target, item) != null ||
+                        createFolder(launcher, list, target, item))
+            } catch (t: Throwable) {
+                // A double-fault -- createLiveFolder AND the createFolder fallback both throwing at
+                // the same model write -- must not propagate out of clearView and skip the clear()
+                // below, which would leak the dwell state (N3, adversarial re-review 2026-08-21).
+                // Consume it; the pair simply does not fold.
+                Log.e(TAG, "live-create: both commit paths failed on ${target?.id}", t)
                 false
             }
             clear()
@@ -990,13 +1004,11 @@ object AresFolderDrop {
         try {
             folder.animateOpen()
         } catch (t: Throwable) {
-            // Geometry not settled (preview background drawn on a later pass): retry, don't re-enter
-            // animateOpen after a partial open on the last attempt -- leave it closed instead.
-            if (attemptsLeft > 0) {
-                list.postOnAnimation { openLiveFolderWhenReady(launcher, list, folderId, attemptsLeft - 1) }
-            } else {
-                Log.w(TAG, "live-create: folder $folderId could not open (${t.message}); left closed")
-            }
+            // Do NOT retry animateOpen after a throw: a partial open (mIsOpen set, added to the
+            // DragLayer, then the animator math threw) would be re-entered and double-open (N4,
+            // adversarial re-review 2026-08-21). The +150ms first attempt is past the geometry-settle
+            // point in practice; on the rare throw leave a normal CLOSED, tappable 2-item folder.
+            Log.w(TAG, "live-create: folder $folderId could not open (${t.message}); left closed")
             return
         }
         if (list.isEditMode()) AresFolderEdit.attach(launcher, gridIcon)
