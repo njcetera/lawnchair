@@ -173,6 +173,19 @@ object AresFolderDrop {
     fun isLiveCreateEnabled(): Boolean = liveCreateEnabled
 
     /**
+     * True between a live-create dwell arming and the folder being formed: the window in which the
+     * seam has fired a synthetic UP to end the in-grid drag and is waiting for `clearView ->
+     * commitDrop` to build the folder. The reorder Callback returns a 0-length settle while this is
+     * set so the end is instant, and `commitDrop` routes to `createLiveFolder` rather than the
+     * ordinary create-on-release.
+     */
+    private var liveArming = false
+
+    /** See [liveArming]. Read by [AresHomeReorder.Callback.getAnimationDuration]. */
+    @JvmStatic
+    fun isLiveArming(): Boolean = liveArming
+
+    /**
      * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
      * `DragController` drag from the app list, the widget picker or another folder.
      *
@@ -448,31 +461,26 @@ object AresFolderDrop {
                 return
             }
         }
-        // §25 live-create: dwelling an icon on an icon forms the real folder NOW and opens it,
-        // rather than drawing a ring and creating on release. Gated OFF by default; the held app's
-        // in-grid drag ends as createLiveFolder removes its row, and the user re-grabs the app in
-        // the open folder to pull it back out (which dissolves the 1-item folder). Full mechanism
-        // and risks in live-create-enter-handoff-design.md. Wrapped so ANY failure falls straight
-        // back to the ring + create-on-release, which is never touched.
-        if (liveCreateEnabled && candidateKind == Kind.CREATE && fromGrid) {
-            val target = candidateInfo
-            val held = dragged
-            if (target != null && held != null) {
-                val fi = try {
-                    createLiveFolder(list.launcher, list, target, held)
-                } catch (t: Throwable) {
-                    Log.e(TAG, "live-create threw; falling back to the ring", t)
-                    null
-                }
-                if (fi != null) {
-                    Log.i(TAG, "live-create armed: folder ${fi.id} from ${target.id}+${held.id}")
-                    // The dwell's job is done -- the folder and the exit handoff own the gesture
-                    // from here. Neutralise our own state so the in-grid drag's end cannot also run
-                    // createFolder on the same pair (a double create). clear() drops the ring too.
-                    clear()
-                    return
-                }
-            }
+        // §25 live-create: dwelling an icon on an icon forms the real folder mid-hold and opens it,
+        // rather than drawing a ring and creating on release. Gated OFF by default.
+        //
+        // The seam ENDS the in-grid drag cleanly FIRST, then forms the folder from the ended drag --
+        // it does NOT remove the dragged row from under a still-active ItemTouchHelper drag. A
+        // synthetic UP (with the Callback's settle forced to 0 while `liveArming`, see
+        // getAnimationDuration) ends ITH, so `clearView -> commitDrop` runs `createLiveFolder` on a
+        // fully-ended drag; the per-frame dwell feed (`onChildDraw`) stops the instant the drag
+        // leaves the active state, so nothing re-arms behind the open folder. Corrections that drove
+        // this (adversarial review 2026-08-21) are in live-create-enter-handoff-design.md.
+        if (liveCreateEnabled && candidateKind == Kind.CREATE && fromGrid &&
+            candidateInfo != null && dragged != null
+        ) {
+            liveArming = true
+            val now = android.os.SystemClock.uptimeMillis()
+            list.dispatchSyntheticHandoffEvent(
+                android.view.MotionEvent.ACTION_UP, now, now, anchorX, anchorY,
+            )
+            Log.i(TAG, "live-create arming: ended the in-grid drag to form a folder on ${candidateInfo?.id}")
+            return
         }
         list.setFolderDropTarget(view)
         Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; reflow frozen, target armed")
@@ -584,6 +592,24 @@ object AresFolderDrop {
      */
     @JvmStatic
     fun commitDrop(launcher: Launcher, item: ItemInfo): Boolean {
+        // §25 live-create takes priority over every ordinary drop resolution below: the synthetic UP
+        // that ended the in-grid drag lands here, and [item] is the app that was being dragged. Form
+        // the real folder from the ended drag ([createLiveFolder] opens it + attaches the edit
+        // session so it can be dragged back apart); if it declines, fall back to the ordinary
+        // create-on-release so the pair still becomes a folder. Either way the drop is consumed.
+        if (liveArming) {
+            liveArming = false
+            val list = grid
+            val target = candidateInfo
+            val done = if (list != null && target != null && candidateKind == Kind.CREATE) {
+                createLiveFolder(launcher, list, target, item) != null ||
+                    createFolder(launcher, list, target, item)
+            } else {
+                false
+            }
+            clear()
+            return done
+        }
         // An open folder resolves against the slot the user positioned, not against the tile the
         // dwell originally locked onto -- the folder covers the grid by then, so there is no
         // meaningful tile any more.
@@ -890,17 +916,23 @@ object AresFolderDrop {
             Log.e(TAG, "live-create declined: folder row got no id")
             return null
         }
-        val filer = FolderIcon
-            .inflateFolderAndIcon(R.layout.folder_icon, launcher, list, folderInfo)
-            .folder
-        if (filer == null) {
-            Log.e(TAG, "live-create declined: folder ${folderInfo.id} inflated without a Folder")
+        // File BOTH items (target leading, as stock does) in one synchronous stack, so the row is a
+        // legal 2-item folder the instant it renders. On ANY failure after the DB row exists, delete
+        // the row: an orphaned 0-item folder on CONTAINER_DESKTOP is NOT reclaimed by
+        // deleteUnparentedApps and would render as an empty tile (adversarial review 2026-08-21).
+        // `filer` is a transient Folder used only to run these model writes; TODO(§17) fold its
+        // disposal into the shared create+insert core lift (a minor per-folder listener leak).
+        try {
+            val filer = FolderIcon
+                .inflateFolderAndIcon(R.layout.folder_icon, launcher, list, folderInfo)
+                .folder ?: throw IllegalStateException("inflated without a Folder")
+            filer.addFolderContent(target, 0, false)
+            filer.addFolderContent(dragged, 1, false)
+        } catch (t: Throwable) {
+            Log.e(TAG, "live-create: filing ${folderInfo.id} failed; deleting the orphan row", t)
+            launcher.modelWriter.deleteItemFromDatabase(folderInfo, "ares-live-create-failed")
             return null
         }
-        // Target first (leading preview slot, as stock does), then the dragged item -- 2 items in
-        // one synchronous stack, so no posted cleanup ever sees a 1-item folder.
-        filer.addFolderContent(target, 0, false)
-        filer.addFolderContent(dragged, 1, false)
         Log.i(TAG, "live-create: folder ${folderInfo.id} from ${target.id}+${dragged.id}")
 
         list.post {
@@ -913,29 +945,66 @@ object AresFolderDrop {
             adapter.addItemAt(folderInfo, at)
             list.animateNextRelayout()
             AresHomeReorder.persistOrder(launcher, adapter.snapshot())
-            // Open after the row has bound + drawn its preview background -- `animateOpen` reads
-            // that background's radius, computed on a draw pass, so a same-frame forced layout is
-            // not enough (measured: scaleX=NaN). A short posted delay is; the dwell has already
-            // elapsed, so ~150ms is not perceptible lag. TUNE on the Pixel.
-            list.postDelayed({
-                val gridIcon = folderIconForId(list, folderInfo.id)
-                if (gridIcon == null) {
-                    Log.w(TAG, "live-create: folder ${folderInfo.id} has no rendered tile to open")
-                    return@postDelayed
-                }
-                try {
-                    gridIcon.folder?.animateOpen()
-                    Log.i(
-                        TAG,
-                        "live-create: opened folder ${folderInfo.id} " +
-                            "contents=${gridIcon.folder?.info?.getContents()?.size}",
-                    )
-                } catch (t: Throwable) {
-                    Log.e(TAG, "live-create: open threw ${t.javaClass.simpleName}: ${t.message}", t)
-                }
-            }, 150)
+            // Open once the tile has bound + laid out. A first attempt after ~150ms (the
+            // preview-background radius animateOpen reads is computed on a draw pass, so a same-frame
+            // layout gives scaleX=NaN), then a bounded per-frame retry if the tile is not rendered
+            // yet -- NOT a bare fixed delay, whose silent miss trapped the apps in a never-opened
+            // folder (adversarial review 2026-08-21).
+            list.postDelayed({ openLiveFolderWhenReady(launcher, list, folderInfo.id, attemptsLeft = 6) }, 150)
         }
         return folderInfo
+    }
+
+    /**
+     * Opens the just-created live folder once its grid tile is bound + laid out, then attaches the
+     * edit session.
+     *
+     * The attach is the load-bearing line: `AresFolderEdit.attach` is what installs
+     * [AresFolderDrag.DragStarter] on the folder's app tiles, and DragStarter is the ONLY thing that
+     * calls `folder.startDrag`. Without it a folder opened by bare [Folder.animateOpen] has inert
+     * apps: nothing can be dragged out, `isFolderDrag` never becomes true, [AresFolderExitHandoff]
+     * never engages, and the folder never dissolves — §25's drag-out is unreachable (adversarial
+     * review 2026-08-21). A live-create dwell is always inside an in-grid drag, i.e. edit mode, so
+     * attaching is correct here exactly as [AresFolderPreview.open] does it.
+     *
+     * If the tile never renders within budget, or the open throws, the folder is left CLOSED — a
+     * normal, tappable 2-item folder — rather than trapping the apps.
+     */
+    private fun openLiveFolderWhenReady(
+        launcher: Launcher,
+        list: AresHomeListView,
+        folderId: Int,
+        attemptsLeft: Int,
+    ) {
+        val gridIcon = folderIconForId(list, folderId)
+        val folder = gridIcon?.folder
+        if (gridIcon == null || folder == null || !gridIcon.isLaidOut || gridIcon.width == 0) {
+            if (attemptsLeft <= 0) {
+                Log.w(TAG, "live-create: folder $folderId tile never rendered; left closed")
+                return
+            }
+            list.postOnAnimation { openLiveFolderWhenReady(launcher, list, folderId, attemptsLeft - 1) }
+            return
+        }
+        if (folder.isDestroyed) return
+        try {
+            folder.animateOpen()
+        } catch (t: Throwable) {
+            // Geometry not settled (preview background drawn on a later pass): retry, don't re-enter
+            // animateOpen after a partial open on the last attempt -- leave it closed instead.
+            if (attemptsLeft > 0) {
+                list.postOnAnimation { openLiveFolderWhenReady(launcher, list, folderId, attemptsLeft - 1) }
+            } else {
+                Log.w(TAG, "live-create: folder $folderId could not open (${t.message}); left closed")
+            }
+            return
+        }
+        if (list.isEditMode()) AresFolderEdit.attach(launcher, gridIcon)
+        Log.i(
+            TAG,
+            "live-create: opened folder $folderId contents=${folder.info.getContents().size} " +
+                "editAttached=${list.isEditMode()}",
+        )
     }
 
     /** The rendered [FolderIcon] for [id] in the grid, or null if no such tile is bound. */

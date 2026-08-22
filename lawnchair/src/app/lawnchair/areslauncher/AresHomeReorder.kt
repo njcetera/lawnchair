@@ -276,6 +276,24 @@ object AresHomeReorder {
 
         override fun isItemViewSwipeEnabled(): Boolean = false
 
+        /**
+         * §25 live-create: while the seam is ending the in-grid drag to form a folder
+         * ([AresFolderDrop.isLiveArming]), collapse ItemTouchHelper's drop-settle to 0 so the
+         * synthetic UP reaches `clearView` immediately, rather than snapping the dragged tile back to
+         * a slot over the default recover animation before the folder forms.
+         */
+        override fun getAnimationDuration(
+            recyclerView: RecyclerView,
+            animationType: Int,
+            animateDx: Float,
+            animateDy: Float,
+        ): Long =
+            if (AresFolderDrop.isLiveArming()) {
+                0L
+            } else {
+                super.getAnimationDuration(recyclerView, animationType, animateDx, animateDy)
+            }
+
         override fun getMovementFlags(
             recyclerView: RecyclerView,
             viewHolder: RecyclerView.ViewHolder,
