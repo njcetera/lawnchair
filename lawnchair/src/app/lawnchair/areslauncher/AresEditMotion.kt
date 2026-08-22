@@ -321,6 +321,22 @@ object AresEditMotion {
     }
 
     /**
+     * Re-writes [view]'s composite translation from its recorded contributions, if it has any.
+     *
+     * A safety re-assert for a view whose translation channel was zeroed underneath us by something
+     * outside this file — `FolderPagedView.arrangeChildren` does exactly that on open/close, wiping
+     * the `INDEX_REORDER_BOUNCE_OFFSET` value the orbit+lift live in after the orbit already wrote
+     * it that frame, so the icon draws un-lifted for one frame until the next orbit tick. Called
+     * from `AresFolderEdit.sync` (a pre-draw listener, so it runs AFTER the arrange in the same
+     * frame) to restore the value before the draw. Idempotent: writes the same total the orbit
+     * would, so it is harmless when nothing reset it.
+     */
+    fun reapply(view: View) {
+        val m = motions[view] ?: return
+        apply(view, m)
+    }
+
+    /**
      * The single write.
      *
      * A [Reorderable] — every `BubbleTextView`, so every icon inside an open folder — must **not**

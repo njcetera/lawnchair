@@ -396,6 +396,13 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // the "apps twitch on folder open" pop. Deferring lets the 120ms transition run.
                 AresEditLabel.setItem(icon, true, deferUntilLaidOut = true)
 
+                // Re-assert the composite translation NOW, at pre-draw. Stock's arrangeChildren
+                // (fired on open/close) zeroes the icon's INDEX_REORDER_BOUNCE_OFFSET channel after
+                // the orbit already wrote it that frame, so without this the icon draws un-lifted for
+                // one frame — the owner's "flicker like they're re-rendering". This runs after the
+                // arrange in the same frame and is idempotent when nothing reset it.
+                AresEditMotion.reapply(icon)
+
                 // ...and share the slide, during a rearrangement. `animateChildToPosition` moves
                 // the icon with a translation while leaving its layout params at the old cell, and
                 // the badge's bounds are copied from those layout params -- so without this the ×
