@@ -337,6 +337,8 @@ class AresMasonryLayoutManager(
      * come back.
      */
     private fun animateFromPreviousBounds() {
+        val listView = host as? AresHomeListView
+        val suspended = ArrayList<View>()
         for (i in 0 until childCount) {
             val child = getChildAt(i) ?: continue
             val position = getPosition(child)
@@ -355,12 +357,19 @@ class AresMasonryLayoutManager(
             val resized = sx != 1f || sy != 1f
             if (!moved && !resized) continue
 
-            // This animation is an exclusive owner of the tile's translation for its duration, so
-            // any reflow still in flight on it is dropped rather than left summing underneath.
-            // Stated rather than assumed: the two cannot overlap today (a repack is triggered only
-            // by an affordance tap, and a gesture starting on an affordance never becomes a drag),
-            // and this is what keeps that true if a future path breaks the assumption.
+            // This animation now owns the tile's translation outright for its duration: it drops any
+            // reflow still in flight ([clearReflow]) AND suspends the edit-mode orbit float
+            // ([suspendFloatForRepack]). Suspending the orbit is the fix for the owner's Pixel report
+            // that repacks "snap to place without animation" — the orbit ([AresEditWiggle]) writes
+            // translationX/Y every frame for the whole of edit mode, so without this the
+            // ViewPropertyAnimator below is overwritten frame-by-frame and the tile teleports to its
+            // new cell instead of sliding. AresEditMotion's header named this the thing to do here if
+            // a repack were ever seen not to play; the owner saw exactly that.
             AresEditMotion.clearReflow(child)
+            if (listView != null) {
+                listView.suspendFloatForRepack(child)
+                suspended.add(child)
+            }
 
             child.translationX = dx
             child.translationY = dy
@@ -379,6 +388,17 @@ class AresMasonryLayoutManager(
                 .scaleY(restScale)
                 .setDuration(LAYOUT_ANIM_MS)
                 .start()
+        }
+        // Resume each suspended tile's orbit once its animation is over. A single posted callback,
+        // not a per-view ViewPropertyAnimator listener: a VPA listener does not fire on cancel and
+        // mis-attributes end callbacks across overlapping repacks (a new repack replaces the shared
+        // per-view listener), whereas this always fires and the per-tile count in [AresHomeListView]
+        // keeps overlaps balanced — a tile suspended by two repacks resumes only after both.
+        if (listView != null && suspended.isNotEmpty()) {
+            listView.postDelayed(
+                { for (c in suspended) listView.resumeFloatAfterRepack(c) },
+                LAYOUT_ANIM_MS,
+            )
         }
     }
 

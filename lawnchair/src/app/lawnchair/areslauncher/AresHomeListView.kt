@@ -734,12 +734,57 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (child != null) syncWiggle(child)
     }
 
+    /**
+     * Tiles whose orbit float is suspended for the life of a repack animation
+     * ([AresMasonryLayoutManager.animateFromPreviousBounds]), counted per tile.
+     *
+     * Distinct from [floatSuspendedFor], which is the single dragged tile and is also read as
+     * [draggedTile] — a repack moves several tiles at once and must not disturb that slot. The
+     * count lets overlapping repacks (rapid affordance taps, or a folder-create landing on a settle
+     * still in flight) each balance their own suspend with their own resume: a tile suspended twice
+     * resumes only after both repacks release it.
+     */
+    private val repackFloatSuspends = mutableMapOf<View, Int>()
+
+    /**
+     * Suspends the edit-mode orbit float on [child] while a repack animates its translation.
+     *
+     * The float ([AresEditWiggle]) writes `translationX/Y` every frame for the whole of edit mode,
+     * so a repack's `ViewPropertyAnimator` on the same property is overwritten frame-by-frame and
+     * the tile snaps to its new cell instead of sliding — the owner's "the apps jump to their new
+     * positions with no animation" on the Pixel, and exactly the contention AresEditMotion's header
+     * warned to fix here. This mirrors the drag's [setFloatSuspendedFor] but for the several tiles
+     * one repack moves, and without claiming the single drag slot. Paired with [resumeFloatAfterRepack].
+     */
+    fun suspendFloatForRepack(child: View) {
+        repackFloatSuspends[child] = (repackFloatSuspends[child] ?: 0) + 1
+        AresEditWiggle.stop(child, wiggles.remove(child))
+    }
+
+    /**
+     * Restores the orbit float on [child] when its repack ends — one resume per
+     * [suspendFloatForRepack], counted, so a newer repack still holding the tile keeps it
+     * suspended. A drag that took the tile meanwhile ([floatSuspendedFor]) keeps it; edit mode
+     * ended leaves it at rest via [syncWiggle]'s own `editMode` guard.
+     */
+    fun resumeFloatAfterRepack(child: View) {
+        val remaining = (repackFloatSuspends[child] ?: 0) - 1
+        if (remaining > 0) {
+            repackFloatSuspends[child] = remaining
+            return
+        }
+        repackFloatSuspends.remove(child)
+        if (child === floatSuspendedFor) return
+        syncWiggle(child)
+    }
+
     /** Stops every float and puts every tile back at rest, so nothing is left displaced. */
     private fun clearWiggles() {
         for ((child, animator) in wiggles) {
             AresEditWiggle.stop(child, animator)
         }
         wiggles.clear()
+        repackFloatSuspends.clear()
         floatSuspendedFor = null
         masonry.reflowExempt = null
     }
