@@ -191,8 +191,11 @@ object AresTestInfo {
     /** Turns folder edit mode on or off on the open folder. `arg`: "on" (default) or "off". */
     const val REQUEST_FOLDER_EDIT = "ares-folder-edit"
 
-    /** SPIKE (§25, remove after): create + open a ONE-item folder; returns what happened. */
+    /** §25 create+open verification: create + open a real 2-item folder; returns what happened. */
     const val REQUEST_LIVE_CREATE_SPIKE = "ares-live-create-spike"
+
+    /** §25 gate: `arg` "on"/"off" toggles live-create on the dwell-arm path; returns the new state. */
+    const val REQUEST_LIVE_CREATE_ENABLE = "ares-live-create-enable"
 
     /**
      * The surface at a glance: `state|inTransition|optionsPopup|scrollOffset`.
@@ -283,6 +286,13 @@ object AresTestInfo {
         REQUEST_LIVE_CREATE_SPIKE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> liveCreateSpike(launcher) },
+        )
+        REQUEST_LIVE_CREATE_ENABLE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putBoolean(key, value) },
+            { _ ->
+                AresFolderDrop.setLiveCreateEnabled(arg == "on")
+                AresFolderDrop.isLiveCreateEnabled()
+            },
         )
         else -> null
     }

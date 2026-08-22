@@ -155,6 +155,24 @@ object AresFolderDrop {
     fun declinedExitingCount(): Long = declinedExiting
 
     /**
+     * §25 live-create gate. OFF by default: dwelling an icon on an icon draws the ring and the
+     * folder forms on release ([createFolder]) — the owner-verified path, untouched. ON: the folder
+     * forms and OPENS on the hold ([createLiveFolder]) and the held app can be dragged back out to
+     * dissolve it. Experimental and drag-coupled (see live-create-enter-handoff-design.md); toggled
+     * from the test channel while the gesture's feel is verified on the owner's Pixel.
+     */
+    private var liveCreateEnabled = false
+
+    @JvmStatic
+    fun setLiveCreateEnabled(on: Boolean) {
+        liveCreateEnabled = on
+        Log.i(TAG, "live-create gate ${if (on) "ENABLED" else "disabled"}")
+    }
+
+    @JvmStatic
+    fun isLiveCreateEnabled(): Boolean = liveCreateEnabled
+
+    /**
      * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
      * `DragController` drag from the app list, the widget picker or another folder.
      *
@@ -428,6 +446,32 @@ object AresFolderDrop {
                 list.setFolderDropTarget(null)
                 Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; folder opened for placement")
                 return
+            }
+        }
+        // §25 live-create: dwelling an icon on an icon forms the real folder NOW and opens it,
+        // rather than drawing a ring and creating on release. Gated OFF by default; the held app's
+        // in-grid drag ends as createLiveFolder removes its row, and the user re-grabs the app in
+        // the open folder to pull it back out (which dissolves the 1-item folder). Full mechanism
+        // and risks in live-create-enter-handoff-design.md. Wrapped so ANY failure falls straight
+        // back to the ring + create-on-release, which is never touched.
+        if (liveCreateEnabled && candidateKind == Kind.CREATE && fromGrid) {
+            val target = candidateInfo
+            val held = dragged
+            if (target != null && held != null) {
+                val fi = try {
+                    createLiveFolder(list.launcher, list, target, held)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "live-create threw; falling back to the ring", t)
+                    null
+                }
+                if (fi != null) {
+                    Log.i(TAG, "live-create armed: folder ${fi.id} from ${target.id}+${held.id}")
+                    // The dwell's job is done -- the folder and the exit handoff own the gesture
+                    // from here. Neutralise our own state so the in-grid drag's end cannot also run
+                    // createFolder on the same pair (a double create). clear() drops the ring too.
+                    clear()
+                    return
+                }
             }
         }
         list.setFolderDropTarget(view)
