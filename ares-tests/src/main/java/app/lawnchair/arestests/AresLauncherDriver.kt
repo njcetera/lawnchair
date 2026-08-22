@@ -246,6 +246,9 @@ class AresLauncherDriver {
     /** Opens the first folder on the grid, through `FolderIcon.performClick`. */
     fun openFolder(): Boolean = call("ares-open-folder")?.getBoolean("response") ?: false
 
+    /** SPIKE (§25): create + open a one-item folder; returns what happened. */
+    fun liveCreateSpike(): String = call("ares-live-create-spike")?.getString("response") ?: "null"
+
     /** Attaches or detaches folder edit mode on the open folder. */
     fun setFolderEdit(on: Boolean): Boolean =
         call("ares-folder-edit", if (on) "on" else "off")?.getBoolean("response") ?: false

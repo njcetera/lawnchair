@@ -804,6 +804,126 @@ object AresFolderDrop {
         return true
     }
 
+    /**
+     * §25 live-create core: build a REAL 2-item folder {[target], [dragged]} mid-drag and OPEN it,
+     * so both apps are visible in the folder without a release.
+     *
+     * Two hard facts from the spikes shape this:
+     *  - A 1-item folder is destroyed by the platform within ~150ms of being rendered (child
+     *    promoted to the desktop, folder row deleted). So BOTH items are filed **atomically** here
+     *    -- there is never a 1-item frame to catch. (Drag-out later removes one, and that same
+     *    cleanup is what dissolves the folder -- see §25.)
+     *  - `animateOpen` reads the **rendered** folder tile's geometry; the transient [FolderIcon]
+     *    from [FolderIcon.inflateFolderAndIcon] (used only to file content into the model) is not
+     *    laid out and yields NaN. So the open goes through the adapter's rendered tile, after a
+     *    forced layout pass, exactly as the working spike did -- and via [Folder.animateOpen], NOT
+     *    [AresFolderPreview], whose preview open reserves an extra empty slot for an incoming item
+     *    this already-2-item folder does not have.
+     *
+     * Returns the created [FolderInfo], or null if no folder could be placed. The open is posted
+     * (the row needs its layout pass first). Reuses [createFolder]'s insertion verbatim in spirit;
+     * TODO(§17): once owner-verified, lift the shared create+insert core out of [createFolder] so
+     * release-create and hold-create cannot drift.
+     */
+    fun createLiveFolder(
+        launcher: Launcher,
+        list: AresHomeListView,
+        target: ItemInfo,
+        dragged: ItemInfo,
+    ): FolderInfo? {
+        val cell = IntArray(2)
+        val screenId = AresWidgetAdd.findFreeCell(launcher, 1, 1, cell, target.id)
+        if (screenId == AresWidgetAdd.NO_SCREEN) {
+            Log.e(TAG, "live-create declined: no free cell")
+            return null
+        }
+        val folderInfo = FolderInfo()
+        folderInfo.rank = target.rank
+        launcher.modelWriter.addItemToDatabase(
+            folderInfo, Favorites.CONTAINER_DESKTOP, screenId, cell[0], cell[1],
+        )
+        if (folderInfo.id == ItemInfo.NO_ID) {
+            Log.e(TAG, "live-create declined: folder row got no id")
+            return null
+        }
+        val filer = FolderIcon
+            .inflateFolderAndIcon(R.layout.folder_icon, launcher, list, folderInfo)
+            .folder
+        if (filer == null) {
+            Log.e(TAG, "live-create declined: folder ${folderInfo.id} inflated without a Folder")
+            return null
+        }
+        // Target first (leading preview slot, as stock does), then the dragged item -- 2 items in
+        // one synchronous stack, so no posted cleanup ever sees a 1-item folder.
+        filer.addFolderContent(target, 0, false)
+        filer.addFolderContent(dragged, 1, false)
+        Log.i(TAG, "live-create: folder ${folderInfo.id} from ${target.id}+${dragged.id}")
+
+        list.post {
+            val adapter = list.aresAdapter
+            val targetAt = adapter.indexOf(target).let { if (it >= 0) it else adapter.itemCount }
+            val sourceAt = adapter.indexOf(dragged)
+            var at = targetAt
+            if (sourceAt in 0 until at) at--
+            adapter.removeItems { it.id == target.id || it.id == dragged.id }
+            adapter.addItemAt(folderInfo, at)
+            list.animateNextRelayout()
+            AresHomeReorder.persistOrder(launcher, adapter.snapshot())
+            // Open after the row has bound + drawn its preview background -- `animateOpen` reads
+            // that background's radius, computed on a draw pass, so a same-frame forced layout is
+            // not enough (measured: scaleX=NaN). A short posted delay is; the dwell has already
+            // elapsed, so ~150ms is not perceptible lag. TUNE on the Pixel.
+            list.postDelayed({
+                val gridIcon = folderIconForId(list, folderInfo.id)
+                if (gridIcon == null) {
+                    Log.w(TAG, "live-create: folder ${folderInfo.id} has no rendered tile to open")
+                    return@postDelayed
+                }
+                try {
+                    gridIcon.folder?.animateOpen()
+                    Log.i(
+                        TAG,
+                        "live-create: opened folder ${folderInfo.id} " +
+                            "contents=${gridIcon.folder?.info?.getContents()?.size}",
+                    )
+                } catch (t: Throwable) {
+                    Log.e(TAG, "live-create: open threw ${t.javaClass.simpleName}: ${t.message}", t)
+                }
+            }, 150)
+        }
+        return folderInfo
+    }
+
+    /** The rendered [FolderIcon] for [id] in the grid, or null if no such tile is bound. */
+    private fun folderIconForId(list: AresHomeListView, id: Int): FolderIcon? {
+        val holder = list.findViewHolderForItemId(id.toLong()) ?: return null
+        return (holder.itemView as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon
+    }
+
+    /**
+     * §25 create+open verification harness: drives [createLiveFolder] gesture-free from the test
+     * channel with the first two folderable seeds, so the create+open half is verifiable without a
+     * real drag (the drag-continuation half is owner-Pixel only). Leaves the folder open on success.
+     * Named `spike*` for the channel it is wired to; kept as the create+open regression check.
+     */
+    @JvmStatic
+    fun spikeOneItemFolder(launcher: Launcher, list: AresHomeListView): String = try {
+        val seeds = list.aresAdapter.snapshot().filter { it !is FolderInfo && Folder.willAccept(it) }.take(2)
+        if (seeds.size < 2) {
+            "need 2 folderable seeds, found ${seeds.size}"
+        } else {
+            val fi = createLiveFolder(launcher, list, seeds[0], seeds[1])
+            if (fi == null) {
+                "createLiveFolder declined"
+            } else {
+                "live folder ${fi.id} created from ${seeds[0].id}+${seeds[1].id}; open POSTED -- see logcat live-create"
+            }
+        }
+    } catch (t: Throwable) {
+        Log.e(TAG, "spikeOneItemFolder threw", t)
+        "EXCEPTION ${t.javaClass.simpleName}: ${t.message}"
+    }
+
     /** The [FolderIcon] a holder container hosts, or null when it hosts anything else. */
     private fun folderIconOf(container: View): FolderIcon? =
         (container as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon

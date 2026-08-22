@@ -191,6 +191,9 @@ object AresTestInfo {
     /** Turns folder edit mode on or off on the open folder. `arg`: "on" (default) or "off". */
     const val REQUEST_FOLDER_EDIT = "ares-folder-edit"
 
+    /** SPIKE (§25, remove after): create + open a ONE-item folder; returns what happened. */
+    const val REQUEST_LIVE_CREATE_SPIKE = "ares-live-create-spike"
+
     /**
      * The surface at a glance: `state|inTransition|optionsPopup|scrollOffset`.
      *
@@ -277,7 +280,17 @@ object AresTestInfo {
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> openFirstFolder(launcher) },
         )
+        REQUEST_LIVE_CREATE_SPIKE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> liveCreateSpike(launcher) },
+        )
         else -> null
+    }
+
+    /** See [REQUEST_LIVE_CREATE_SPIKE]. */
+    private fun liveCreateSpike(launcher: Launcher): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no home list"
+        return AresFolderDrop.spikeOneItemFolder(launcher, list)
     }
 
     // ---------------------------------------------------------------- internals
