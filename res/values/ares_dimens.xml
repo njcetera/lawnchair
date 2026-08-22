@@ -142,11 +142,20 @@
          FrameLayout measures a child's margin INSIDE that padding), so the drawn badge lands this far
          from the frost corner regardless of item type. Folder-internal badges are exempt (they pass
          an explicit touch size and keep ares_widget_resize_margin). -->
-    <!-- Solved, not eyeballed (2026-08-22): with the drawn badge centred at
-         edge_distance + (touch-pull)/2 = edge_distance + 14.5dp, this puts the badge centre 16.5dp
-         (~40px) down the corner's 45° diagonal, where the gap to the 16dp rounded corner equals the
-         gap to a 158px icon centred in a 260x232 cell — ~6dp of clearance on each side. -->
-    <dimen name="ares_badge_edge_distance">2dp</dimen>
+    <!-- Home-grid touch target for the × / ! badges. Folder badges pass their own touch size and
+         the resize chevron keeps ares_widget_resize_touch_size, so this shrinks ONLY the home
+         badges: at 48dp two targets ate the tile's grab area in edit mode (owner asked for 30dp).
+         At 30dp the target leaves 5dp around the 20dp drawn badge; ares_badge_corner_pull is clamped
+         to touch − drawn = 10dp (cornerPullFor), which the edge_distance below accounts for. -->
+    <dimen name="ares_home_badge_touch_size">30dp</dimen>
+
+    <!-- Solved, not eyeballed (2026-08-22): the drawn badge's centre sits at
+         edge_distance + (touch − pull)/2. At touch 30dp the pull clamps to 10dp, so the centre is
+         6.5 + (30 − 10)/2 = 16.5dp (~40px) down the corner's 45° diagonal — where the gap to the
+         16dp rounded corner equals the gap to a 158px icon centred in a 260×232 cell (~6dp each
+         side). edge_distance carries the touch-size term: it holds the badge still as the target
+         shrinks (re-derive as 16.5 − (touch − pull)/2 if either changes). -->
+    <dimen name="ares_badge_edge_distance">6.5dp</dimen>
 
     <!-- How far the drawn badge is pulled toward its corner, away from the centre of its own touch
          target.

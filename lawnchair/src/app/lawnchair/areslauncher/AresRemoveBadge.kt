@@ -71,7 +71,9 @@ object AresRemoveBadge {
         val touch = if (touchSizePx > 0) {
             touchSizePx
         } else {
-            res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+            // Home grid: a dedicated, smaller target than the chevron's 48dp, so two badges do not
+            // eat the tile's drag-grab area. Folders still pass their own touchSizePx above.
+            res.getDimensionPixelSize(R.dimen.ares_home_badge_touch_size)
         }
         // Distance from the tile's true (frost-box) edge. On the home grid this is one value for
         // every item type (ares_badge_edge_distance), minus the container's own content-inset

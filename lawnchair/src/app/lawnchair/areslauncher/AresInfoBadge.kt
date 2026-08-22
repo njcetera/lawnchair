@@ -84,7 +84,8 @@ object AresInfoBadge {
         val touch = if (touchSizePx > 0) {
             touchSizePx
         } else {
-            res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
+            // Mirror of the ×: the home grid's smaller badge target, chevron/folders unaffected.
+            res.getDimensionPixelSize(R.dimen.ares_home_badge_touch_size)
         }
         // Same distance-from-frost-edge rule as the ×, so the pair stays symmetric on both top
         // corners; see AresRemoveBadge.createBadge for why the container's padding is subtracted.
