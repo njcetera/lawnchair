@@ -341,6 +341,12 @@ class AresMasonryLayoutManager(
         val suspended = ArrayList<View>()
         for (i in 0 until childCount) {
             val child = getChildAt(i) ?: continue
+            // The tile in the user's hand is off-limits, exactly as in reflowFromDrawnPositions:
+            // ItemTouchHelper owns its follow-translation, and suspendFloatForRepack below would
+            // clear its Motion and the child.translationX write would snap it off the finger. A
+            // repack CAN overlap a drag — a second finger tapping a × badge fires animateNextLayout
+            // mid-drag. (adversarial review, 2026-08-22)
+            if (child === reflowExempt) continue
             val position = getPosition(child)
             val old = previousBounds[position] ?: continue
 

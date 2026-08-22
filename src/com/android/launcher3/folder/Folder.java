@@ -1449,7 +1449,15 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // editing, re-hide that caption now, in this same frame, so it is never drawn visible — the
         // posted re-assert from AresFolderEdit's detach lands a frame later and flashes. No-op when
         // not editing.
-        AresFolderEdit.onClosed(this);
+        //
+        // Guarded on Launcher: closeComplete runs for taskbar and app-drawer folders too, whose
+        // mActivityContext is not a Launcher, and onClosed's Launcher.getLauncher() would then throw
+        // a ClassCastException — the exact guard restoreLauncherAfterFolderDismissed makes just above.
+        // Only Launcher home folders ever edit, so this both fixes the crash and loses nothing.
+        // (adversarial review, 2026-08-22)
+        if (mActivityContext instanceof Launcher) {
+            AresFolderEdit.onClosed(this);
+        }
     }
 
     /**

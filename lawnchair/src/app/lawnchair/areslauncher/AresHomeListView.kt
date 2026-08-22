@@ -775,6 +775,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
         repackFloatSuspends.remove(child)
         if (child === floatSuspendedFor) return
+        // The tile may have scrolled off during the repack's LAYOUT_ANIM_MS. syncWiggle on a
+        // detached, recycled view starts an infinite orbit animator on it (position NO_POSITION),
+        // which would then write translation to whatever item binds into it next.
+        // onChildAttachedToWindow re-syncs it if the row comes back. (adversarial review 2026-08-22)
+        if (getChildAdapterPosition(child) == NO_POSITION) return
         syncWiggle(child)
     }
 

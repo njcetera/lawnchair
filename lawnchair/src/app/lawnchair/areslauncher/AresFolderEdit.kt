@@ -83,10 +83,17 @@ private const val CELL_TAG = "ares_folder_edit_cell"
     fun attach(launcher: Launcher, folderIcon: FolderIcon) {
         val folder = folderIcon.folder ?: return
         if (folder.isDestroyed) return
-        if (session?.folder === folder) {
+        val live = session
+        if (live != null && live.folder === folder && !live.isClosing()) {
             android.util.Log.d("AresFolderEdit", "attach: session already live for this folder")
             return
         }
+        // Reaching detach() for the same folder means the live session is already gated `closing` by
+        // onClosing. Reusing it would leave sync() permanently gated (`if (closing) return`), so a
+        // reopened folder would get NO edit chrome — no badges, no §26 lift, and no tap-launch
+        // suppression (folder-spec D7: a tap in edit mode must not launch). Tearing it down and
+        // building fresh avoids that. Latent today — nothing reopens a folder mid-close — but the
+        // guard rests entirely on that staying true. (adversarial review, 2026-08-22)
         detach()
         android.util.Log.d("AresFolderEdit", "attach: new session for folder=${System.identityHashCode(folder)}")
         session = Session(launcher, folder).also { it.start() }
@@ -226,6 +233,9 @@ private const val CELL_TAG = "ares_folder_edit_cell"
          * and wiggle it just cleared, so the close scales clean, non-edit positions. @see onClosing.
          */
         private var closing = false
+
+        /** True once [onClosing] has gated this session; [sync] stays suspended. See [attach]. */
+        fun isClosing(): Boolean = closing
 
         /**
          * Turns a plain touch-and-drag on any of this folder's icons into a folder drag.
