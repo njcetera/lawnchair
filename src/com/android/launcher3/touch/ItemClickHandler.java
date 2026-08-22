@@ -139,6 +139,11 @@ public class ItemClickHandler {
      */
     private static void onClickFolderIcon(View v) {
         Folder folder = ((FolderIcon) v).getFolder();
+        // A §25 live-create/close race can wedge a folder with mIsOpen left true while it is
+        // detached from the DragLayer; without this the !isOpen() guard below would decline every
+        // tap and the folder could never be reopened (its data is intact — a reload heals it too).
+        // No-op for a normally-closed folder. Owner-reported 2026-08-22.
+        folder.aresRecoverStuckOpen();
         if (!folder.isOpen() && !folder.isDestroyed()) {
             // Open the requested folder
             folder.animateOpen();

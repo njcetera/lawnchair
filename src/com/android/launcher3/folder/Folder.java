@@ -896,6 +896,26 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         return mState == STATE_ANIMATING;
     }
 
+    /**
+     * Recovers a folder wedged in the documented inconsistent state: mIsOpen (and/or a mid-close
+     * STATE_ANIMATING) left set while the folder is NOT attached to the DragLayer. A §25 live-create
+     * that opens the folder mid-drag can leave it here after a close race, and then
+     * {@code onClickFolderIcon}'s {@code !isOpen()} guard declines every tap forever — the folder's
+     * data is intact (a reload heals it), but by touch it can never be reopened. Owner-reported
+     * 2026-08-22 ("added the two apps back into the same folder and now I can't open that folder").
+     *
+     * Guarded on {@code getParent() == null}, so a genuinely-open folder — always parented into the
+     * DragLayer — is never disturbed. Returns true when it actually reset something.
+     */
+    public boolean aresRecoverStuckOpen() {
+        if (getParent() != null || (!mIsOpen && mState != STATE_ANIMATING)) {
+            return false;
+        }
+        mIsOpen = false;
+        setState(STATE_CLOSED);
+        return true;
+    }
+
     public boolean aresBeginPreviewDrag() {
         // STATE_ANIMATING is refused, not just mIsOpen.
         //
