@@ -129,11 +129,11 @@
          the backdrop across the full target instead made the circle nearly as wide as a 1x1 app
          icon, which read as a blob beside the icon rather than a badge on it. 28dp matches the
          resize chevron so the two corners carry equal visual weight. -->
-    <dimen name="ares_remove_badge_size">20dp</dimen>
+    <dimen name="ares_remove_badge_size">22dp</dimen>
     <!-- The cross inside that circle. Inset enough to leave a visible ring of backdrop around it,
          so the glyph reads against a busy icon rather than blending into it. Shrinks with the circle
          to keep the same ring proportion. -->
-    <dimen name="ares_remove_badge_glyph_size">13dp</dimen>
+    <dimen name="ares_remove_badge_glyph_size">14dp</dimen>
 
     <!-- Distance of the drawn × / ! badge from the tile's TRUE (frost-box) edge, on the home grid.
          One value for every item type so the badge sits the same on an app, a folder-less leaf and a
@@ -145,17 +145,18 @@
     <!-- Home-grid touch target for the × / ! badges. Folder badges pass their own touch size and
          the resize chevron keeps ares_widget_resize_touch_size, so this shrinks ONLY the home
          badges: at 48dp two targets ate the tile's grab area in edit mode (owner asked for 30dp).
-         At 30dp the target leaves 5dp around the 20dp drawn badge; ares_badge_corner_pull is clamped
-         to touch − drawn = 10dp (cornerPullFor), which the edge_distance below accounts for. -->
+         At 30dp the target leaves 4dp around the 22dp drawn badge; ares_badge_corner_pull is clamped
+         to touch − drawn = 8dp (cornerPullFor), which the edge_distance below accounts for. -->
     <dimen name="ares_home_badge_touch_size">30dp</dimen>
 
     <!-- Solved, not eyeballed (2026-08-22): the drawn badge's centre sits at
-         edge_distance + (touch − pull)/2. At touch 30dp the pull clamps to 10dp, so the centre is
-         6.5 + (30 − 10)/2 = 16.5dp (~40px) down the corner's 45° diagonal — where the gap to the
-         16dp rounded corner equals the gap to a 158px icon centred in a 260×232 cell (~6dp each
-         side). edge_distance carries the touch-size term: it holds the badge still as the target
-         shrinks (re-derive as 16.5 − (touch − pull)/2 if either changes). -->
-    <dimen name="ares_badge_edge_distance">6.5dp</dimen>
+         edge_distance + (touch − pull)/2. At touch 30dp with a 22dp badge the pull clamps to 8dp, so
+         the centre is 5.5 + (30 − 8)/2 = 16.5dp (~40px) down the corner's 45° diagonal — where the
+         gap to the 16dp rounded corner equals the gap to a 158px icon centred in a 260×232 cell
+         (~5dp each side; the balanced centre is independent of badge size, so a bigger badge just
+         tightens both gaps equally). edge_distance carries the touch/pull term: it holds the badge
+         still (re-derive as 16.5 − (touch − pull)/2 if the touch or badge size changes). -->
+    <dimen name="ares_badge_edge_distance">5.5dp</dimen>
 
     <!-- How far the drawn badge is pulled toward its corner, away from the centre of its own touch
          target.
