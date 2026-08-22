@@ -7,15 +7,22 @@ public class ClippedFolderIconLayoutRule {
     public static final int MAX_NUM_ITEMS_IN_PREVIEW = 4;
     private static final int MIN_NUM_ITEMS_IN_PREVIEW = 2;
 
-    public static final float MIN_SCALE = 0.44f;
-    public static final float MAX_SCALE = 0.51f;
+    // Ares: stock is MIN 0.44 / MAX 0.51. At MAX=0.51 the ≤3-item preview icons are ~half the
+    // preview wide and, sat on the stock radius, spill well past the background circle — the "closed
+    // folders with 3+ icons are partially clipped" report (2026-08-22). Shrunk so the icons sit
+    // inside the circle with a margin. The whole preview geometry — static icon, open/close/create
+    // animations — reads these, so any change is re-verified against the close animation.
+    public static final float MIN_SCALE = 0.40f;
+    public static final float MAX_SCALE = 0.44f;
 
     // TODO: figure out exact radius for different icons
     private static final float MAX_RADIUS_DILATION = 0.25f;
     // The max amount of overlap the preview items can go outside of the background bounds.
     public static final float ICON_OVERLAP_FACTOR = 1 + (MAX_RADIUS_DILATION / 2f);
-    private static final float ITEM_RADIUS_SCALE_FACTOR = 1.15f;
-    private static final float ITEM_RADIUS_SCALE_FACTOR_SHAPES = 1.2f;
+    // Ares: stock 1.15 / 1.20. Pulled in so preview icons orbit closer to the circle's centre and
+    // stay within its bounds (see the scale note above).
+    private static final float ITEM_RADIUS_SCALE_FACTOR = 0.92f;
+    private static final float ITEM_RADIUS_SCALE_FACTOR_SHAPES = 0.96f;
 
     public static final int EXIT_INDEX = -2;
     public static final int ENTER_INDEX = -3;
