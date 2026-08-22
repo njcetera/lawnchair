@@ -149,6 +149,23 @@ public class ItemClickHandler {
             folder.animateOpen();
             StatsLogManager.newInstance(v.getContext()).logger().withItemInfo(folder.mInfo)
                     .log(LAUNCHER_FOLDER_OPEN);
+        } else {
+            // AresLauncher diagnostic (2026-08-22, owner-reported Bug B recurring on the Pixel): the
+            // user tapped a folder icon and the open was DECLINED even after aresRecoverStuckOpen ran
+            // — so the folder is wedged in a state the heal does not cover. Confirmed on device: the
+            // data is intact and a launcher RESTART heals it (animateOpen then fires), which also
+            // erases the live evidence, so a restart-free capture is the only way to see the real
+            // state. The heal handles only getParent()==null && mIsOpen; this log tells us which of
+            // the other wedges it actually is (attached-and-mIsOpen, destroyed, or mid-animation)
+            // the next time it happens in normal use — no live repro required. Silent on every
+            // successful open. Remove once the real wedge is identified and the heal widened.
+            android.util.Log.w("AresFolderOpen", "DECLINED open after heal: id="
+                    + System.identityHashCode(folder)
+                    + " infoId=" + (folder.mInfo != null ? folder.mInfo.id : -1)
+                    + " isOpen=" + folder.isOpen()
+                    + " isDestroyed=" + folder.isDestroyed()
+                    + " hasParent=" + (folder.getParent() != null)
+                    + " animating=" + folder.aresIsAnimating());
         }
     }
 
