@@ -151,7 +151,7 @@ object AresEditLabel {
      * laid its icons out. (The home grid needs an explicit [reassert] for that only because its
      * funnel does *not* run every frame.)
      */
-    fun setItem(item: View, hidden: Boolean) {
+    fun setItem(item: View, hidden: Boolean, deferUntilLaidOut: Boolean = false) {
         val label = labelOf(item) ?: return
         val state = states.getOrPut(item) { State() }
         val targetLift = if (hidden) liftFor(item) else 0f
@@ -191,6 +191,15 @@ object AresEditLabel {
             }
             return
         }
+
+        // Not laid out yet, and the caller wants the entrance ANIMATED: defer WITHOUT committing
+        // `state.hidden`, so the first laid-out pass runs the transition below instead of finding
+        // the state already committed and writing the lift in one direct step. That step is the
+        // folder-open "pop" (measured 2026-08-22: the §26 lift appeared as a +24px jump one frame
+        // after stock's open animation cleared). The folder's `sync` re-calls this every pre-draw,
+        // so a one-frame defer costs nothing; the grid does NOT pass this flag, because its funnel
+        // runs once and relies on committing here so [reassert] can apply the lift after layout.
+        if (deferUntilLaidOut && ValueAnimator.areAnimatorsEnabled() && item.height <= 0) return
 
         val fromAlpha = BubbleTextView.TEXT_ALPHA_PROPERTY.get(label)
         // Same rule stock's own createTextAlphaAnimator uses, so restoring cannot re-show a label

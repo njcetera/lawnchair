@@ -391,7 +391,10 @@ private const val CELL_TAG = "ares_folder_edit_cell"
                 // only. So the badge follows the rearrangement slide and is blind to the lift,
                 // which is exactly the split §21 wants: the frost box marks the CELL and stays
                 // there while the icon moves to the middle of it.
-                AresEditLabel.setItem(icon, true)
+                // deferUntilLaidOut: on open the first pre-draw runs at height 0; without deferring,
+                // the lift commits at 0 and then writes to its full value in one step a frame later —
+                // the "apps twitch on folder open" pop. Deferring lets the 120ms transition run.
+                AresEditLabel.setItem(icon, true, deferUntilLaidOut = true)
 
                 // ...and share the slide, during a rearrangement. `animateChildToPosition` moves
                 // the icon with a translation while leaving its layout params at the old cell, and
