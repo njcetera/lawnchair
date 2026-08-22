@@ -129,10 +129,24 @@
          the backdrop across the full target instead made the circle nearly as wide as a 1x1 app
          icon, which read as a blob beside the icon rather than a badge on it. 28dp matches the
          resize chevron so the two corners carry equal visual weight. -->
-    <dimen name="ares_remove_badge_size">28dp</dimen>
+    <dimen name="ares_remove_badge_size">20dp</dimen>
     <!-- The cross inside that circle. Inset enough to leave a visible ring of backdrop around it,
-         so the glyph reads against a busy icon rather than blending into it. -->
-    <dimen name="ares_remove_badge_glyph_size">18dp</dimen>
+         so the glyph reads against a busy icon rather than blending into it. Shrinks with the circle
+         to keep the same ring proportion. -->
+    <dimen name="ares_remove_badge_glyph_size">13dp</dimen>
+
+    <!-- Distance of the drawn × / ! badge from the tile's TRUE (frost-box) edge, on the home grid.
+         One value for every item type so the badge sits the same on an app, a folder-less leaf and a
+         widget. AresRemoveBadge/AresInfoBadge subtract the container's own content-inset padding
+         from this (a widget cell is padded by ares_home_widget_inset/2 and an icon cell is not, and
+         FrameLayout measures a child's margin INSIDE that padding), so the drawn badge lands this far
+         from the frost corner regardless of item type. Folder-internal badges are exempt (they pass
+         an explicit touch size and keep ares_widget_resize_margin). -->
+    <!-- Solved, not eyeballed (2026-08-22): with the drawn badge centred at
+         edge_distance + (touch-pull)/2 = edge_distance + 14.5dp, this puts the badge centre 16.5dp
+         (~40px) down the corner's 45° diagonal, where the gap to the 16dp rounded corner equals the
+         gap to a 158px icon centred in a 260x232 cell — ~6dp of clearance on each side. -->
+    <dimen name="ares_badge_edge_distance">2dp</dimen>
 
     <!-- How far the drawn badge is pulled toward its corner, away from the centre of its own touch
          target.

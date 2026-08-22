@@ -86,7 +86,14 @@ object AresInfoBadge {
         } else {
             res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         }
-        val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        // Same distance-from-frost-edge rule as the ×, so the pair stays symmetric on both top
+        // corners; see AresRemoveBadge.createBadge for why the container's padding is subtracted.
+        val margin = if (touchSizePx > 0) {
+            res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        } else {
+            (res.getDimensionPixelSize(R.dimen.ares_badge_edge_distance) - container.paddingTop)
+                .coerceAtLeast(-container.paddingTop)
+        }
         // Mirror of the ×: pull the drawn circle into the top-END corner by padding the far sides,
         // leaving the whole 48dp view touchable. Through the same clamp, so the two corners stay
         // symmetric and a folder's smaller target cannot clip this one either -- see

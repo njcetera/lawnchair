@@ -73,7 +73,24 @@ object AresRemoveBadge {
         } else {
             res.getDimensionPixelSize(R.dimen.ares_widget_resize_touch_size)
         }
-        val margin = res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        // Distance from the tile's true (frost-box) edge. On the home grid this is one value for
+        // every item type (ares_badge_edge_distance), minus the container's own content-inset
+        // padding: a widget cell is padded by ares_home_widget_inset/2 (AresHomeAdapter §23) while an
+        // icon cell is not, and FrameLayout measures a child's margin INSIDE that padding — so a
+        // fixed margin sat the × ~4dp from an icon's edge yet ~8dp from a widget's. Subtracting the
+        // padding cancels that, landing both the same distance from the frost corner. A folder cell
+        // (explicit touchSizePx) keeps ares_widget_resize_margin, its small-cell geometry solved
+        // separately. Padding is uniform (setPadding all-sides), so paddingTop stands for all edges.
+        val margin = if (touchSizePx > 0) {
+            res.getDimensionPixelSize(R.dimen.ares_widget_resize_margin)
+        } else {
+            // Floor at -paddingTop, not 0: when edge_distance < the widget's content-inset padding
+            // the compensation is negative, which is what pulls the badge back out to the same
+            // frost-edge distance an unpadded icon cell gets. The floor keeps the view's start >= the
+            // container's true edge (padding + margin >= 0), so nothing is clipped.
+            (res.getDimensionPixelSize(R.dimen.ares_badge_edge_distance) - container.paddingTop)
+                .coerceAtLeast(-container.paddingTop)
+        }
         // Pull the drawn circle into the top-start corner, away from the centre of its own touch
         // target, by padding the two FAR sides. The 48dp view stays fully touchable; only the
         // CENTER-scaled drawable moves. Centred it landed on the app icon rather than beside it.
