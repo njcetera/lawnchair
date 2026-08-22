@@ -231,16 +231,21 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * condition here: this adapter serves [AresHomeListView] and nothing else, and an open folder's
      * edit mode is `AresFolderEdit`, which never calls this.
      *
-     * The frost goes in the container's *foreground* so it draws above the item's own content and,
-     * being a property of the container, wiggles and scales with the tile exactly as the badges do
-     * — including the pick-up swell, which is applied to the same view. It is a drawable, so it
-     * takes no touches and cannot affect the affordance hit-testing or the centre drag disc.
+     * The frost goes in the container's *background* so it draws **behind** the item's own content
+     * and behind the × / ! badges and the resize chevron, rather than veiling them. Foreground was
+     * fine while the fill was faint, but at the stronger alpha the owner asked for
+     * ([AresEditGrid.cellOutline]'s `FROST_FILL_ALPHA`) a foreground haze dimmed the icon and the
+     * badges — *"the frost should be applied behind icons and widgets, and the x and i icons, not
+     * in front of it"*. Background still belongs to the same container, so it wiggles, scales and
+     * swells with the tile exactly as a foreground would; it is still a drawable that takes no
+     * touches, so it cannot affect the affordance hit-testing or the centre drag disc. Nothing else
+     * writes this container's background, so owning it here is safe.
      */
     private fun syncCellOutlineFor(container: FrameLayout, info: ItemInfo?) {
         val wanted = info != null && editMode
-        val has = container.foreground != null
+        val has = container.background != null
         if (wanted == has) return
-        container.foreground = if (wanted) AresEditGrid.cellOutline(container.context) else null
+        container.background = if (wanted) AresEditGrid.cellOutline(container.context) else null
     }
 
     /**

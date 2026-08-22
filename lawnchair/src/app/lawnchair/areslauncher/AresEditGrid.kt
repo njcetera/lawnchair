@@ -28,13 +28,17 @@ import com.android.launcher3.R
  * on every scroll. A static overlay would desynchronise the moment the grid scrolled, because the
  * scroll offset is not a whole number of cells.
  *
- * ## Why the outline is a foreground, not a decoration
+ * ## Why the outline is a container background, not a decoration
  *
  * The outline belongs to *one item*, and in edit mode an item wiggles and scales. Putting the
- * outline in the holder container's foreground makes it a property of the tile, so it rotates and
- * scales with it exactly like the × badge and the resize chevron do. Drawn from a decoration it
- * would sit still while the tile moved underneath it, which is the very complaint (§21) that asked
- * for it: affordances that look detached from the thing they belong to.
+ * outline on the holder container makes it a property of the tile, so it rotates and scales with it
+ * exactly like the × badge and the resize chevron do. Drawn from a decoration it would sit still
+ * while the tile moved underneath it, which is the very complaint (§21) that asked for it:
+ * affordances that look detached from the thing they belong to.
+ *
+ * It rides the container's **background**, not its foreground, so it draws *behind* the icon or
+ * widget and behind those badges instead of veiling them — which is what the owner asked for once
+ * the fill grew strong. See [AresHomeAdapter.syncCellOutlineFor].
  *
  * ## Note: §21's "outline only, no fill" is superseded
  *
@@ -42,7 +46,8 @@ import com.android.launcher3.R
  * *"when in edit mode theres an outline for the widget border. Can we fill that in with a
  * frost/blur effect?"* — so [cellOutline] now carries a frosted fill. The later instruction wins;
  * the reasoning behind the original restraint survives in [cellOutline]'s own documentation, which
- * is why the fill is as weak as it is.
+ * is why the fill stays a translucent pane rather than an opaque one even after the owner asked for
+ * it to be strengthened.
  */
 object AresEditGrid {
 
@@ -317,8 +322,16 @@ object AresEditGrid {
      * an app icon is mostly empty cell, so the pane is far more visible behind one than behind a
      * widget that fills its footprint. If the grid reads as busy, lower this rather than
      * reintroducing a per-type condition.
+     *
+     * Raised 0.10 -> 0.25 on 2026-08-22 (owner, in two steps: *"sometimes I can barely tell it's
+     * there"* then *"make it .25f"*): the pane was too faint against some wallpapers. That same
+     * session built and tested a real
+     * per-tile wallpaper blur on both devices — capture the wallpaper, downscale, blit the slice
+     * behind each tile — and **scrapped it**: it renders only on a static wallpaper (a live
+     * wallpaper has no still frame to sample), and over a dark wall a blur of mostly-dark is barely
+     * different from this scrim anyway. A stronger scrim is the better trade. See the report.
      */
-    private const val FROST_FILL_ALPHA = 0.10f
+    private const val FROST_FILL_ALPHA = 0.25f
 
     /** The gradient: brighter at the top, thinner at the bottom, like light across real glass. */
     private const val FROST_TOP_MULTIPLIER = 1.5f
