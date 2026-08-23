@@ -475,7 +475,14 @@
 
     <!-- Edit-mode frosted tile fill tint: a subtle Material You light green (owner, 2026-08-23).
          Applied at FROST_FILL_ALPHA in AresEditGrid.cellOutline, so it stays a faint veil. -->
-    <color name="ares_edit_fill_tint">@color/system_accent1_100</color>
+    <color name="ares_edit_fill_tint">@color/system_accent1_800</color>
+
+    <!-- Edit-mode remove/info badges as M3 tonal-container buttons (owner, 2026-08-23): a
+         primaryContainer fill behind an onPrimaryContainer glyph, so they read as clickable buttons
+         and stand off the teal tile tint. Decoupled from ares_my_icon_button (the search close) so
+         the two can diverge. Theme-aware via the M3 roles. -->
+    <color name="ares_edit_badge_container">@color/materialColorPrimaryContainer</color>
+    <color name="ares_edit_badge_icon">@color/materialColorOnPrimaryContainer</color>
 
     <!-- App-list section headers (letters + recents clock) as Material You tertiary chips, to
          mimic the home widgets' brown/orange cards (owner, 2026-08-23): an accent3 (tertiary)

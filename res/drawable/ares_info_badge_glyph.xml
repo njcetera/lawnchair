@@ -11,7 +11,7 @@
     android:height="24dp"
     android:viewportWidth="960"
     android:viewportHeight="960"
-    android:tint="@color/ares_my_icon_button_icon">
+    android:tint="@color/ares_edit_badge_icon">
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"

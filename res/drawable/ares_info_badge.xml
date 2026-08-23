@@ -21,7 +21,7 @@
         android:height="@dimen/ares_remove_badge_size"
         android:gravity="center">
         <shape android:shape="oval">
-            <solid android:color="@color/ares_my_icon_button_container" />
+            <solid android:color="@color/ares_edit_badge_container" />
         </shape>
     </item>
 
