@@ -115,6 +115,14 @@ class AresSearchContainerView @JvmOverloads constructor(
     /** Material fast-out-slow-in for the expand/collapse width morph. */
     private val morphInterpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
 
+    // The pill recolours across the morph: collapsed it is the high-emphasis M3 colorPrimary (the
+    // fob reads as a FAB/action), expanded it settles to the calm neutral surfaceContainerHigh so a
+    // full-width bright fill does not shout behind the text field (owner). Animated with an
+    // ArgbEvaluator alongside the width morph via the pill's backgroundTint.
+    private val collapsedPillColor by lazy { context.getColor(R.color.materialColorPrimary) }
+    private val expandedPillColor by lazy { context.getColor(R.color.materialColorSurfaceContainerHigh) }
+    private var pillColorAnimator: ValueAnimator? = null
+
     /** Last known IME bottom inset (px), so [onEnd] of the insets animation can settle to it. */
     private var lastImeBottom = 0
 
@@ -218,6 +226,8 @@ class AresSearchContainerView @JvmOverloads constructor(
         // collapse() can restore it after expand() retints the icon for the tonal close button.
         defaultIconTint = icon.imageTintList
         defaultIconPadding = icon.paddingLeft
+        // Drive the pill colour from code so it can animate across the morph; start collapsed.
+        pill.backgroundTintList = android.content.res.ColorStateList.valueOf(collapsedPillColor)
 
         installImeFollower()
 
@@ -637,7 +647,24 @@ class AresSearchContainerView @JvmOverloads constructor(
         // the settled, full-width field is what a normal tap does, so serving the IME again here
         // deterministically leaves it bound with a correct cursor even if the early call above did
         // not fully take.
+        // Settle the pill from the bright fob colour to the calmer expanded surface over the morph.
+        animatePillColorTo(expandedPillColor, MORPH_DURATION_MS)
         animateWidthTo(expandedWidth(), fadeInInput = true) { focusAndRaiseKeyboard() }
+    }
+
+    /** Crossfades the pill's fill colour across the morph via its backgroundTint. */
+    private fun animatePillColorTo(target: Int, durationMs: Long) {
+        pillColorAnimator?.cancel()
+        val start = pill.backgroundTintList?.defaultColor ?: collapsedPillColor
+        pillColorAnimator = ValueAnimator.ofObject(android.animation.ArgbEvaluator(), start, target).apply {
+            duration = durationMs
+            interpolator = morphInterpolator
+            addUpdateListener {
+                pill.backgroundTintList =
+                    android.content.res.ColorStateList.valueOf(it.animatedValue as Int)
+            }
+            start()
+        }
     }
 
     /**
@@ -666,6 +693,8 @@ class AresSearchContainerView @JvmOverloads constructor(
         input.setText("")
         searchBarController.reset()
         crossfadeIconToSearch()
+        // Return the pill to the bright fob colour as it shrinks back to a button.
+        animatePillColorTo(collapsedPillColor, MORPH_DURATION_COLLAPSE_MS)
         // Fade the input out and hide it only once the pill has finished shrinking, so the field
         // collapses smoothly instead of blanking the instant the close button is tapped. `expanded`
         // stays true (it reads input.isVisible) until then, keeping re-entrant taps a harmless no-op.
