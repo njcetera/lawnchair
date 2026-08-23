@@ -11,12 +11,15 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.core.view.isVisible
 import com.android.launcher3.ExtendedEditText
+import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherState
 import com.android.launcher3.R
 import com.android.launcher3.allapps.ActivityAllAppsContainerView
 import com.android.launcher3.allapps.BaseAllAppsAdapter.AdapterItem
 import com.android.launcher3.allapps.SearchUiManager
 import com.android.launcher3.allapps.search.AllAppsSearchBarController
 import com.android.launcher3.search.SearchCallback
+import com.android.launcher3.statemanager.StateManager
 import com.android.launcher3.views.ActivityContext
 
 /**
@@ -80,6 +83,34 @@ class AresSearchContainerView @JvmOverloads constructor(
     /** Bottom inset contributed by the IME, so the affordance rides above the keyboard. */
     private var imeInset = 0
 
+    /**
+     * Gates the whole affordance to the app-list pane. Registered while attached; see
+     * [onAttachedToWindow].
+     *
+     * [AresSearchUiDelegate.isSearchBarFloating] re-parents this container into the `DragLayer`, which
+     * is what lets it rest in the corner — but the `DragLayer` outlives the pane, so without this the
+     * pill floats over the **home screen** too (owner: *"the search ... should only be accessible from
+     * the app list page"*). Stock hides a floating search bar by tying it to the all-apps state's
+     * visible elements; that path is part of the Google QSB layer this fork does not ship (see the
+     * class note), so the gating is done here — visible only in [LauncherState.ALL_APPS].
+     */
+    private var stateListener: StateManager.StateListener<LauncherState>? = null
+
+    /**
+     * True only while the app-list pane is the current/target state. The authority for whether this
+     * container may be visible: [setVisibility] refuses external VISIBLE requests while it is false,
+     * because the app-list setup shows this container even at rest on the **first run** (before any
+     * state transition), and it lives in the `DragLayer` so a stray VISIBLE floats over the home.
+     */
+    private var gateOpen = false
+
+    /** Drives the render/derender slide; cancelled and replaced on each toggle. */
+    private var visAnimator: ValueAnimator? = null
+    // Enter: overshoot, so the pill slides in from the right and springs a little past its rest before
+    // settling. Exit: Material 3 emphasized-accelerate, a quick firm slide back off the right edge.
+    private val overshoot = android.view.animation.OvershootInterpolator(2.5f)
+    private val emphasizedAccelerate = android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
+
     private val collapsedSize by lazy {
         resources.getDimensionPixelSize(R.dimen.ares_search_collapsed_size)
     }
@@ -127,6 +158,108 @@ class AresSearchContainerView @JvmOverloads constructor(
         }
         translationY = -imeInset.toFloat()
         return super.onApplyWindowInsets(insets)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        val launcher = Launcher.getLauncher(context)
+        val listener = object : StateManager.StateListener<LauncherState> {
+            override fun onStateTransitionStart(toState: LauncherState) {
+                // Drive the slide as the transition BEGINS, so it overlaps the pane settling in rather
+                // than waiting for it to fully land — owner: "start the animation a little earlier".
+                // For a gesture this fires at the release, when the pane is already most of the way in,
+                // so it is not shown mid-drag; the first-run clamp still guards the resting home.
+                applyState(toState, animate = true)
+            }
+
+            override fun onStateTransitionComplete(finalState: LauncherState) {
+                // Safety net only: correct the end state if a transition somehow skipped start, and
+                // only while nothing is mid-flight, so a normal start-driven slide is never snapped.
+                val onAppList = finalState == LauncherState.ALL_APPS
+                if (gateOpen != onAppList && visAnimator == null) applyState(finalState, animate = true)
+            }
+        }
+        launcher.stateManager.addStateListener(listener)
+        stateListener = listener
+        // Attaching in NORMAL (the home screen) must start hidden, with no animation.
+        applyState(launcher.stateManager.state, animate = false)
+    }
+
+    /**
+     * Brings the affordance in line with [state]: shown only on the app list, hidden everywhere else
+     * — including the home screen this container floats over now that it lives in the `DragLayer`.
+     * Sets [gateOpen] first so [setVisibility] knows whether a VISIBLE is permitted, then fades the
+     * pill in or out. When hiding it is also collapsed, so it never reopens mid-morph the next time
+     * the pane shows (resetSearch already collapses on close, but a cancelled transition can skip it).
+     */
+    private fun applyState(state: LauncherState, animate: Boolean) {
+        val onAppList = state == LauncherState.ALL_APPS
+        gateOpen = onAppList
+        animateVisibility(onAppList, animate)
+        if (!onAppList && expanded) collapse()
+    }
+
+    /**
+     * Slides the pill in from the right (show) or out off the right edge then GONE (hide) — the owner
+     * asked for a Material-You slide with a small horizontal bounce on entry. Enter overshoots its
+     * rest position and settles ([overshoot]); exit is a quick emphasized-accelerate slide off-screen.
+     * The `DragLayer` clips at the screen edge, so the pill is hidden by the slide itself — no fade.
+     * Writes visibility through [setRawVisibility] (i.e. `super`) so it is not re-clamped; the
+     * end-listener no-ops when a later toggle has superseded this animation, so a cancel-to-show never
+     * leaves it GONE.
+     */
+    private fun animateVisibility(show: Boolean, animate: Boolean) {
+        val prev = visAnimator
+        visAnimator = null
+        prev?.cancel()
+        // Far enough right to clear the screen edge: the pill's own width plus its side margins.
+        val offset = (collapsedSize + marginHorizontal * 2).toFloat()
+        alpha = 1f // the slide, not a fade, is the reveal
+        if (!animate) {
+            translationX = if (show) 0f else offset
+            setRawVisibility(if (show) VISIBLE else GONE)
+            return
+        }
+        if (show) {
+            setRawVisibility(VISIBLE)
+            if (translationX == 0f) return // already settled in place
+        } else if (visibility == GONE) {
+            return
+        }
+        val target = if (show) 0f else offset
+        val anim = ValueAnimator.ofFloat(translationX, target)
+        visAnimator = anim
+        anim.apply {
+            duration = if (show) ENTER_DURATION_MS else EXIT_DURATION_MS
+            // A short lead-in on entry so the slide begins partway through the pane settling rather
+            // than the instant the transition starts (owner: at-start was "too fast"). Exit is immediate.
+            startDelay = if (show) ENTER_START_DELAY_MS else 0L
+            interpolator = if (show) overshoot else emphasizedAccelerate
+            addUpdateListener { translationX = it.animatedValue as Float }
+            addListener(onEnd = {
+                if (visAnimator === anim) {
+                    visAnimator = null
+                    if (!show) setRawVisibility(GONE)
+                }
+            })
+            start()
+        }
+    }
+
+    /** `super.setVisibility`, bypassing the [setVisibility] gate-clamp for our own authoritative writes. */
+    private fun setRawVisibility(v: Int) = super.setVisibility(v)
+
+    /**
+     * Clamps external visibility to the gate. The launcher's app-list setup makes this container
+     * VISIBLE even at rest on the **first run** — before any state transition fires, so the state
+     * listener has no event to correct it, and being a `DragLayer` child it then floats the pill over
+     * the home (owner: verified on a fresh install — the FAB showed on the first-use home). External
+     * hides still pass through; only VISIBLE is refused while the gate is closed. Reproduced by
+     * `pm clear` then launch: without this the pill sits on the first-use home until All Apps is
+     * opened once. Our own writes go through [setRawVisibility], so this never blocks them.
+     */
+    override fun setVisibility(visibility: Int) {
+        super.setVisibility(if (visibility == VISIBLE && !gateOpen) GONE else visibility)
     }
 
     // region SearchUiManager
@@ -237,12 +370,26 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        stateListener?.let { Launcher.getLauncher(context).stateManager.removeStateListener(it) }
+        stateListener = null
         widthAnimator?.cancel()
         widthAnimator = null
+        visAnimator?.cancel()
+        visAnimator = null
     }
 
     private companion object {
         const val MORPH_DURATION_MS = 200L
+
+        /** Slide timing: entry gets a little room for its overshoot bounce to read; exit is a quick
+         *  flick off the right edge. Both kept short so the pill feels responsive, not laggy. */
+        const val ENTER_DURATION_MS = 260L
+        const val EXIT_DURATION_MS = 120L
+
+        /** Lead-in before the entry slide, so it starts partway through the pane settling rather than
+         *  the instant the transition begins. Tuned by feel between at-start ("too fast") and
+         *  at-fully-settled ("too late"). */
+        const val ENTER_START_DELAY_MS = 200L
     }
 }
 

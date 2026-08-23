@@ -12,12 +12,18 @@
 
      Ares-owned: res/layout/search_container_all_apps.xml is shared with the Taskbar's all-apps
      surface and is deliberately not modified.
+
+     Starts visibility=gone: this container is re-parented into the DragLayer (isSearchBarFloating),
+     which outlives the app-list pane, so a visible default would float over the home screen too. It
+     is shown only in LauncherState.ALL_APPS - see AresSearchContainerView.syncVisibilityToState.
+     Starting gone also avoids a one-frame flash on cold start, before that listener first runs.
 -->
 <app.lawnchair.areslauncher.AresSearchContainerView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@id/search_container_all_apps"
     android:layout_width="match_parent"
-    android:layout_height="@dimen/ares_search_collapsed_size">
+    android:layout_height="@dimen/ares_search_collapsed_size"
+    android:visibility="gone">
 
     <FrameLayout
         android:id="@+id/ares_search_pill"
