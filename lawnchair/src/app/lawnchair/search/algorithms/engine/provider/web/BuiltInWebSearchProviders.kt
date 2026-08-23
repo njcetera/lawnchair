@@ -64,8 +64,10 @@ object GoogleWebSearchProvider : WebSearchProvider {
         }
 
         try {
-            val encodedQuery = Uri.encode(query)
-            val response = service.getSuggestions(query = encodedQuery)
+            // Retrofit's @Query already URL-encodes the value; pre-encoding here double-encoded
+            // multi-word queries (a space became %20, then the % became %25), so a query like
+            // "Miley Cyrus" returned no suggestions while single words worked. Pass it raw.
+            val response = service.getSuggestions(query = query)
 
             if (response.isSuccessful) {
                 val responseBody = response.body() ?: ""
@@ -149,8 +151,10 @@ object DuckDuckGoWebSearchProvider : WebSearchProvider {
 
         try {
             // 2. Call the Retrofit service.
-            val encodedQuery = Uri.encode(query)
-            val response = service.getSuggestions(query = encodedQuery)
+            // Retrofit's @Query already URL-encodes the value; pre-encoding here double-encoded
+            // multi-word queries (a space became %20, then the % became %25), so a query like
+            // "Miley Cyrus" returned no suggestions while single words worked. Pass it raw.
+            val response = service.getSuggestions(query = query)
 
             if (response.isSuccessful) {
                 val responseBody = response.body()?.string() ?: ""
@@ -231,8 +235,10 @@ object StartPageWebSearchProvider : WebSearchProvider {
         }
 
         try {
-            val encodedQuery = Uri.encode(query)
-            val response = service.getSuggestions(query = encodedQuery)
+            // Retrofit's @Query already URL-encodes the value; pre-encoding here double-encoded
+            // multi-word queries (a space became %20, then the % became %25), so a query like
+            // "Miley Cyrus" returned no suggestions while single words worked. Pass it raw.
+            val response = service.getSuggestions(query = query)
 
             if (response.isSuccessful) {
                 val responseBody = response.body() ?: ""
@@ -311,8 +317,10 @@ object StartPageEUWebSearchProvider : WebSearchProvider {
         }
 
         try {
-            val encodedQuery = Uri.encode(query)
-            val response = service.getSuggestions(query = encodedQuery)
+            // Retrofit's @Query already URL-encodes the value; pre-encoding here double-encoded
+            // multi-word queries (a space became %20, then the % became %25), so a query like
+            // "Miley Cyrus" returned no suggestions while single words worked. Pass it raw.
+            val response = service.getSuggestions(query = query)
 
             if (response.isSuccessful) {
                 val responseBody = response.body() ?: ""
@@ -378,8 +386,10 @@ object KagiWebSearchProvider : WebSearchProvider {
         }
 
         try {
-            val encodedQuery = Uri.encode(query)
-            val response = service.getSuggestions(query = encodedQuery)
+            // Retrofit's @Query already URL-encodes the value; pre-encoding here double-encoded
+            // multi-word queries (a space became %20, then the % became %25), so a query like
+            // "Miley Cyrus" returned no suggestions while single words worked. Pass it raw.
+            val response = service.getSuggestions(query = query)
 
             if (response.isSuccessful) {
                 val responseBody = response.body() ?: ""
