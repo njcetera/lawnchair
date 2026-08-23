@@ -32,12 +32,16 @@ class AresSearchHighlightDecoration(context: Context) : RecyclerView.ItemDecorat
         context.resources.getDimensionPixelSize(R.dimen.ares_search_highlight_inset).toFloat()
     private val rect = RectF()
 
-    /** Set true only while a query is showing results; see AresSearchContainerView. */
-    var active = false
+    /**
+     * Adapter position of the row to highlight — the first launchable result — or -1 for none.
+     * Set from AresSearchContainerView; usually 0 (top app), but a query yielding only rich results
+     * highlights the first real row beneath its section header rather than the header itself.
+     */
+    var activePosition = -1
 
     override fun onDraw(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        if (!active) return
-        val holder = parent.findViewHolderForAdapterPosition(0) ?: return
+        if (activePosition < 0) return
+        val holder = parent.findViewHolderForAdapterPosition(activePosition) ?: return
         val view = holder.itemView
         val top = view.y
         rect.set(insetHorizontal, top, parent.width - insetHorizontal, top + view.height)

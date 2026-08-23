@@ -70,7 +70,11 @@ class AresSearchContainerView @JvmOverloads constructor(
     private var appsView: ActivityAllAppsContainerView<*>? = null
 
     /** The current top search result — the default the keyboard's search action launches. */
-    private var topResult: com.android.launcher3.model.data.AppInfo? = null
+    /** Adapter position of the highlighted top (first launchable) result, or -1 when there is none. */
+    private var topResultPosition: Int = -1
+
+    /** The highlighted top result itself, kept so [launchTopResult] can route apps vs. rich results. */
+    private var topResultItem: AdapterItem? = null
 
     /** Draws the top-result highlight on the search recycler; toggled from the search callback. */
     private var highlightDecoration: AresSearchHighlightDecoration? = null
@@ -415,16 +419,22 @@ class AresSearchContainerView @JvmOverloads constructor(
             object : SearchCallback<AdapterItem> {
                 override fun onSearchResult(query: String, items: ArrayList<AdapterItem>?) {
                     if (items == null) return
-                    // Top result becomes the default the keyboard's search action launches.
-                    topResult = items.firstOrNull()?.itemInfo
+                    // The highlighted default the keyboard's action launches is the first LAUNCHABLE
+                    // row — skipping section headers. With apps on top that is position 0; for a
+                    // query yielding only rich results (calculator, settings, contact, web) it is the
+                    // first real row beneath its section header.
+                    val pos = items.indexOfFirst { it.isLaunchable() }
+                    topResultPosition = pos
+                    topResultItem = pos.takeIf { it >= 0 }?.let { items[it] }
                     containerView.setSearchResults(items)
-                    highlight.active = topResult != null
+                    highlight.activePosition = pos
                     containerView.mSearchRecyclerView.invalidateItemDecorations()
                 }
 
                 override fun clearSearchResult() {
-                    topResult = null
-                    highlight.active = false
+                    topResultPosition = -1
+                    topResultItem = null
+                    highlight.activePosition = -1
                     containerView.mSearchRecyclerView.invalidateItemDecorations()
                     containerView.onClearSearchResult()
                 }
@@ -482,13 +492,36 @@ class AresSearchContainerView @JvmOverloads constructor(
         }
     }
 
-    /** Launches the highlighted top result, if any; the source view drives the launch animation. */
+    /**
+     * Launches the highlighted top result, if any; the source view drives the launch animation.
+     * App rows go through the launcher's safe-launch path (as before); every other result type —
+     * settings, contacts, files, calculator, web suggestions — fires its row's own click action, so
+     * the keyboard's enter/search key matches a tap on the highlighted row (owner).
+     */
     private fun launchTopResult(): Boolean {
-        val top = topResult ?: return false
-        val intent = top.getIntent() ?: return false
-        val source = appsView?.mSearchRecyclerView?.findViewHolderForAdapterPosition(0)?.itemView
-            ?: this
-        return Launcher.getLauncher(context).startActivitySafely(source, intent, top) != null
+        val pos = topResultPosition
+        if (pos < 0) return false
+        val source = appsView?.mSearchRecyclerView?.findViewHolderForAdapterPosition(pos)?.itemView
+            ?: return false
+        val info = topResultItem?.itemInfo
+        if (info is com.android.launcher3.model.data.AppInfo) {
+            val intent = info.getIntent() ?: return false
+            return Launcher.getLauncher(context).startActivitySafely(source, intent, info) != null
+        }
+        return source.performClick()
+    }
+
+    /**
+     * Whether a row can be launched by enter — i.e. it is a real result, not a section header,
+     * empty-state card, or divider. Our plain app rows are not [SearchAdapterItem]s, so they are
+     * always launchable.
+     */
+    private fun AdapterItem.isLaunchable(): Boolean {
+        val target = (this as? app.lawnchair.search.adapter.SearchAdapterItem)?.searchTarget
+            ?: return true
+        return target.resultType != app.lawnchair.search.adapter.SearchTargetCompat.RESULT_TYPE_SECTION_HEADER &&
+            target.resultType != app.lawnchair.search.adapter.SearchTargetCompat.RESULT_TYPE_EMPTY_RESULT &&
+            target.layoutType != com.android.app.search.LayoutType.EMPTY_DIVIDER
     }
 
     /**
