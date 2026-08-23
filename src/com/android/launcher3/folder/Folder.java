@@ -578,6 +578,11 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // outcome, including a cancel that never reaches a drop target.
         mAresDragContentHeight = 0;
         mActivityContext.getDragController().removeDragListener(this);
+        // state-seam P4a: drag-end is the third checkpoint (with open-complete and close-complete)
+        // where the open/closed/destroyed facets should be settled and agreeing. A drag that ended
+        // by pulling the last item out, or a create/dissolve race, is exactly where a facet is left
+        // latched -- catch it forming here rather than at the next declined tap.
+        aresLogSeamInvariants("drag-end");
     }
 
     public void startEditingFolderName() {
