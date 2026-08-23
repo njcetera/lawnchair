@@ -663,8 +663,17 @@ class AresSearchContainerView @JvmOverloads constructor(
                 if (fadeInInput) input.alpha = animator.animatedFraction
                 if (fadeOutInput) input.alpha = 1f - animator.animatedFraction
             }
-            addListener(
-                onEnd = {
+            // Explicit AnimatorListenerAdapter (not the KTX addListener(onCancel=,onEnd=), whose
+            // overload resolution falls back to the Java method once onCancel is named) so we can
+            // tell a natural end from a cancel.
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: android.animation.Animator) {
                     widthAnimator = null
                     // Pin the final width explicitly rather than trusting the last animation frame.
                     // If the animator is cancelled, or the device has its animator duration scale
@@ -674,9 +683,15 @@ class AresSearchContainerView @JvmOverloads constructor(
                     lp.width = target
                     pill.layoutParams = lp
                     if (fadeInInput) input.alpha = 1f
-                    onEnd()
-                },
-            )
+                    // Run the completion ONLY on a natural end. A cancel also fires onAnimationEnd,
+                    // and collapse() cancels a still-running expand as its first step — whose
+                    // completion is focusAndRaiseKeyboard(). Without this guard, tapping the close
+                    // fob during the ~180ms open morph re-focuses the field and re-raises the IME
+                    // right after collapse asked to drop it (a keyboard flash). The superseding
+                    // animation owns the field's next state, so the cancelled one must not complete.
+                    if (!cancelled) onEnd()
+                }
+            })
             start()
         }
     }
