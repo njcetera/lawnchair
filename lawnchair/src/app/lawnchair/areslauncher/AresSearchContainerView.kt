@@ -530,19 +530,33 @@ class AresSearchContainerView @JvmOverloads constructor(
         icon.imageTintList = android.content.res.ColorStateList.valueOf(
             context.getColor(R.color.ares_search_close_icon),
         )
-        // Raise the keyboard on the NEXT frame — after this expand's layout pass — rather than
-        // synchronously here. Focusing before the freshly-shown input is laid out left it with a
-        // half-established input connection: typing (commitText) worked, but backspace didn't, until
-        // the field was tapped (which is what re-established the connection). Posting establishes the
-        // connection cleanly so backspace works first try. One frame is still perceptually immediate,
-        // and the insets follower slides the bar up in step with the keyboard.
-        input.post {
-            if (!input.isVisible) return@post // collapsed again before we ran
-            input.requestFocus()
-            input.setSelection(input.text?.length ?: 0)
-            input.showKeyboard()
-        }
-        animateWidthTo(expandedWidth(), fadeInInput = true) {}
+        // Focus the field and raise the keyboard when the expand morph COMPLETES — see
+        // [focusAndRaiseKeyboard]. Collapsed, the field measures ZERO wide (its start margin plus
+        // its trailing-icon end inset exceed the collapsed pill), and the morph grows it to full
+        // width over ~180ms. Focusing while the field is zero-width or mid-morph is unreliable: the
+        // IME can stay served to the launcher's DecorView (keyboard never shows), or bind an input
+        // connection with a stale cursor so typing works but backspace no-ops — and because it
+        // depends on where in the animation the focus lands, it presents as *flaky* (both bugs
+        // sometimes, neither other times). Focusing on the settled, full-width field is what a
+        // normal tap does, so it deterministically serves the IME with a correct cursor.
+        animateWidthTo(expandedWidth(), fadeInInput = true) { focusAndRaiseKeyboard() }
+    }
+
+    /**
+     * Serves the IME to the (now settled, full-width) input: request focus, place the cursor at the
+     * end, and raise the keyboard. Called from the expand morph's completion so the field is laid
+     * out at full width — the same preconditions a normal tap satisfies, which is why focus binds a
+     * clean input connection with a correct cursor and backspace works first try. The keyboard is
+     * raised both through [ExtendedEditText.showKeyboard] (SHOW_IMPLICIT) and the insets controller's
+     * `show(ime())` for reliability; the insets follower rides the bar up with it.
+     */
+    private fun focusAndRaiseKeyboard() {
+        if (!input.isVisible) return // collapsed again before the morph finished
+        input.requestFocus()
+        input.setSelection(input.text?.length ?: 0)
+        input.showKeyboard()
+        androidx.core.view.ViewCompat.getWindowInsetsController(input)
+            ?.show(androidx.core.view.WindowInsetsCompat.Type.ime())
     }
 
     private fun collapse() {
