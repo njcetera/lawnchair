@@ -210,6 +210,24 @@ object AresFolderExitHandoff : DragController.DragListener {
         declinedFor = null
     }
 
+    /**
+     * Drops handoff state pinned to [launcher] when its activity is destroyed (state-seam P5 /
+     * ledger S5). [onDragEnd] normally clears `list`/`host`, but a fold recreates the Launcher
+     * mid-handoff and [onDragEnd] may never fire — leaving a dead [AresHomeListView] and Launcher
+     * behind. [isActive] would then stay true and the next folder-exit drag would relay a synthetic
+     * event into a detached grid. Nulling our own static refs here is safe (a normal drag still
+     * clears them in [onDragEnd]) and closes the leak. Called from `LawnchairLauncher.onDestroy`.
+     */
+    @JvmStatic
+    fun onLauncherDestroyed(launcher: Launcher) {
+        if (host !== launcher) return
+        list = null
+        host = null
+        dropped = false
+        teardownHold = false
+        declinedFor = null
+    }
+
     /** Past the ~250ms settle plus margin; the in-grid ending has cleared the dwell by then. */
     private const val TEARDOWN_HOLD_MS = 800L
 }

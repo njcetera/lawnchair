@@ -32,6 +32,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
+import app.lawnchair.areslauncher.AresFolderExitHandoff
+import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.compat.LawnchairQuickstepCompat
 import app.lawnchair.data.AppDatabase
 import app.lawnchair.data.wallpaper.service.WallpaperService
@@ -667,6 +669,14 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onDestroy() {
+        // state-seam P5 / ledger S5: drop any folder-drag state pinned to THIS activity before it
+        // goes. These are process-global singletons; a fold recreates the Launcher and, mid-drag,
+        // their per-drag terminal callbacks (onDragEnd / preview close) may never fire — leaving a
+        // dead Launcher and grid behind, so isActive() stays true and the next folder-exit drag
+        // relays into a detached grid, or a ghost icon outlives the activity. Both clears are safe
+        // to call when nothing is in flight (guarded / no-op).
+        AresFolderExitHandoff.onLauncherDestroyed(this)
+        AresFolderPreview.close()
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()
