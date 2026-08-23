@@ -56,8 +56,17 @@ object AresFolderExitHandoff : DragController.DragListener {
     /** True once the real drop was consumed, so [onDragEnd] relays UP rather than CANCEL. */
     private var dropped = false
 
-    /** Set while this drag has been declined (conversion failed); stops re-tries every move. */
-    private var declined = false
+    /**
+     * The drag object this handoff has DECLINED (conversion failed), so its every later move is
+     * waved through to the old pipeline instead of retried. Scoped to the specific [DragObject]
+     * rather than a process-global boolean: the decline paths below run *before* [addDragListener],
+     * so [onDragEnd] — the only reset — never fires for a declined drag. A boolean therefore latched
+     * true for the rest of the process and disabled the in-grid pipeline permanently (ledger row 36,
+     * state-seam P5). `DragObject` is created fresh per drag (`LauncherDragController` builds a new
+     * one in `startDrag`), so `d === declinedFor` only suppresses the drag that was actually
+     * declined; the next drag's new object clears the block by identity.
+     */
+    private var declinedFor: DropTarget.DragObject? = null
 
     private var downTime = 0L
 
@@ -96,14 +105,14 @@ object AresFolderExitHandoff : DragController.DragListener {
             relay(MotionEvent.ACTION_MOVE, x, y)
             return true
         }
-        if (declined) return false
+        if (d === declinedFor) return false
         val info = d.dragInfo ?: return false
         // Same population as the §C4 slot: an item that already has a row. Everything else
         // (picker widgets, app-list drags) keeps the existing pipeline.
         if (info.id == ItemInfo.NO_ID) return false
         if (!grid.isEditMode()) {
             // The in-grid pipeline is an edit-mode machine; outside it, keep the old path.
-            declined = true
+            declinedFor = d
             return false
         }
 
@@ -112,7 +121,7 @@ object AresFolderExitHandoff : DragController.DragListener {
         val cell = IntArray(2)
         val screenId = AresWidgetAdd.findFreeCell(launcher, info.spanX, info.spanY, cell, info.id)
         if (screenId == AresWidgetAdd.NO_SCREEN) {
-            declined = true
+            declinedFor = d
             return false
         }
         val at = grid.dropIndexAt(x, y).coerceIn(0, grid.aresAdapter.itemCount)
@@ -139,7 +148,7 @@ object AresFolderExitHandoff : DragController.DragListener {
             // (the item stays desktop-bound — the drop will place it) and decline.
             Log.w(TAG, "handoff declined: no holder for id=${info.id} after layout")
             grid.aresAdapter.removeItems { it === info }
-            declined = true
+            declinedFor = d
             return false
         }
 
@@ -184,7 +193,7 @@ object AresFolderExitHandoff : DragController.DragListener {
      * latch downstream keys on.
      */
     override fun onDragEnd() {
-        val grid = list ?: run { declined = false; return }
+        val grid = list ?: run { declinedFor = null; return }
         val last = grid.lastHandoffPoint()
         // Hold dwell-teardown ownership through the settle window; see [ownsDwellTeardown].
         teardownHold = true
@@ -198,7 +207,7 @@ object AresFolderExitHandoff : DragController.DragListener {
         list = null
         host = null
         dropped = false
-        declined = false
+        declinedFor = null
     }
 
     /** Past the ~250ms settle plus margin; the in-grid ending has cleared the dwell by then. */
