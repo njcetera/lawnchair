@@ -240,12 +240,12 @@ public class AllAppsRecyclerView extends FastScrollRecyclerView {
             return;
         }
 
-        // Skip early if, there no child laid out in the container.
-        int scrollY = computeVerticalScrollOffset();
-        if (scrollY < 0) {
-            mScrollbar.setThumbOffsetY(-1);
-            return;
-        }
+        // AresLauncher: clamp instead of hiding. A transient negative offset — overscroll when the
+        // list is pulled past its very top — used to hide the fast-scroll thumb and leave it hidden
+        // until the next downward scroll, so the thumb "disappeared at the top of the list" (owner).
+        // The genuinely-empty / not-laid-out case is still handled by the availableScrollHeight <= 0
+        // guard below (an empty list has no scroll range, so that check sets the thumb to -1).
+        int scrollY = Math.max(0, computeVerticalScrollOffset());
 
         if (Flags.letterFastScroller() && !mScrollbar.isDraggingThumb()) {
             setLettersToScrollLayout(mApps.getFastScrollerSections());

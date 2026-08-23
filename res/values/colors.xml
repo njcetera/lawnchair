@@ -467,13 +467,35 @@
     <color name="ares_search_close_container">@color/system_accent3_100</color>
     <color name="ares_search_close_icon">@color/system_accent3_900</color>
 
+    <!-- Shared Material You tonal for the small icon-button family (edit-mode remove/info badges).
+         Same tertiary tonal the §17 search close uses, as a shared token so the owner can retune
+         all the icon buttons from one place. Dark values in res/values-night/colors.xml. -->
+    <color name="ares_my_icon_button_container">@color/system_accent1_700</color>
+    <color name="ares_my_icon_button_icon">@color/system_accent1_100</color>
+
+    <!-- Edit-mode frosted tile fill tint: a subtle Material You light green (owner, 2026-08-23).
+         Applied at FROST_FILL_ALPHA in AresEditGrid.cellOutline, so it stays a faint veil. -->
+    <color name="ares_edit_fill_tint">@color/system_accent1_100</color>
+
+    <!-- App-list section headers (letters + recents clock) as Material You tertiary chips, to
+         mimic the home widgets' brown/orange cards (owner, 2026-08-23): an accent3 (tertiary)
+         container behind light on-container text/icon. Same tones in both themes so the chip stays
+         a brown/orange with light text regardless of light/dark. The recents icon tints from the
+         text colour. -->
+    <color name="ares_section_header_bg">@color/system_accent1_800</color>
+    <color name="ares_section_header_color">@color/system_accent1_100</color>
+
+    <!-- §17 search bar surface, Material You (owner, 2026-08-23). Neutral-variant tonal so it
+         carries a faint wallpaper tint (green on this palette) rather than plain white/gray. -->
+    <color name="ares_search_bar_surface">@color/materialColorPrimary</color>
+
     <!--
          §17 search: fill for the top-result highlight (the default selection the keyboard's search
          action launches). The dark tertiary tone (accent3_700, tone 30) reads the same in light and
          dark and stays dark enough that the row's white label keeps contrast; the decoration draws it
          translucent. No -night variant: this Monet tone is theme-independent.
     -->
-    <color name="ares_search_highlight">@color/system_accent3_700</color>
+    <color name="ares_search_highlight">@color/system_accent1_700</color>
 
     <!--
          §8 fast-scroller letter popup. Stock painted the bubble with ?attr/colorAccent, which on a
@@ -482,6 +504,6 @@
          (accent1_0, on-primary) restores contrast; both are raw Monet tones, theme-independent, so
          no -night variant is needed.
     -->
-    <color name="ares_fastscroll_popup_bg">@color/system_accent1_700</color>
-    <color name="ares_fastscroll_popup_text">@color/system_accent1_0</color>
+    <color name="ares_fastscroll_popup_bg">@color/system_accent1_800</color>
+    <color name="ares_fastscroll_popup_text">@color/system_accent1_100</color>
 </resources>

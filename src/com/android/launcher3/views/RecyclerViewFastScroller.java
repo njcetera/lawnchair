@@ -219,8 +219,12 @@ public class RecyclerViewFastScroller extends View {
         mTrackPaint.setColor(ColorTokens.TextColorPrimary.resolveColor(getContext()));
         mTrackPaint.setAlpha(MAX_TRACK_ALPHA);
 
-        mThumbColor = Themes.getColorAccent(context);
-        mThumbLetterScrollerColor = context.getColor(R.color.materialColorSurfaceBright);
+        // AresLauncher: the grab thumb matches the search fob's surface (@color/ares_search_bar_surface),
+        // so the two Material You affordances on the app list read as the same green (owner).
+        mThumbColor = context.getColor(R.color.ares_search_bar_surface);
+        // During letter fast-scroll the thumb enlarges into a circle; keep it the same colour as the
+        // resting thumb so the whole quick-scroll indicator (thumb, circle, popup bubble) is one family.
+        mThumbLetterScrollerColor = mThumbColor;
         mThumbPaint = new Paint();
         mThumbPaint.setAntiAlias(true);
         mThumbPaint.setColor(mThumbColor);

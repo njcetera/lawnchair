@@ -16,6 +16,6 @@
     android:insetRight="8dp"
     android:insetBottom="8dp">
     <shape android:shape="oval">
-        <solid android:color="@color/ares_search_close_container" />
+        <solid android:color="@color/ares_my_icon_button_container" />
     </shape>
 </inset>

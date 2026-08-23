@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher: brown/orange chip behind an app-list section header (letter or recents icon),
+     mimicking the home widgets' Material You tertiary cards (owner, 2026-08-23). Solid accent3
+     (tertiary) container; the letter/icon sits on it in the light on-container tone.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/ares_section_header_bg" />
+    <corners android:radius="12dp" />
+</shape>

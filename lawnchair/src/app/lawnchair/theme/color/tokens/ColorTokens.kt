@@ -93,7 +93,11 @@ object ColorTokens {
 
     @JvmField val AllAppsHeaderProtectionColor = DayNightColorToken(SurfaceContainerHighest, SurfaceContainerLow)
 
-    @JvmField val AllAppsScrimColor = StaticColorToken(0x404040).setAlpha(.40f)
+    // AresLauncher: the home->app-list swipe scrim still darkens, but from the wallpaper-derived
+    // Material You green instead of a flat neutral gray, so the fade carries a theme hue (owner,
+    // 2026-08-23). Accent1_800 (not the near-black _900) so the green actually reads; 40% strength
+    // keeps it a darkening fade with a visible hue rather than a heavy wash.
+    @JvmField val AllAppsScrimColor = Accent1_800.setAlpha(.40f)
 
     @JvmField val AllAppsTabBackground = DayNightColorToken(Neutral1_100, Neutral1_800.setLStar(22.0))
 

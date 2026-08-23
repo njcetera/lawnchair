@@ -21,7 +21,7 @@
         android:height="@dimen/ares_remove_badge_size"
         android:gravity="center">
         <shape android:shape="oval">
-            <solid android:color="?attr/popupColorPrimary" />
+            <solid android:color="@color/ares_my_icon_button_container" />
         </shape>
     </item>
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-     AresLauncher: letter section header (A / B / C) for the app-list pane.
+     AresLauncher: letter section header (A / B / C) for the app-list pane, as a Material You chip.
 
      Ares-owned rather than a shared layout: BaseAllAppsAdapter serves the Taskbar's all-apps
      sheet and the secondary-display host as well as our pane, and editing shared all-apps
@@ -8,28 +8,29 @@
      VIEW_TYPE_ARES_SECTION_HEADER, which is only ever produced behind
      AresAllApps.isAresAppListPane(), so stock surfaces never reach it.
 
-     Visual intent (design/implementation-scope.md §8, Niagara traits 3-4): the letter is a
-     signpost, not content. Smaller and dimmer than the 17sp app labels it groups, on a shorter
-     row, so the list still reads as sparse and text-forward rather than gaining chrome.
-
-     textColor resolves against the wallpaper via workspaceTextColor for the same reason the row
-     layout does: since the CONVERGENCE TARGET restyle the pane draws directly on the wallpaper
-     with no sheet behind it, so the style default (textColorSecondary, which assumes an opaque
-     light sheet) renders dark-on-dark. alpha de-emphasises it without a second colour attribute,
-     which would have to be resolved against the wallpaper all over again.
+     Visual intent (owner, 2026-08-23): a small brown/orange chip that mimics the home widgets'
+     Material You tertiary cards — an accent3 (tertiary) container behind a light on-container
+     letter or recents icon (the icon tints from the text colour). wrap_content so the chip hugs
+     the letter; a start margin keeps it aligned under the app rows. Larger than the old bare
+     letter, but still a signpost rather than content.
 -->
 <TextView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/ares_section_header"
-    android:layout_width="match_parent"
-    android:layout_height="@dimen/ares_section_header_height"
-    android:alpha="0.6"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="@dimen/ares_app_row_padding_horizontal"
+    android:layout_marginTop="@dimen/ares_section_header_padding_top"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/ares_section_header_bg"
     android:ellipsize="end"
-    android:gravity="start|bottom"
+    android:gravity="center"
     android:maxLines="1"
-    android:paddingStart="@dimen/ares_app_row_padding_horizontal"
-    android:paddingTop="@dimen/ares_section_header_padding_top"
-    android:paddingEnd="@dimen/ares_app_row_padding_horizontal"
+    android:minWidth="40dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
     android:textAllCaps="true"
-    android:textColor="?attr/workspaceTextColor"
-    android:textSize="@dimen/ares_section_header_text_size"
+    android:textColor="@color/ares_section_header_color"
+    android:textSize="15sp"
     android:textStyle="bold" />

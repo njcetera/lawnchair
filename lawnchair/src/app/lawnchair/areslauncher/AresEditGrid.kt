@@ -126,7 +126,10 @@ object AresEditGrid {
      */
     fun cellOutline(context: Context): Drawable {
         val res = context.resources
-        val colour = editColor(context)
+        // The frosted fill takes a subtle Material You light green (owner, 2026-08-23) rather than
+        // the workspaceTextColor the dots/outlines use, so the pane reads as a faint green tint. The
+        // low FROST_FILL_ALPHA keeps it subtle; the grid dots still flip with the wallpaper.
+        val colour = context.getColor(R.color.ares_edit_fill_tint)
         // Top-to-bottom so the pane is brightest where light would strike it.
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
@@ -164,7 +167,9 @@ object AresEditGrid {
     ) : RecyclerView.ItemDecoration() {
 
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = editColor(context)
+            // Same subtle Material You light green as the frosted fill (owner, 2026-08-23), so the
+            // grid markers read as one system with the tile tint rather than the label colour.
+            color = context.getColor(R.color.ares_edit_fill_tint)
             style = Paint.Style.FILL
         }
 

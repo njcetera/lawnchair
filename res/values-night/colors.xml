@@ -21,6 +21,18 @@
     <color name="ares_search_close_container">@color/system_accent3_800</color>
     <color name="ares_search_close_icon">@color/system_accent3_100</color>
 
+    <!-- Shared Material You icon-button tonal, dark theme. See res/values/colors.xml. -->
+    <color name="ares_my_icon_button_container">@color/system_accent1_700</color>
+    <color name="ares_my_icon_button_icon">@color/system_accent1_100</color>
+
+    <!-- §17 search bar surface, dark. See res/values/colors.xml. -->
+    <color name="ares_search_bar_surface">@color/materialColorPrimary</color>
+
+    <!-- App-list section header chip (tertiary/brown + light text), dark theme. Same tones as
+         res/values/colors.xml so the brown chip matches the home widgets in both themes. -->
+    <color name="ares_section_header_bg">@color/system_accent1_800</color>
+    <color name="ares_section_header_color">@color/system_accent1_100</color>
+
     <color name="materialColorBackground">@color/system_background_dark</color>
     <color name="materialColorControlActivated">@color/system_control_activated_dark</color>
     <color name="materialColorControlHighlight">@color/system_control_highlight_dark</color>
