@@ -159,6 +159,8 @@ public class RecyclerViewFastScroller extends View {
     private ObjectAnimator mWidthAnimator;
 
     private final Paint mThumbPaint;
+    /** AresLauncher §8: darker fill for the letter popup bubble, distinct from the thumb accent. */
+    private final Paint mPopupBgPaint;
     protected final int mThumbHeight;
     private final RectF mThumbBounds = new RectF();
     private final Point mThumbDrawOffset = new Point();
@@ -224,6 +226,14 @@ public class RecyclerViewFastScroller extends View {
         mThumbPaint.setColor(mThumbColor);
         mThumbPaint.setStyle(Paint.Style.FILL);
 
+        // AresLauncher §8: the letter popup gets its own darker bubble, separate from the thumb.
+        // ?attr/colorAccent is a light tone on a dark theme, which read as too pale behind the
+        // letter; a dark primary tone with a near-white letter restores the contrast (owner).
+        mPopupBgPaint = new Paint();
+        mPopupBgPaint.setAntiAlias(true);
+        mPopupBgPaint.setColor(context.getColor(R.color.ares_fastscroll_popup_bg));
+        mPopupBgPaint.setStyle(Paint.Style.FILL);
+
         Resources res = getResources();
         mWidth = mMinWidth = res.getDimensionPixelSize(R.dimen.fastscroll_track_min_width);
         mMaxWidth = res.getDimensionPixelSize(R.dimen.fastscroll_track_max_width);
@@ -245,8 +255,11 @@ public class RecyclerViewFastScroller extends View {
     /** Sets the popup view to show while the scroller is being dragged */
     public void setPopupView(TextView popupView) {
         mPopupView = popupView;
+        // AresLauncher §8: darker bubble + pinned near-white letter, so the letter stays legible
+        // regardless of what ?attr/textColorPrimaryInverse resolves to in the current theme.
         mPopupView.setBackground(
-                new FastScrollThumbDrawable(mThumbPaint, Utilities.isRtl(getResources())));
+                new FastScrollThumbDrawable(mPopupBgPaint, Utilities.isRtl(getResources())));
+        mPopupView.setTextColor(getContext().getColor(R.color.ares_fastscroll_popup_text));
     }
 
     public void setRecyclerView(FastScrollRecyclerView rv) {

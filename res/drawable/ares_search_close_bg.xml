@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher §17 — background for the expanded search field's trailing close (✕) button.
+
+     A Material You filled-tonal icon button: a ~40dp tonal circle (the secondary-container tone)
+     inset within the 56dp trailing tap target, so the ✕ reads as a distinct, tappable button
+     rather than a bare glyph. The 8dp inset leaves the surrounding touch area full-size while the
+     visible circle stays the M3 icon-button size (40dp circle around a 24dp icon).
+
+     Applied/removed in code (AresSearchContainerView.expand/collapse); the collapsed pill is itself
+     the circular search affordance, so this button only exists while expanded.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="8dp"
+    android:insetTop="8dp"
+    android:insetRight="8dp"
+    android:insetBottom="8dp">
+    <shape android:shape="oval">
+        <solid android:color="@color/ares_search_close_container" />
+    </shape>
+</inset>

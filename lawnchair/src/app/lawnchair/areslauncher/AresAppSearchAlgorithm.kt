@@ -23,13 +23,24 @@ import java.util.Locale
 class AresAppSearchAlgorithm(private val appsStore: AllAppsStore<*>) : SearchAlgorithm<AdapterItem> {
 
     override fun doSearch(query: String, callback: SearchCallback<AdapterItem>) {
-        val normalized = query.normalizeForSearch()
-        if (normalized.isEmpty()) {
+        val results = search(query)
+        if (results == null) {
             callback.clearSearchResult()
-            return
+        } else {
+            callback.onSearchResult(query, results, SearchCallback.FINAL)
         }
+    }
 
-        val scored = appsStore.apps
+    /**
+     * The app-name match, exposed so the hybrid ([AresRichSearchAlgorithm]) can reuse the exact same
+     * ranked app rows and render them plainly above the richer category results. Returns null for an
+     * empty query (i.e. "clear"), an ArrayList of app [AdapterItem]s otherwise.
+     */
+    fun search(query: String): ArrayList<AdapterItem>? {
+        val normalized = query.normalizeForSearch()
+        if (normalized.isEmpty()) return null
+
+        return appsStore.apps
             .mapNotNull { app ->
                 val title = app.title?.toString()?.normalizeForSearch() ?: return@mapNotNull null
                 val rank = rank(title, normalized) ?: return@mapNotNull null
@@ -38,8 +49,6 @@ class AresAppSearchAlgorithm(private val appsStore: AllAppsStore<*>) : SearchAlg
             // Rank first, then alphabetically so equal-rank results have a stable, predictable order.
             .sortedWith(compareBy({ it.second }, { it.first.title?.toString()?.lowercase(Locale.getDefault()) }))
             .mapTo(ArrayList()) { AdapterItem.asApp(it.first) }
-
-        callback.onSearchResult(query, scored, SearchCallback.FINAL)
     }
 
     /** Lower is better; null means no match. */

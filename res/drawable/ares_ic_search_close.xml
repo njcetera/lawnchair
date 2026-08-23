@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher §17 — close (✕) glyph for the app-list search's tonal close button.
+
+     Authored in the Material Symbols style (thin, round-capped strokes) to match the newer Material
+     You iconography on the keyboard's action buttons, rather than the older filled/sharp Material
+     Icons "close" (res/drawable/ic_close.xml, ic_gm_close_24.xml) which read as heavier.
+
+     Two round-capped diagonal strokes on a 24dp canvas. Stroke colour is white so the ImageView's
+     imageTintList (the on-tertiary-container tone) recolours it cleanly.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:pathData="M7.5,7.5 L16.5,16.5" />
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:pathData="M16.5,7.5 L7.5,16.5" />
+</vector>

@@ -4,8 +4,8 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.util.AttributeSet
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -68,6 +68,15 @@ class AresSearchContainerView @JvmOverloads constructor(
     private lateinit var pill: View
 
     private var appsView: ActivityAllAppsContainerView<*>? = null
+
+    /** The current top search result — the default the keyboard's search action launches. */
+    private var topResult: com.android.launcher3.model.data.AppInfo? = null
+
+    /** Draws the top-result highlight on the search recycler; toggled from the search callback. */
+    private var highlightDecoration: AresSearchHighlightDecoration? = null
+
+    /** Guards the one-shot contacts/media permission request; see [maybeRequestSearchPermissions]. */
+    private var requestedSearchPerms = false
     /**
      * Derived from the input's visibility rather than tracked in a separate boolean.
      *
@@ -80,8 +89,22 @@ class AresSearchContainerView @JvmOverloads constructor(
         get() = input.isVisible
     private var widthAnimator: ValueAnimator? = null
 
-    /** Bottom inset contributed by the IME, so the affordance rides above the keyboard. */
-    private var imeInset = 0
+    /** The collapsed search glyph's XML tint, restored on collapse; see [onFinishInflate]. */
+    private var defaultIconTint: android.content.res.ColorStateList? = null
+
+    /** Material fast-out-slow-in for the expand/collapse width morph. */
+    private val morphInterpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
+
+    /** Last known IME bottom inset (px), so [onEnd] of the insets animation can settle to it. */
+    private var lastImeBottom = 0
+
+    /**
+     * True while the IME is mid-animation (open or close). During that window the per-frame
+     * [androidx.core.view.WindowInsetsAnimationCompat] callback owns [translationY], and
+     * [onApplyWindowInsets] — which is dispatched once with the *final* insets — must not also set
+     * it, or the bar would snap to its end position and then be re-animated (the "pops in" glitch).
+     */
+    private var imeAnimating = false
 
     /**
      * Gates the whole affordance to the app-list pane. Registered while attached; see
@@ -121,14 +144,70 @@ class AresSearchContainerView @JvmOverloads constructor(
         resources.getDimensionPixelSize(R.dimen.ares_search_margin_bottom)
     }
 
+    /** Snug gap kept between the bar and the top of the keyboard while the IME is up. */
+    private val imeGap by lazy {
+        resources.getDimensionPixelSize(R.dimen.ares_search_ime_gap)
+    }
+
+    private val tmpLoc = IntArray(2)
+
+    /**
+     * Sits the bar [imeGap] above the top of the keyboard while it is up, and at its resting spot
+     * (translationY 0) when it is down.
+     *
+     * Anchors to the bar's *actual* window position rather than assuming it rests exactly
+     * [marginBottom] above the window bottom: this container is a `DragLayer` child, and the
+     * `DragLayer` is itself inset by the gesture-nav bar, so a resting-offset assumption left that
+     * nav inset sitting in the gap (~24dp too much space). Both the bar's bottom (via
+     * [getLocationInWindow]) and the IME inset are measured against the same full-screen window, so
+     * the result is correct regardless of nav-bar size. Self-correcting per frame, so the
+     * insets-animation callback can call it each step for a smooth ride.
+     */
+    private fun applyImeTranslation(imeBottom: Int) {
+        if (imeBottom <= 0) {
+            translationY = 0f
+            return
+        }
+        val root = rootView ?: return
+        getLocationInWindow(tmpLoc)
+        // Laid-out bottom in window coords, with the current translation removed (getLocationInWindow
+        // includes it) — constant across frames.
+        val restBottom = (tmpLoc[1] + height) - translationY
+        val keyboardTop = root.height - imeBottom
+        // Only ever ride UP to sit imeGap above the keyboard; never dip below the resting spot. Early
+        // in the keyboard's slide the keyboard top is still below the resting bar, so min() keeps the
+        // bar put until the keyboard rises past it, then it tracks the keyboard the rest of the way.
+        val desiredBottom = minOf(restBottom, (keyboardTop - imeGap).toFloat())
+        translationY = desiredBottom - restBottom
+    }
+
     override fun onFinishInflate() {
         super.onFinishInflate()
         input = findViewById(R.id.ares_search_input)
         icon = findViewById(R.id.ares_search_icon)
         pill = findViewById(R.id.ares_search_pill)
 
+        // The collapsed search glyph's tint, set in XML (?android:textColorSecondary). Captured so
+        // collapse() can restore it after expand() retints the icon for the tonal close button.
+        defaultIconTint = icon.imageTintList
+
+        installImeFollower()
+
         pill.setOnClickListener { if (!expanded) expand() }
-        icon.setOnClickListener { if (expanded) collapse() else expand() }
+        // Collapsed, a click on the icon opens the affordance.
+        icon.setOnClickListener { if (!expanded) expand() }
+        // Expanded, the icon is the dismiss button. Collapse on ACTION_DOWN and consume the gesture,
+        // so the tap is not eaten by the IME resolving its own dismissal first — that lag was the
+        // old two-tap-to-close bug. When collapsed the listener passes the event through, so the
+        // click-to-expand above still fires normally.
+        icon.setOnTouchListener { _, ev ->
+            if (expanded && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                collapse()
+                true
+            } else {
+                false
+            }
+        }
     }
 
     /**
@@ -150,14 +229,53 @@ class AresSearchContainerView @JvmOverloads constructor(
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
         // Ride above the keyboard while it is up. Using the IME inset directly rather than
         // Insettable, which only carries the stable system-window insets and so would not move when
-        // the keyboard opens.
-        imeInset = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        // the keyboard opens. This is the resting placement; the frame-by-frame slide as the
+        // keyboard opens/closes is driven by the insets-animation callback (see [installImeFollower]),
+        // so while that animation runs we leave translationY to it and only settle here otherwise.
+        lastImeBottom = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             insets.getInsets(WindowInsets.Type.ime()).bottom
         } else {
             0
         }
-        translationY = -imeInset.toFloat()
+        if (!imeAnimating) applyImeTranslation(lastImeBottom)
         return super.onApplyWindowInsets(insets)
+    }
+
+    /**
+     * Makes the bar ride the keyboard frame-by-frame instead of snapping to its final spot in one
+     * layout pass. Without this the IME inset arrives in a single [onApplyWindowInsets] and the bar
+     * jumps to its above-keyboard position while the keyboard is still sliding up — the "search bar
+     * re-renders above the keyboard as it just appears" glitch the owner described.
+     */
+    private fun installImeFollower() {
+        androidx.core.view.ViewCompat.setWindowInsetsAnimationCallback(
+            this,
+            object : androidx.core.view.WindowInsetsAnimationCompat.Callback(
+                DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+            ) {
+                private val imeType = androidx.core.view.WindowInsetsCompat.Type.ime()
+
+                override fun onPrepare(animation: androidx.core.view.WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and imeType != 0) imeAnimating = true
+                }
+
+                override fun onProgress(
+                    insets: androidx.core.view.WindowInsetsCompat,
+                    runningAnimations: MutableList<androidx.core.view.WindowInsetsAnimationCompat>,
+                ): androidx.core.view.WindowInsetsCompat {
+                    applyImeTranslation(insets.getInsets(imeType).bottom)
+                    return insets
+                }
+
+                override fun onEnd(animation: androidx.core.view.WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and imeType != 0) {
+                        imeAnimating = false
+                        // Settle exactly on the final inset that onApplyWindowInsets recorded.
+                        applyImeTranslation(lastImeBottom)
+                    }
+                }
+            },
+        )
     }
 
     override fun onAttachedToWindow() {
@@ -266,17 +384,48 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     override fun initializeSearch(containerView: ActivityAllAppsContainerView<*>) {
         appsView = containerView
+
+        // Highlight the top result as the default selection (owner). Drawn behind the first result
+        // row of the search recycler; toggled from the search callback below.
+        highlightDecoration?.let { containerView.mSearchRecyclerView.removeItemDecoration(it) }
+        val highlight = AresSearchHighlightDecoration(context)
+        highlightDecoration = highlight
+        containerView.mSearchRecyclerView.addItemDecoration(highlight)
+
+        // §17 hybrid search: our plain app rows on top, Lawnchair's richer categories below (only
+        // while a query is active). Enable the permission-free, non-recreate category prefs so
+        // calculator/settings/shortcuts run; web suggestions are on by default. Contacts/files need
+        // runtime permissions (they self-gate to empty until granted).
+        app.lawnchair.preferences.PreferenceManager.getInstance(context).apply {
+            searchResultCalculator.set(true)
+            searchResultSettings.set(true)
+            searchResultShortcuts.set(true)
+            // Contacts + files (owner). These carry a `recreate` flag, so set them only when not
+            // already on, to avoid a relaunch loop. Each self-gates to empty until its runtime
+            // permission is granted — requested from [expand] the first time search is opened.
+            if (!searchResultPeople.get()) searchResultPeople.set(true)
+            if (!searchResultFilesToggle.get()) searchResultFilesToggle.set(true)
+            if (!searchResultVisualMedia.get()) searchResultVisualMedia.set(true)
+            if (!searchResultAudio.get()) searchResultAudio.set(true)
+        }
         searchBarController.initialize(
-            AresAppSearchAlgorithm(containerView.appsStore),
+            AresRichSearchAlgorithm(context, containerView.appsStore),
             input,
             ActivityContext.lookupContext(containerView.context),
             object : SearchCallback<AdapterItem> {
                 override fun onSearchResult(query: String, items: ArrayList<AdapterItem>?) {
                     if (items == null) return
+                    // Top result becomes the default the keyboard's search action launches.
+                    topResult = items.firstOrNull()?.itemInfo
                     containerView.setSearchResults(items)
+                    highlight.active = topResult != null
+                    containerView.mSearchRecyclerView.invalidateItemDecorations()
                 }
 
                 override fun clearSearchResult() {
+                    topResult = null
+                    highlight.active = false
+                    containerView.mSearchRecyclerView.invalidateItemDecorations()
                     containerView.onClearSearchResult()
                 }
             },
@@ -294,6 +443,52 @@ class AresSearchContainerView @JvmOverloads constructor(
                 false
             }
         }
+
+        // The keyboard's search action launches the highlighted top result. Replaces the stock
+        // controller's editor-action handler, whose launchHighlightedItem() is dead here — it drives
+        // Lawnchair's rich-results quick-launch, which our plain app-name filter never produces.
+        input.setOnEditorActionListener { _, actionId, event ->
+            val isSearchAction = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH ||
+                actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO ||
+                (
+                    actionId == android.view.inputmethod.EditorInfo.IME_NULL &&
+                        event?.action == KeyEvent.ACTION_DOWN
+                    )
+            if (isSearchAction) launchTopResult() else false
+        }
+    }
+
+    /**
+     * Requests the runtime permissions the contacts/files search providers need — once, the first
+     * time the user opens search. Already-granted or permanently-denied permissions don't re-prompt.
+     * The providers self-gate to empty without these, so search still works; granting just lights up
+     * those two categories.
+     */
+    private fun maybeRequestSearchPermissions() {
+        if (requestedSearchPerms) return
+        requestedSearchPerms = true
+        val launcher = Launcher.getLauncher(context)
+        val wanted = mutableListOf(android.Manifest.permission.READ_CONTACTS)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            wanted += android.Manifest.permission.READ_MEDIA_IMAGES
+            wanted += android.Manifest.permission.READ_MEDIA_VIDEO
+            wanted += android.Manifest.permission.READ_MEDIA_AUDIO
+        }
+        val needed = wanted.filter {
+            launcher.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            launcher.requestPermissions(needed.toTypedArray(), REQ_CODE_SEARCH_PERMISSIONS)
+        }
+    }
+
+    /** Launches the highlighted top result, if any; the source view drives the launch animation. */
+    private fun launchTopResult(): Boolean {
+        val top = topResult ?: return false
+        val intent = top.getIntent() ?: return false
+        val source = appsView?.mSearchRecyclerView?.findViewHolderForAdapterPosition(0)?.itemView
+            ?: this
+        return Launcher.getLauncher(context).startActivitySafely(source, intent, top) != null
     }
 
     /**
@@ -316,40 +511,110 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     private fun expand() {
         if (expanded) return
+        // First time search is opened, ask for the contacts/media permissions the enabled providers
+        // need; they stay empty until granted.
+        maybeRequestSearchPermissions()
         // Flips `expanded` immediately, so a re-entrant call during the animation is a no-op.
         input.isVisible = true
-        animateWidthTo(expandedWidth()) {
+        // Fade the input in over the width morph rather than hard-appearing it (see animateWidthTo).
+        input.alpha = 0f
+        // Trailing glyph becomes an explicit close (✕) so "close search" reads as a distinct button
+        // on the right (owner). Styled as a Material You filled-tonal icon button: a tonal circle
+        // behind the ✕, with the ✕ in the on-container tone. Collapsed it is the bare search
+        // magnifier again; see [collapse]. Cancel any in-flight collapse crossfade and restore alpha
+        // so a fast re-open never leaves the icon half-faded.
+        icon.animate().cancel()
+        icon.alpha = 1f
+        icon.setImageResource(R.drawable.ares_ic_search_close)
+        icon.setBackgroundResource(R.drawable.ares_search_close_bg)
+        icon.imageTintList = android.content.res.ColorStateList.valueOf(
+            context.getColor(R.color.ares_search_close_icon),
+        )
+        // Raise the keyboard on the NEXT frame — after this expand's layout pass — rather than
+        // synchronously here. Focusing before the freshly-shown input is laid out left it with a
+        // half-established input connection: typing (commitText) worked, but backspace didn't, until
+        // the field was tapped (which is what re-established the connection). Posting establishes the
+        // connection cleanly so backspace works first try. One frame is still perceptually immediate,
+        // and the insets follower slides the bar up in step with the keyboard.
+        input.post {
+            if (!input.isVisible) return@post // collapsed again before we ran
             input.requestFocus()
+            input.setSelection(input.text?.length ?: 0)
             input.showKeyboard()
         }
+        animateWidthTo(expandedWidth(), fadeInInput = true) {}
     }
 
     private fun collapse() {
         if (!expanded) return
-        input.isVisible = false
-        input.setText("")
+        // Keyboard drops first; the insets follower rides the bar down with it (applyImeTranslation).
         input.hideKeyboard()
         input.clearFocus()
+        input.setText("")
         searchBarController.reset()
-        animateWidthTo(collapsedSize) {}
+        crossfadeIconToSearch()
+        // Fade the input out and hide it only once the pill has finished shrinking, so the field
+        // collapses smoothly instead of blanking the instant the close button is tapped. `expanded`
+        // stays true (it reads input.isVisible) until then, keeping re-entrant taps a harmless no-op.
+        animateWidthTo(
+            collapsedSize,
+            fadeInInput = false,
+            fadeOutInput = true,
+            durationMs = MORPH_DURATION_COLLAPSE_MS,
+        ) {
+            input.isVisible = false
+            input.alpha = 1f
+        }
+    }
+
+    /**
+     * Crossfades the trailing glyph from the tonal close button back to the resting search magnifier,
+     * rather than a hard swap the instant the button is tapped. Quick, so it reads as part of the
+     * collapse rather than a separate beat.
+     */
+    private fun crossfadeIconToSearch() {
+        icon.animate().cancel()
+        icon.animate()
+            .alpha(0f)
+            .setDuration(ICON_CROSSFADE_MS)
+            .withEndAction {
+                icon.setImageResource(R.drawable.ic_allapps_search)
+                icon.background = null
+                icon.imageTintList = defaultIconTint
+                icon.animate().alpha(1f).setDuration(ICON_CROSSFADE_MS).start()
+            }
+            .start()
     }
 
     /** The pill fills the container, which is already inset by the resting margins. */
     private fun expandedWidth(): Int = width.coerceAtLeast(collapsedSize)
 
-    private fun animateWidthTo(target: Int, onEnd: () -> Unit) {
+    private fun animateWidthTo(
+        target: Int,
+        fadeInInput: Boolean,
+        fadeOutInput: Boolean = false,
+        durationMs: Long = MORPH_DURATION_MS,
+        onEnd: () -> Unit,
+    ) {
         widthAnimator?.cancel()
         val start = pill.width
         if (start == target) {
+            if (fadeInInput) input.alpha = 1f
+            if (fadeOutInput) input.alpha = 0f
             onEnd()
             return
         }
         widthAnimator = ValueAnimator.ofInt(start, target).apply {
-            duration = MORPH_DURATION_MS
+            duration = durationMs
+            interpolator = morphInterpolator
             addUpdateListener { animator ->
                 val lp = pill.layoutParams
                 lp.width = animator.animatedValue as Int
                 pill.layoutParams = lp
+                // Bring the input up with the morph on expand so its text/hint doesn't hard-appear at
+                // full width; on collapse fade it back out as the pill shrinks rather than blanking it.
+                if (fadeInInput) input.alpha = animator.animatedFraction
+                if (fadeOutInput) input.alpha = 1f - animator.animatedFraction
             }
             addListener(
                 onEnd = {
@@ -361,6 +626,7 @@ class AresSearchContainerView @JvmOverloads constructor(
                     val lp = pill.layoutParams
                     lp.width = target
                     pill.layoutParams = lp
+                    if (fadeInInput) input.alpha = 1f
                     onEnd()
                 },
             )
@@ -379,7 +645,17 @@ class AresSearchContainerView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val MORPH_DURATION_MS = 200L
+        /** Request code for the contacts/media search permissions. */
+        const val REQ_CODE_SEARCH_PERMISSIONS = 4517
+
+        /** Expand morph (snappy; owner liked the open, then asked for it a touch quicker). */
+        const val MORPH_DURATION_MS = 180L
+
+        /** Collapse morph — deliberately slower than the open so the close reads as a gentle settle. */
+        const val MORPH_DURATION_COLLAPSE_MS = 360L
+
+        /** Each half of the trailing icon's close->search crossfade on collapse. Paced to the close. */
+        const val ICON_CROSSFADE_MS = 160L
 
         /** Slide timing: entry gets a little room for its overshoot bounce to read; exit is a quick
          *  flick off the right edge. Both kept short so the pill feels responsive, not laggy. */

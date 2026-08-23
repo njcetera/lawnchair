@@ -455,4 +455,33 @@
          travels in with the pane and never washes the workspace behind it. ARGB; the alpha is the
          wallpaper darkening strength. Tune here. -->
     <color name="ares_app_list_wallpaper_dim">#73000000</color>
+
+    <!--
+         §17 app-list search: the expanded search field's trailing close (✕) button, styled as a
+         Material You filled-tonal icon button. Uses the TERTIARY accent (Monet accent3) — the warm,
+         saturated "dark orange" the owner matched to Gboard's functional keys — not the muted
+         secondary tone. Container is the tertiary-container tone, the ✕ is the on-tertiary-container
+         tone; both come from the Monet dynamic palette (local @color/system_accent3_* names, static
+         fallbacks below API 31 and dynamic at 31+). Dark values live in res/values-night/colors.xml.
+    -->
+    <color name="ares_search_close_container">@color/system_accent3_100</color>
+    <color name="ares_search_close_icon">@color/system_accent3_900</color>
+
+    <!--
+         §17 search: fill for the top-result highlight (the default selection the keyboard's search
+         action launches). The dark tertiary tone (accent3_700, tone 30) reads the same in light and
+         dark and stays dark enough that the row's white label keeps contrast; the decoration draws it
+         translucent. No -night variant: this Monet tone is theme-independent.
+    -->
+    <color name="ares_search_highlight">@color/system_accent3_700</color>
+
+    <!--
+         §8 fast-scroller letter popup. Stock painted the bubble with ?attr/colorAccent, which on a
+         dark theme resolves to a LIGHT accent tone — too pale to separate the letter from the
+         bubble (owner). A dark primary tone (accent1_700) as the bubble with a near-white letter
+         (accent1_0, on-primary) restores contrast; both are raw Monet tones, theme-independent, so
+         no -night variant is needed.
+    -->
+    <color name="ares_fastscroll_popup_bg">@color/system_accent1_700</color>
+    <color name="ares_fastscroll_popup_text">@color/system_accent1_0</color>
 </resources>

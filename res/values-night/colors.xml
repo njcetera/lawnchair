@@ -15,6 +15,12 @@
   -->
 
 <resources>
+    <!-- §17 app-list search close (✕) button, dark theme. See res/values/colors.xml.
+         accent3_800 (a darker tertiary tone) matches Gboard's functional-key dark orange (~#372013)
+         more closely than the standard tertiary-container tone. -->
+    <color name="ares_search_close_container">@color/system_accent3_800</color>
+    <color name="ares_search_close_icon">@color/system_accent3_100</color>
+
     <color name="materialColorBackground">@color/system_background_dark</color>
     <color name="materialColorControlActivated">@color/system_control_activated_dark</color>
     <color name="materialColorControlHighlight">@color/system_control_highlight_dark</color>

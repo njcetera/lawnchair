@@ -117,6 +117,11 @@
     <!-- Gap from the pane edges when resting. Clears the gesture-nav bar at the bottom. -->
     <dimen name="ares_search_margin_horizontal">16dp</dimen>
     <dimen name="ares_search_margin_bottom">24dp</dimen>
+    <!-- Snug gap kept between the search bar and the top of the keyboard while the IME is up. -->
+    <dimen name="ares_search_ime_gap">8dp</dimen>
+    <!-- Top-result highlight pill (the default selection the keyboard search action launches). -->
+    <dimen name="ares_search_highlight_radius">20dp</dimen>
+    <dimen name="ares_search_highlight_inset">10dp</dimen>
 
     <!-- §6 widget resize affordance, shown on resizable widgets in edit mode only.
          28dp is below the 44dp hit-target minimum on purpose: the touch target is expanded to
