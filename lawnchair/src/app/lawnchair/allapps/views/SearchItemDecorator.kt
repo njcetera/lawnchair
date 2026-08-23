@@ -27,6 +27,11 @@ class SearchItemDecorator(private val appsView: ActivityAllAppsContainerView<*>)
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
         val adapterItems = appsView.mSearchRecyclerView.mApps.adapterItems
         val searchAdapterProvider = appsView.mainAdapterProvider
+        // AresLauncher: the enter-launch top result, or -1. Stock's quick-launch focus never flags
+        // web-suggestion rows, so we mark the row at this position as focused (green) directly.
+        val aresTopPosition =
+            (appsView.searchUiManager as? app.lawnchair.areslauncher.AresSearchContainerView)
+                ?.highlightedResultPosition ?: -1
         parent.children.forEach { child ->
             val adapterPosition = parent.getChildAdapterPosition(child)
             if (adapterPosition >= 0 && adapterPosition < adapterItems.size) {
@@ -35,7 +40,8 @@ class SearchItemDecorator(private val appsView: ActivityAllAppsContainerView<*>)
                 if (background != null) {
                     val isHighlightedItem = child == searchAdapterProvider.highlightedItem
                     val inputHasFocus = appsView.searchUiManager.editText?.hasFocus() == true
-                    val isFocused = isHighlightedItem && inputHasFocus
+                    val isFocused =
+                        (isHighlightedItem && inputHasFocus) || adapterPosition == aresTopPosition
                     background.draw(c, child, isFocused)
                 }
             }

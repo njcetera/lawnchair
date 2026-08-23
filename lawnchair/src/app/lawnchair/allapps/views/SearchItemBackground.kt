@@ -25,11 +25,15 @@ class SearchItemBackground(
     private val tmpRect = RectF()
 
     val supportBlur = BlurUtils.supportsBlursOnWindows()
-    val focusHighlight = if (supportBlur) {
-        ColorTokens.FocusHighlightBlur.resolveColor(context)
-    } else {
-        ColorTokens.FocusHighlight.resolveColor(context)
-    }
+    // AresLauncher: the focused (top / quick-launch) search row is highlighted in the same
+    // translucent Material You green as the app-row pill (AresSearchHighlightDecoration), so the
+    // selection reads identically whether the top result is a plain app or a rich result. Replaces
+    // the stock neutral FocusHighlight/FocusHighlightBlur tokens. groupHighlight (the subtle
+    // grouping surface behind rich results) is left stock.
+    val focusHighlight = androidx.core.graphics.ColorUtils.setAlphaComponent(
+        context.getColor(R.color.ares_search_highlight),
+        165, // matches AresSearchHighlightDecoration's pill alpha so app + rich selection align
+    )
     val groupHighlight = if (showBackground) {
         if (supportBlur) {
             ColorTokens.GroupHighlightBlur.resolveColor(context)

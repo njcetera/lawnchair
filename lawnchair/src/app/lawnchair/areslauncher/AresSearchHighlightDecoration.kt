@@ -23,9 +23,23 @@ import com.android.launcher3.R
  */
 class AresSearchHighlightDecoration(context: Context) : RecyclerView.ItemDecoration() {
 
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    /** Filled pill for plain app rows: a translucent tonal fill behind the row. */
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
         color = context.getColor(R.color.ares_search_highlight)
         alpha = HIGHLIGHT_ALPHA
+    }
+
+    /**
+     * Outline ring for rich rows (web/contact/settings…), which already render their own background.
+     * A stroke indicates selection without laying a second fill over that surface. Opaque (the
+     * colour's own alpha) so the ring reads clearly against the row's tint.
+     */
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = context.getColor(R.color.ares_search_highlight)
+        strokeWidth =
+            context.resources.getDimension(R.dimen.ares_search_highlight_stroke)
     }
     private val radius = context.resources.getDimension(R.dimen.ares_search_highlight_radius)
     private val insetHorizontal =
@@ -39,13 +53,32 @@ class AresSearchHighlightDecoration(context: Context) : RecyclerView.ItemDecorat
      */
     var activePosition = -1
 
+    /**
+     * When true the active row is a rich result with its own background, so it is highlighted with
+     * an outline ring rather than a filled pill (which would double up on that background). Set from
+     * AresSearchContainerView alongside [activePosition].
+     */
+    var activeAsOutline = false
+
     override fun onDraw(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
         if (activePosition < 0) return
         val holder = parent.findViewHolderForAdapterPosition(activePosition) ?: return
         val view = holder.itemView
         val top = view.y
-        rect.set(insetHorizontal, top, parent.width - insetHorizontal, top + view.height)
-        canvas.drawRoundRect(rect, radius, radius, paint)
+        if (activeAsOutline) {
+            // Inset by half the stroke so the ring sits fully inside the row bounds.
+            val half = strokePaint.strokeWidth / 2f
+            rect.set(
+                insetHorizontal + half,
+                top + half,
+                parent.width - insetHorizontal - half,
+                top + view.height - half,
+            )
+            canvas.drawRoundRect(rect, radius, radius, strokePaint)
+        } else {
+            rect.set(insetHorizontal, top, parent.width - insetHorizontal, top + view.height)
+            canvas.drawRoundRect(rect, radius, radius, fillPaint)
+        }
     }
 
     private companion object {

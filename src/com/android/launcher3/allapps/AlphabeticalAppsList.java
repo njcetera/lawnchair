@@ -465,14 +465,10 @@ public class AlphabeticalAppsList<T extends Context & ActivityContext> implement
      * the bolt and the letters cannot disagree about what colour a popup letter is.
      */
     private static int aresPopupMarkerColor(Context context) {
-        TypedValue value = new TypedValue();
-        if (context.getTheme().resolveAttribute(
-                android.R.attr.textColorPrimaryInverse, value, true)) {
-            return value.resourceId != 0
-                    ? context.getColor(value.resourceId)
-                    : value.data;
-        }
-        return Color.WHITE;
+        // The recents glyph in the fast-scroll popup must match the popup's LETTERS, which are drawn
+        // in @color/ares_fastscroll_popup_text (the light Material You green). Tinting it from
+        // ?android:textColorPrimaryInverse rendered it white against the green letters (owner).
+        return context.getColor(com.android.launcher3.R.color.ares_fastscroll_popup_text);
     }
 
     int addPrivateSpaceItems(int position) {

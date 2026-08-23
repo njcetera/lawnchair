@@ -122,6 +122,7 @@
     <!-- Top-result highlight pill (the default selection the keyboard search action launches). -->
     <dimen name="ares_search_highlight_radius">20dp</dimen>
     <dimen name="ares_search_highlight_inset">10dp</dimen>
+    <dimen name="ares_search_highlight_stroke">2dp</dimen>
 
     <!-- §6 widget resize affordance, shown on resizable widgets in edit mode only.
          28dp is below the 44dp hit-target minimum on purpose: the touch target is expanded to
