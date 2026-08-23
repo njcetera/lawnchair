@@ -73,6 +73,13 @@ class AresSearchContainerView @JvmOverloads constructor(
     /** Adapter position of the highlighted top (first launchable) result, or -1 when there is none. */
     private var topResultPosition: Int = -1
 
+    /**
+     * Public read of [topResultPosition] for `SearchItemDecorator`, which draws the rich-row
+     * selection highlight. Stock's quick-launch focus never flags web-suggestion rows, so the
+     * decorator keys the focus tint off our own top-result index instead.
+     */
+    val highlightedResultPosition: Int get() = topResultPosition
+
     /** The highlighted top result itself, kept so [launchTopResult] can route apps vs. rich results. */
     private var topResultItem: AdapterItem? = null
 
@@ -96,6 +103,15 @@ class AresSearchContainerView @JvmOverloads constructor(
     /** The collapsed search glyph's XML tint, restored on collapse; see [onFinishInflate]. */
     private var defaultIconTint: android.content.res.ColorStateList? = null
 
+    // The resting icon padding (ares_search_icon_padding, 16dp) captured from XML. The expanded
+    // close button's background is an <inset> drawable, and an inset reports its 8dp inset as View
+    // padding — so setBackgroundResource() silently clobbers the icon's padding to 8dp (a 40dp
+    // glyph in the 56dp target) and setting background=null on collapse never restores it, leaving
+    // the resting magnifier oversized too. We re-assert this captured value after every background
+    // change so the glyph stays 24dp in both states: at rest a 24dp magnifier, expanded a 24dp ✕
+    // centred in the 40dp tonal circle — the correct M3 icon-button proportion.
+    private var defaultIconPadding = 0
+
     /** Material fast-out-slow-in for the expand/collapse width morph. */
     private val morphInterpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
 
@@ -109,6 +125,13 @@ class AresSearchContainerView @JvmOverloads constructor(
      * it, or the bar would snap to its end position and then be re-animated (the "pops in" glitch).
      */
     private var imeAnimating = false
+
+    /**
+     * True only while [collapse] is running its own teardown. The IME-hide auto-collapse (see the
+     * insets follower's `onEnd`) must ignore the keyboard drop that [collapse] itself triggers, or a
+     * button-tap close would fire collapse() a second time mid-morph.
+     */
+    private var collapsing = false
 
     /**
      * Gates the whole affordance to the app-list pane. Registered while attached; see
@@ -194,6 +217,7 @@ class AresSearchContainerView @JvmOverloads constructor(
         // The collapsed search glyph's tint, set in XML (?android:textColorSecondary). Captured so
         // collapse() can restore it after expand() retints the icon for the tonal close button.
         defaultIconTint = icon.imageTintList
+        defaultIconPadding = icon.paddingLeft
 
         installImeFollower()
 
@@ -206,6 +230,19 @@ class AresSearchContainerView @JvmOverloads constructor(
         // click-to-expand above still fires normally.
         icon.setOnTouchListener { _, ev ->
             if (expanded && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                collapse()
+                true
+            } else {
+                false
+            }
+        }
+        // Back while the keyboard is up (routed here by ExtendedEditText.onKeyPreIme): if the query
+        // is empty, one back collapses the whole affordance — keyboard AND bar — instead of only
+        // dropping the keyboard and stranding an empty open search bar (owner). With text present it
+        // returns false and falls through to the default: drop the keyboard, keep the query and its
+        // results.
+        input.setOnBackKeyListener {
+            if (expanded && input.text.isNullOrEmpty()) {
                 collapse()
                 true
             } else {
@@ -276,6 +313,18 @@ class AresSearchContainerView @JvmOverloads constructor(
                         imeAnimating = false
                         // Settle exactly on the final inset that onApplyWindowInsets recorded.
                         applyImeTranslation(lastImeBottom)
+                        // If the user dismissed the keyboard (it is now down) while search is open
+                        // and the query is EMPTY, close the whole affordance too — an empty open bar
+                        // has no results worth keeping, so one back gesture should leave search
+                        // entirely (owner). With text present the bar stays so the results remain.
+                        // Keyed off the keyboard hiding rather than a back-key listener because
+                        // predictive back (gesture nav) bypasses onKeyPreIme; this fires however the
+                        // keyboard was dismissed. Guarded by [collapsing] so collapse()'s own
+                        // hideKeyboard() does not re-enter, and by [expanded] so a completed collapse
+                        // is a no-op.
+                        if (lastImeBottom == 0 && expanded && !collapsing && input.text.isNullOrEmpty()) {
+                            collapse()
+                        }
                     }
                 }
             },
@@ -427,7 +476,14 @@ class AresSearchContainerView @JvmOverloads constructor(
                     topResultPosition = pos
                     topResultItem = pos.takeIf { it >= 0 }?.let { items[it] }
                     containerView.setSearchResults(items)
-                    highlight.activePosition = pos
+                    // Our green pill highlights only PLAIN APP rows, which have no background of
+                    // their own. Rich results (web, contacts, settings…) already get a focus
+                    // highlight from the stock SearchItemBackground/SearchItemDecorator when they are
+                    // the quick-launch row — recoloured to the same green — so drawing our pill over
+                    // them too would double the highlight (owner). Enter-to-launch still targets the
+                    // top result of any type; this governs only our pill.
+                    highlight.activePosition =
+                        pos.takeIf { it >= 0 && topResultItem?.isPlainAppRow() == true } ?: -1
                     containerView.mSearchRecyclerView.invalidateItemDecorations()
                 }
 
@@ -525,6 +581,15 @@ class AresSearchContainerView @JvmOverloads constructor(
     }
 
     /**
+     * A plain app row — a stock `BubbleTextView` bound by the app adapter — as opposed to a rich
+     * [app.lawnchair.search.adapter.SearchAdapterItem] (web, contact, settings, calculator…), which
+     * renders its own row background. Governs whether the highlight draws a filled pill (app rows)
+     * or an outline ring (rich rows), so the pill never doubles a row's own surface.
+     */
+    private fun AdapterItem.isPlainAppRow(): Boolean =
+        this !is app.lawnchair.search.adapter.SearchAdapterItem
+
+    /**
      * Also collapses, so leaving the pane entirely (`Launcher` calls this when All Apps closes)
      * never leaves the affordance expanded for the next time it is opened.
      */
@@ -556,22 +621,22 @@ class AresSearchContainerView @JvmOverloads constructor(
         // behind the ✕, with the ✕ in the on-container tone. Collapsed it is the bare search
         // magnifier again; see [collapse]. Cancel any in-flight collapse crossfade and restore alpha
         // so a fast re-open never leaves the icon half-faded.
-        icon.animate().cancel()
-        icon.alpha = 1f
-        icon.setImageResource(R.drawable.ares_ic_search_close)
-        icon.setBackgroundResource(R.drawable.ares_search_close_bg)
-        icon.imageTintList = android.content.res.ColorStateList.valueOf(
-            context.getColor(R.color.ares_search_close_icon),
-        )
-        // Focus the field and raise the keyboard when the expand morph COMPLETES — see
-        // [focusAndRaiseKeyboard]. Collapsed, the field measures ZERO wide (its start margin plus
-        // its trailing-icon end inset exceed the collapsed pill), and the morph grows it to full
-        // width over ~180ms. Focusing while the field is zero-width or mid-morph is unreliable: the
-        // IME can stay served to the launcher's DecorView (keyboard never shows), or bind an input
-        // connection with a stale cursor so typing works but backspace no-ops — and because it
-        // depends on where in the animation the focus lands, it presents as *flaky* (both bugs
-        // sometimes, neither other times). Focusing on the settled, full-width field is what a
-        // normal tap does, so it deterministically serves the IME with a correct cursor.
+        // Twist-crossfade the resting magnifier into the ✕ close button, mirroring the collapse
+        // (see [crossfadeIconToSearch]) so opening and closing read as one continuous motion rather
+        // than a hard cut.
+        crossfadeIconToClose()
+        // Raise the keyboard the instant search is tapped rather than after the morph settles
+        // (owner). This focuses/serves the IME while the field is still mid-morph, which is exactly
+        // the timing the note below calls flaky — so it is paired with a re-assert at the morph's
+        // END ([focusAndRaiseKeyboard] in the completion). The early call gets the keyboard moving
+        // immediately; the late call repairs the rare mid-morph binding that serves the IME to the
+        // DecorView or lands a stale cursor. Re-asserting is idempotent, so raising twice is safe.
+        focusAndRaiseKeyboard()
+        // Collapsed, the field measures ZERO wide (its start margin plus its trailing-icon end inset
+        // exceed the collapsed pill), and the morph grows it to full width over ~180ms. Focusing on
+        // the settled, full-width field is what a normal tap does, so serving the IME again here
+        // deterministically leaves it bound with a correct cursor even if the early call above did
+        // not fully take.
         animateWidthTo(expandedWidth(), fadeInInput = true) { focusAndRaiseKeyboard() }
     }
 
@@ -594,6 +659,7 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     private fun collapse() {
         if (!expanded) return
+        collapsing = true
         // Keyboard drops first; the insets follower rides the bar down with it (applyImeTranslation).
         input.hideKeyboard()
         input.clearFocus()
@@ -611,6 +677,7 @@ class AresSearchContainerView @JvmOverloads constructor(
         ) {
             input.isVisible = false
             input.alpha = 1f
+            collapsing = false
         }
     }
 
@@ -623,12 +690,47 @@ class AresSearchContainerView @JvmOverloads constructor(
         icon.animate().cancel()
         icon.animate()
             .alpha(0f)
+            .rotationBy(90f) // the ✕ twists a quarter-turn as it leaves — a bit of Material You whimsy
             .setDuration(ICON_CROSSFADE_MS)
             .withEndAction {
                 icon.setImageResource(R.drawable.ares_ic_search)
                 icon.background = null
+                // Removing the inset background does not restore padding; re-assert the resting
+                // 16dp so the collapsed magnifier returns to 24dp instead of staying oversized.
+                icon.setPadding(defaultIconPadding, defaultIconPadding, defaultIconPadding, defaultIconPadding)
                 icon.imageTintList = defaultIconTint
-                icon.animate().alpha(1f).setDuration(ICON_CROSSFADE_MS).start()
+                // The magnifier enters pre-twisted and settles upright, so the swap reads as one
+                // continuous turn rather than a hard cut. Always ends at 0, so it never accumulates.
+                icon.rotation = -90f
+                icon.animate().alpha(1f).rotation(0f).setDuration(ICON_CROSSFADE_MS).start()
+            }
+            .start()
+    }
+
+    /**
+     * Crossfades the trailing glyph from the resting magnifier into the tonal ✕ close button — the
+     * mirror of [crossfadeIconToSearch], with the same quarter-turn twist — so opening reads as one
+     * continuous motion rather than the old hard cut, matching the collapse the owner liked.
+     */
+    private fun crossfadeIconToClose() {
+        icon.animate().cancel()
+        icon.animate()
+            .alpha(0f)
+            .rotationBy(90f) // the magnifier twists out, as the ✕ does on collapse
+            .setDuration(ICON_CROSSFADE_MS)
+            .withEndAction {
+                icon.setImageResource(R.drawable.ares_ic_search_close)
+                icon.setBackgroundResource(R.drawable.ares_search_close_bg)
+                // The inset background reports 8dp padding; re-assert the resting 16dp so the ✕ stays
+                // 24dp centred in the 40dp tonal circle rather than swelling to fill it.
+                icon.setPadding(defaultIconPadding, defaultIconPadding, defaultIconPadding, defaultIconPadding)
+                icon.imageTintList = android.content.res.ColorStateList.valueOf(
+                    context.getColor(R.color.ares_my_icon_button_icon),
+                )
+                // The ✕ enters pre-twisted and settles upright — one continuous turn. Always ends at
+                // 0, so rotation never accumulates across repeated open/close.
+                icon.rotation = -90f
+                icon.animate().alpha(1f).rotation(0f).setDuration(ICON_CROSSFADE_MS).start()
             }
             .start()
     }

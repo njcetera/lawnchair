@@ -31,4 +31,9 @@
     <!-- Spoken label for the resize chevron. %1$s is the widget's own name, e.g. "Analog". -->
     <string name="ares_resize_item">Resize <xliff:g id="item_name" example="Analog">%1$s</xliff:g></string>
 
+    <!-- §17 app-list search hint. "Search" (not "Search apps"): the field now searches
+         apps, contacts, files, settings and the web, so the app-only label under-promised. Scoped
+         to the Ares fob so the shared all_apps_search_bar_hint (stock/taskbar) is untouched. -->
+    <string name="ares_search_bar_hint">Search</string>
+
 </resources>

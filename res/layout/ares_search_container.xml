@@ -44,7 +44,7 @@
             android:ellipsize="end"
             android:focusableInTouchMode="true"
             android:gravity="start|center_vertical"
-            android:hint="@string/all_apps_search_bar_hint"
+            android:hint="@string/ares_search_bar_hint"
             android:imeOptions="actionSearch|flagNoExtractUi"
             android:inputType="textNoSuggestions"
             android:singleLine="true"
@@ -62,10 +62,10 @@
             android:layout_width="@dimen/ares_search_collapsed_size"
             android:layout_height="match_parent"
             android:layout_gravity="end|center_vertical"
-            android:contentDescription="@string/all_apps_search_bar_hint"
+            android:contentDescription="@string/ares_search_bar_hint"
             android:padding="@dimen/ares_search_icon_padding"
             android:src="@drawable/ares_ic_search"
-            android:tint="?android:textColorSecondary" />
+            android:tint="@color/materialColorOnPrimary" />
 
     </FrameLayout>
 
