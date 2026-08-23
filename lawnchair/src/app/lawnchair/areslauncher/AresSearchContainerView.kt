@@ -647,13 +647,26 @@ class AresSearchContainerView @JvmOverloads constructor(
         // the settled, full-width field is what a normal tap does, so serving the IME again here
         // deterministically leaves it bound with a correct cursor even if the early call above did
         // not fully take.
-        // Settle the pill from the bright fob colour to the calmer expanded surface over the morph.
-        animatePillColorTo(expandedPillColor, MORPH_DURATION_MS)
-        animateWidthTo(expandedWidth(), fadeInInput = true) { focusAndRaiseKeyboard() }
+        // Owner: play the recolour as its own short beat FIRST, then grow the fob. The pill settles
+        // from the bright fob colour to the calm expanded surface BEFORE any width change, so the
+        // recolour reads as the fob acknowledging the tap and the expansion follows it, rather than
+        // the two happening at once. The width morph is chained off the colour animation's natural
+        // end; the keyboard was already raised above, so the lead does not delay the IME.
+        animatePillColorTo(expandedPillColor, PILL_COLOR_LEAD_MS) {
+            // Guard: a collapse during the colour lead flips [expanded] false and cancels the width
+            // morph's precondition. Only grow if still opening.
+            if (expanded) animateWidthTo(expandedWidth(), fadeInInput = true) { focusAndRaiseKeyboard() }
+        }
     }
 
-    /** Crossfades the pill's fill colour across the morph via its backgroundTint. */
-    private fun animatePillColorTo(target: Int, durationMs: Long) {
+    /**
+     * Crossfades the pill's fill colour via its backgroundTint.
+     *
+     * [onEnd] fires only on a **natural** end, never when the animation is cancelled (a collapse
+     * cutting in, or a re-entrant recolour): expand chains the width morph off it, and starting the
+     * morph after a cancel would fight whatever cancelled us.
+     */
+    private fun animatePillColorTo(target: Int, durationMs: Long, onEnd: (() -> Unit)? = null) {
         pillColorAnimator?.cancel()
         val start = pill.backgroundTintList?.defaultColor ?: collapsedPillColor
         pillColorAnimator = ValueAnimator.ofObject(android.animation.ArgbEvaluator(), start, target).apply {
@@ -662,6 +675,17 @@ class AresSearchContainerView @JvmOverloads constructor(
             addUpdateListener {
                 pill.backgroundTintList =
                     android.content.res.ColorStateList.valueOf(it.animatedValue as Int)
+            }
+            if (onEnd != null) {
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    private var cancelled = false
+                    override fun onAnimationCancel(animation: android.animation.Animator) {
+                        cancelled = true
+                    }
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (!cancelled) onEnd()
+                    }
+                })
             }
             start()
         }
@@ -843,6 +867,12 @@ class AresSearchContainerView @JvmOverloads constructor(
 
         /** Expand morph (snappy; owner liked the open, then asked for it a touch quicker). */
         const val MORPH_DURATION_MS = 180L
+
+        /**
+         * The recolour beat that plays BEFORE the expand morph (owner: change colour first, then
+         * grow). Short so the two-step open still feels immediate; the width morph chains off it.
+         */
+        const val PILL_COLOR_LEAD_MS = 140L
 
         /** Collapse morph — deliberately slower than the open so the close reads as a gentle settle. */
         const val MORPH_DURATION_COLLAPSE_MS = 360L
