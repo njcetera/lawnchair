@@ -6,8 +6,10 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.android.launcher3.BubbleTextView
+import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
+import com.android.launcher3.popup.PopupContainerWithArrow
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -167,6 +169,34 @@ object AresInfoBadge {
     fun showMenu(itemView: View?): Boolean {
         val icon = itemView as? BubbleTextView ?: return false
         icon.startLongPressAction()
+        // The popup restores the source icon's label when it closes: its close animation fades the
+        // text back in (createTextAlphaAnimator) and closeComplete() runs
+        // setTextVisibility(shouldTextBeVisible()). Edit mode had faded that label out
+        // (AresEditLabel), and a popup close triggers no grid layout or scroll, so nothing re-hides
+        // it -- the app name is left visible on that one tile for the rest of the mode.
+        //
+        // Suppress the label for the popup's whole lifetime rather than re-hiding after it closes:
+        // both restore routes gate on shouldTextBeVisible(), which returns false while suppressed,
+        // so the close animation targets 0 and the name never flashes. (Re-hiding after the fact
+        // left it visible for the entire close animation before snapping away.)
+        //
+        // Guarded so a blank label can never be stranded: only when a popup actually opened and the
+        // tile was hidden, and the release is POSTED from the close callback -- addOnCloseCallback
+        // fires inside ArrowPopup.closeComplete()'s super call, BEFORE the subclass re-shows the
+        // text, so releasing there would re-open the flash; the post lands after closeComplete has
+        // fully returned. reassertIfHidden then snaps the alpha to 0 (a no-op if a menu action such
+        // as App info or Uninstall ended edit mode), and the suppression is released last so normal
+        // label life -- including the eventual un-hide on leaving edit mode -- resumes.
+        val popup = PopupContainerWithArrow.getOpen<Launcher>(Launcher.getLauncher(icon.context))
+        if (popup != null && AresEditLabel.isHidden(icon)) {
+            AresEditLabel.setMenuLabelSuppressed(icon, true)
+            popup.addOnCloseCallback {
+                icon.post {
+                    AresEditLabel.reassertIfHidden(icon)
+                    AresEditLabel.setMenuLabelSuppressed(icon, false)
+                }
+            }
+        }
         return true
     }
 }

@@ -1190,6 +1190,13 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     }
 
     public boolean shouldTextBeVisible() {
+        // AresLauncher: while a hidden edit-mode tile's info (i) menu popup is up, report the label
+        // as not-visible so PopupContainerWithArrow's close animation and closeComplete both leave
+        // it hidden instead of flashing the name back on. Owned by AresInfoBadge.showMenu; see
+        // AresEditLabel.labelSuppressed.
+        if (app.lawnchair.areslauncher.AresEditLabel.isMenuLabelSuppressed(this)) {
+            return false;
+        }
         // Text should be visible everywhere but the hotseat.
         Object tag = getParent() instanceof FolderIcon ? ((View) getParent()).getTag() : getTag();
         ItemInfo info = tag instanceof ItemInfo ? (ItemInfo) tag : null;

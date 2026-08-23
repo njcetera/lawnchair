@@ -125,6 +125,24 @@ object AresEditLabel {
      */
     private val states = WeakHashMap<View, State>()
 
+    /**
+     * Tiles whose label restore is currently **suppressed** because their ⓘ menu popup is up.
+     *
+     * Deliberately separate from [State.hidden]. `PopupContainerWithArrow` restores the source
+     * icon's label on close by two routes that both gate on `BubbleTextView.shouldTextBeVisible()`:
+     * the close animation's `createTextAlphaAnimator(fadeIn = true)` targets `1` only when it is
+     * true, and `closeComplete` runs `setTextVisibility(shouldTextBeVisible())`. Re-hiding *after*
+     * the fact (see [reassertIfHidden]) leaves the name flashing on for the whole close animation
+     * before it snaps away. Reporting the label as not-visible for the popup's lifetime instead
+     * makes both routes target `0`, so it never reappears.
+     *
+     * It cannot be folded into [State.hidden] because [setItem] reads `shouldTextBeVisible()` while
+     * computing the alpha to animate *to* when it un-hides — a flag that rode on `hidden` would make
+     * the un-hide target `0` and strand the label. This flag is owned solely by
+     * `AresInfoBadge.showMenu`, set before the popup opens and cleared one frame after it closes.
+     */
+    private val labelSuppressed = WeakHashMap<View, Boolean>()
+
     /** Reused; every read of it is finished before the next one starts. */
     private val bounds = Rect()
 
@@ -281,6 +299,58 @@ object AresEditLabel {
         val target = liftFor(item)
         if (target != state.lift) writeLift(item, state, target)
     }
+
+    /**
+     * [reassert], keyed on the **item view** and safe to call when the item may no longer be ours.
+     *
+     * The difference from [reassert] is the first line: it reads the state map and returns when
+     * there is no entry, rather than creating one. That is what makes it safe on the one path this
+     * exists for — the `PopupContainerWithArrow` a tile's ⓘ badge raises restores the source icon's
+     * label when it closes (its close animation fades the text back in and `closeComplete` runs
+     * `setTextVisibility(shouldTextBeVisible())`), exactly the way `Folder.closeComplete` does. But
+     * unlike a folder close, a popup close triggers no grid layout or scroll, so neither the funnel
+     * nor [reassert] fires afterwards and the un-hidden name is left on the tile for the rest of the
+     * mode.
+     *
+     * `AresInfoBadge.showMenu` posts this after the popup is gone. It must not re-hide a label the
+     * mode no longer owns: a menu action can end edit mode (App info, Uninstall) while the popup is
+     * up, and a hide applied afterwards would be the stranded-blank-label failure this file exists
+     * to avoid. The guards cover every case — no state entry (mode ended and the item was reset, or
+     * a view we never touched), `!state.hidden` (mode ended but the state lingers at visible), or an
+     * in-flight animator (already heading somewhere; it settles on the next call) — each returns
+     * without writing anything. Only a still-hidden edit-mode tile is corrected.
+     */
+    fun reassertIfHidden(item: View) {
+        val state = states[item] ?: return
+        if (!state.hidden || state.animator != null) return
+        labelOf(item)?.let { label ->
+            if (BubbleTextView.TEXT_ALPHA_PROPERTY.get(label) != 0f) {
+                BubbleTextView.TEXT_ALPHA_PROPERTY.set(label, 0f)
+            }
+        }
+        val target = liftFor(item)
+        if (target != state.lift) writeLift(item, state, target)
+    }
+
+    /** Whether [item] is currently a hidden edit-mode tile. */
+    @JvmStatic
+    fun isHidden(item: View): Boolean = states[item]?.hidden == true
+
+    /**
+     * Marks [item]'s label as suppressed (or releases it) for the lifetime of its ⓘ menu popup.
+     *
+     * Consulted by `BubbleTextView.shouldTextBeVisible`, which returns false while suppressed so the
+     * popup's close animation and `closeComplete` both leave the hidden name hidden. See
+     * [labelSuppressed]. Set only by `AresInfoBadge.showMenu`, and only when the tile was hidden.
+     */
+    @JvmStatic
+    fun setMenuLabelSuppressed(item: View, suppressed: Boolean) {
+        if (suppressed) labelSuppressed[item] = true else labelSuppressed.remove(item)
+    }
+
+    /** Whether [item]'s label restore is currently suppressed. See [labelSuppressed]. */
+    @JvmStatic
+    fun isMenuLabelSuppressed(item: View): Boolean = labelSuppressed[item] == true
 
     /**
      * Puts the item inside [container] back to a visible label at rest, and forgets it.
