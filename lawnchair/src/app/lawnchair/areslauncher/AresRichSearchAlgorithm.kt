@@ -1,6 +1,8 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import app.lawnchair.search.adapter.SPACE
+import app.lawnchair.search.adapter.SPACE_MINI
 import app.lawnchair.search.adapter.SearchAdapterItem
 import app.lawnchair.search.adapter.SearchTargetCompat
 import app.lawnchair.search.algorithms.LawnchairLocalSearchAlgorithm
@@ -40,9 +42,13 @@ class AresRichSearchAlgorithm(
             query,
             object : SearchCallback<AdapterItem> {
                 override fun onSearchResult(q: String, items: ArrayList<AdapterItem>?) {
-                    val categories = dropLeadingDividers(
-                        (items ?: emptyList()).filterNot { it.isDropped() },
-                    )
+                    // Drop the rows we render ourselves (apps) or suppress (settings gear), plus
+                    // every structural blank. Each Lawnchair section appends a `SPACE` spacer header
+                    // (and some — apps/shortcuts, actions — emit one even with no content), which
+                    // render as full empty rows between sections; strip them all so the list has no
+                    // empty items (owner). Real section headers ("From the web") are kept.
+                    val categories = (items ?: emptyList())
+                        .filterNot { it.isDropped() || it.isStructuralBlank() }
                     val combined = ArrayList<AdapterItem>(appItems.size + categories.size)
                     combined.addAll(appItems)
                     combined.addAll(categories)
@@ -66,17 +72,23 @@ class AresRichSearchAlgorithm(
      *  - app rows (`RESULT_TYPE_APPLICATION`): we render apps ourselves above (shortcuts stay);
      *  - the "search settings" entry (`RESULT_TYPE_SEARCH_SETTINGS`): its gear opens Lawnchair's
      *    stock settings, which clash with the Ares layouts — hidden until we ship our own settings
-     *    page (see the custom-settings TODO).
+     *    page (see the custom-settings TODO);
+     *  - redirection actions (`RESULT_TYPE_REDIRECTION`): the "Search <provider> for …" web link and
+     *    the "Search Play Store for …" market link (ActionsSectionBuilder). They render as blank rows
+     *    in this surface and are redundant with the "From the web" suggestions we already show.
      */
     private fun AdapterItem.isDropped(): Boolean {
         val target = (this as? SearchAdapterItem)?.searchTarget ?: return false
         return target.resultType == SearchTargetCompat.RESULT_TYPE_APPLICATION ||
-            target.resultType == SearchTargetCompat.RESULT_TYPE_SEARCH_SETTINGS
+            target.resultType == SearchTargetCompat.RESULT_TYPE_SEARCH_SETTINGS ||
+            target.resultType == SearchTargetCompat.RESULT_TYPE_REDIRECTION
     }
 
-    /** After removing the app rows, a divider that now leads the category list would dangle. */
-    private fun dropLeadingDividers(items: List<AdapterItem>): List<AdapterItem> =
-        items.dropWhile {
-            (it as? SearchAdapterItem)?.searchTarget?.layoutType == LayoutType.EMPTY_DIVIDER
-        }
+    /** A section spacer (`header_space`/`header_space_mini`) or an empty divider — no real content. */
+    private fun AdapterItem.isStructuralBlank(): Boolean {
+        val target = (this as? SearchAdapterItem)?.searchTarget ?: return false
+        return target.layoutType == LayoutType.EMPTY_DIVIDER ||
+            target.id == "header_$SPACE" ||
+            target.id == "header_$SPACE_MINI"
+    }
 }

@@ -168,12 +168,15 @@ class LawnchairLocalSearchAlgorithm(context: Context) : LawnchairSearchAlgorithm
     private val sectionBuilders: List<SectionBuilder> = listOf(
         AppsAndShortcutsSectionBuilder,
         CalculationSectionBuilder,
-        WebSuggestionsSectionBuilder,
         ContactsSectionBuilder,
         FilesSectionBuilder,
         SettingsSectionBuilder,
         HistorySectionBuilder,
         ActionsSectionBuilder,
+        // AresLauncher §17: web suggestions sink to the bottom of the result list, below the
+        // on-device categories (owner). Was 3rd (right under apps); moved here so "From the web"
+        // is the last content section before the empty/settings tails.
+        WebSuggestionsSectionBuilder,
         EmptyStateSectionBuilder,
         SearchSettingsSectionBuilder,
     )
