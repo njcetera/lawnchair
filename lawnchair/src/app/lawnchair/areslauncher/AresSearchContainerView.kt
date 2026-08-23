@@ -625,7 +625,7 @@ class AresSearchContainerView @JvmOverloads constructor(
             .alpha(0f)
             .setDuration(ICON_CROSSFADE_MS)
             .withEndAction {
-                icon.setImageResource(R.drawable.ic_allapps_search)
+                icon.setImageResource(R.drawable.ares_ic_search)
                 icon.background = null
                 icon.imageTintList = defaultIconTint
                 icon.animate().alpha(1f).setDuration(ICON_CROSSFADE_MS).start()

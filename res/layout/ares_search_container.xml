@@ -64,7 +64,7 @@
             android:layout_gravity="end|center_vertical"
             android:contentDescription="@string/all_apps_search_bar_hint"
             android:padding="@dimen/ares_search_icon_padding"
-            android:src="@drawable/ic_allapps_search"
+            android:src="@drawable/ares_ic_search"
             android:tint="?android:textColorSecondary" />
 
     </FrameLayout>

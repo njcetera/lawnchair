@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     AresLauncher §17 — search (magnifier) glyph for the app-list search affordance's collapsed state.
+
+     Authored in the same Material Symbols style as the close glyph (res/drawable/ares_ic_search_close.xml):
+     thin, round-capped strokes on a 24dp canvas, white so the ImageView's imageTintList recolours it.
+     Pairs the collapsed search icon with the Material You close so the two states read as one family,
+     replacing the heavier stock ic_allapps_search on this affordance only (other uses are untouched).
+
+     Lens: a stroked circle centred at (10,10), r=5. Handle: a round-capped diagonal off its lower-right.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10,5 a5,5 0 1 0 0,10 a5,5 0 1 0 0,-10" />
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:pathData="M13.6,13.6 L18.5,18.5" />
+</vector>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AresLauncher — Material You design-language foundation.
+
+    A Material3 dynamic-color ThemeOverlay that maps the M3 color ROLES (colorPrimary,
+    colorPrimaryContainer, colorSurface, …) that com.google.android.material components read onto the
+    project's existing Monet tonal aliases (@color/system_accentN_* / system_neutralN_*). Those
+    aliases resolve to the real @android:color/system_* wallpaper palette on API 31+ (values-v31) and
+    to a static fallback below — so a component themed with this overlay is genuinely Material You:
+    it follows the wallpaper on 12+ and the owner can retune any role here or via system theming.
+
+    Usage (the additive "island" pattern — the base app theme stays AppCompat, so existing launcher
+    chrome is untouched and cannot regress):
+      • In XML:   android:theme="@style/ThemeOverlay.Ares.MaterialYou" on a container, plus an M3
+                  widget style e.g. style="@style/Widget.Material3.Button.IconButton.Filled".
+      • In code:  ContextThemeWrapper(context, R.style.ThemeOverlay_Ares_MaterialYou) when inflating
+                  or constructing a Material component.
+
+    Light roles here; dark roles in values-night/ares_material_you.xml. Tonal mapping follows the
+    standard M3 dynamic scheme (the same one ThemeOverlay.Material3.DynamicColors produces).
+-->
+<resources>
+
+    <style name="ThemeOverlay.Ares.MaterialYou" parent="">
+        <!-- Primary -->
+        <item name="colorPrimary">@color/system_accent1_600</item>
+        <item name="colorOnPrimary">@color/system_accent1_0</item>
+        <item name="colorPrimaryContainer">@color/system_accent1_100</item>
+        <item name="colorOnPrimaryContainer">@color/system_accent1_900</item>
+        <item name="colorPrimaryInverse">@color/system_accent1_200</item>
+
+        <!-- Secondary -->
+        <item name="colorSecondary">@color/system_accent2_600</item>
+        <item name="colorOnSecondary">@color/system_accent2_0</item>
+        <item name="colorSecondaryContainer">@color/system_accent2_100</item>
+        <item name="colorOnSecondaryContainer">@color/system_accent2_900</item>
+
+        <!-- Tertiary (the contrasting hue — orange against the launcher's green Monet) -->
+        <item name="colorTertiary">@color/system_accent3_600</item>
+        <item name="colorOnTertiary">@color/system_accent3_0</item>
+        <item name="colorTertiaryContainer">@color/system_accent3_100</item>
+        <item name="colorOnTertiaryContainer">@color/system_accent3_900</item>
+
+        <!-- Surfaces / background -->
+        <item name="android:colorBackground">@color/system_neutral1_10</item>
+        <item name="colorOnBackground">@color/system_neutral1_900</item>
+        <item name="colorSurface">@color/system_neutral1_10</item>
+        <item name="colorOnSurface">@color/system_neutral1_900</item>
+        <item name="colorSurfaceVariant">@color/system_neutral2_100</item>
+        <item name="colorOnSurfaceVariant">@color/system_neutral2_700</item>
+        <item name="colorSurfaceInverse">@color/system_neutral1_800</item>
+        <item name="colorOnSurfaceInverse">@color/system_neutral1_50</item>
+
+        <!-- Outline -->
+        <item name="colorOutline">@color/system_neutral2_500</item>
+        <item name="colorOutlineVariant">@color/system_neutral2_200</item>
+
+        <!-- Error (M3 baseline; not wallpaper-derived) -->
+        <item name="colorError">#B3261E</item>
+        <item name="colorOnError">#FFFFFF</item>
+        <item name="colorErrorContainer">#F9DEDC</item>
+        <item name="colorOnErrorContainer">#410E0B</item>
+    </style>
+
+</resources>
