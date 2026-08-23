@@ -48,8 +48,8 @@
             android:imeOptions="actionSearch|flagNoExtractUi"
             android:inputType="textNoSuggestions"
             android:singleLine="true"
-            android:textColor="?android:textColorPrimary"
-            android:textColorHint="?android:textColorTertiary"
+            android:textColor="@color/materialColorOnSurface"
+            android:textColorHint="@color/materialColorOnSurfaceVariant"
             android:textSize="17sp"
             android:visibility="gone" />
 
