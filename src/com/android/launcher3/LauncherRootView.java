@@ -17,6 +17,8 @@ import android.view.ViewDebug;
 import android.view.WindowInsets;
 
 import com.android.launcher3.graphics.SysUiScrim;
+import androidx.core.graphics.ColorUtils;
+import app.lawnchair.areslauncher.AresAllApps;
 import com.android.launcher3.statemanager.StatefulContainer;
 
 import com.android.launcher3.util.window.WindowManagerProxy;
@@ -52,6 +54,15 @@ public class LauncherRootView extends InsettableFrameLayout {
     private final boolean mEnableTaskbarOnPhone;
 
     private final PreferenceManager pref;
+
+    /**
+     * AresLauncher §9 wallpaper dim, 0..1. Drawn in {@link #dispatchDraw} before the children so it
+     * darkens ONLY the wallpaper -- every launcher view (workspace icons, widgets, and the app-list
+     * content) draws on top of it at full brightness. Driven by {@code LawnchairLauncher}'s state
+     * listener: fades in only once the app list is fully shown and out over a long, gentle fade that
+     * outlives the pane, since this surface (unlike the pane) stays on screen through the whole fade.
+     */
+    private float mAresWallpaperDimProgress = 0f;
 
     public LauncherRootView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -192,7 +203,27 @@ public class LauncherRootView extends InsettableFrameLayout {
     @Override
     protected void dispatchDraw(Canvas canvas) {
         mSysUiScrim.draw(canvas);
+        // §9 wallpaper dim: over the wallpaper, under every launcher view, so only the wallpaper
+        // darkens. See mAresWallpaperDimProgress.
+        if (mAresWallpaperDimProgress > 0f) {
+            int base = AresAllApps.appListWallpaperDim(getContext());
+            int alpha = Math.round(Color.alpha(base) * mAresWallpaperDimProgress);
+            canvas.drawColor(ColorUtils.setAlphaComponent(base, alpha));
+        }
         super.dispatchDraw(canvas);
+    }
+
+    /** §9 wallpaper dim strength, 0..1. Set by {@code LawnchairLauncher}'s state listener. */
+    public void setAresWallpaperDimProgress(float progress) {
+        progress = Utilities.boundToRange(progress, 0f, 1f);
+        if (mAresWallpaperDimProgress != progress) {
+            mAresWallpaperDimProgress = progress;
+            invalidate();
+        }
+    }
+
+    public float getAresWallpaperDimProgress() {
+        return mAresWallpaperDimProgress;
     }
 
     @Override

@@ -153,6 +153,35 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
+    // AresLauncher §9 wallpaper dim: fades the app-list readability dim in only once the app list is
+    // fully shown (transition to ALL_APPS complete) and out the moment it starts to leave. Owner
+    // wanted it gated to the settled page, not tied to swipe progress.
+    private var appListDimAnimator: android.animation.ValueAnimator? = null
+    private val appListDimStateListener = object : StateManager.StateListener<LauncherState> {
+        override fun onStateTransitionStart(toState: LauncherState) {
+            if (toState !is AllAppsState) animateAppListDim(0f)
+        }
+        override fun onStateTransitionComplete(finalState: LauncherState) {
+            animateAppListDim(if (finalState is AllAppsState) 1f else 0f)
+        }
+    }
+
+    private fun animateAppListDim(target: Float) {
+        val root = rootView ?: return
+        appListDimAnimator?.cancel()
+        val start = root.aresWallpaperDimProgress
+        if (start == target) {
+            root.aresWallpaperDimProgress = target
+            return
+        }
+        appListDimAnimator = android.animation.ValueAnimator.ofFloat(start, target).apply {
+            duration = if (target > start) APP_LIST_DIM_FADE_IN_MS else APP_LIST_DIM_FADE_OUT_MS
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener { root.aresWallpaperDimProgress = it.animatedValue as Float }
+            start()
+        }
+    }
+
     private lateinit var colorScheme: ColorScheme
     private var hasBackGesture = false
 
@@ -168,6 +197,7 @@ class LawnchairLauncher : QuickstepLauncher() {
             defaultOverlay.setEnableFeed(enable)
         }.launchIn(scope = lifecycleScope)
         launcher.stateManager.addStateListener(clearSearchStateListener)
+        launcher.stateManager.addStateListener(appListDimStateListener)
 
         if (prefs.autoLaunchRoot.get()) {
             lifecycleScope.launch {
@@ -694,6 +724,10 @@ class LawnchairLauncher : QuickstepLauncher() {
     companion object {
         private const val FLAG_RECREATE = 1 shl 0
         private const val FLAG_RESTART = 1 shl 1
+
+        // §9 app-list wallpaper dim fade timings (owner: long, gentle 2s fade both ways).
+        private const val APP_LIST_DIM_FADE_IN_MS = 2000L
+        private const val APP_LIST_DIM_FADE_OUT_MS = 2000L
 
         var sRestartFlags = 0
 

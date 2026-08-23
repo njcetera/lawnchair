@@ -92,4 +92,16 @@ object AresAllApps {
     @JvmStatic
     fun ergoBottomPaddingPx(context: Context): Int =
         context.resources.getDimensionPixelSize(R.dimen.ares_list_ergo_bottom_padding)
+
+    /**
+     * §9 readability dim (owner, 2026-08-22): a wallpaper darkening drawn behind the app-list pane's
+     * content, so the icons/labels read clearly over any wallpaper. Per the §9 design note in
+     * `AllAppsState.getWorkspaceScrimColor`, this lives on the PANE -- it travels in with the pane
+     * and leaves with it, like a page of the canvas -- rather than a workspace scrim, which §9 rules
+     * out as the "one thing on top of another" cue the one-canvas pan deliberately avoids. The pane's
+     * own transition alpha fades it in as the app list swipes in, and out as it swipes away.
+     */
+    @JvmStatic
+    fun appListWallpaperDim(context: Context): Int =
+        context.resources.getColor(R.color.ares_app_list_wallpaper_dim, context.theme)
 }

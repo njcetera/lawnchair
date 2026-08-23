@@ -450,4 +450,9 @@
     <color name="materialColorSecondaryFixedDim">@color/system_secondary_fixed_dim</color>
     <color name="materialColorTertiaryFixed">@color/system_tertiary_fixed</color>
     <color name="materialColorTertiaryFixedDim">@color/system_tertiary_fixed_dim</color>
+
+    <!-- AresLauncher §9: readability dim drawn on the app-list PANE (behind its content), so it
+         travels in with the pane and never washes the workspace behind it. ARGB; the alpha is the
+         wallpaper darkening strength. Tune here. -->
+    <color name="ares_app_list_wallpaper_dim">#73000000</color>
 </resources>
