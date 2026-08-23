@@ -490,7 +490,8 @@ class AresMasonryLayoutManager(
             val top = cell.y * ch
             val bottom = top + span.h.coerceAtLeast(1) * ch
 
-            val view = attached[position]
+            val existing = attached[position]
+            val view = existing
                 ?: recycler.getViewForPosition(position).also { addView(it) }
 
             // Each tile occupies its WHOLE cell. Separation between tiles is applied inside the
@@ -503,12 +504,23 @@ class AresMasonryLayoutManager(
             // the frost box's edge. And an inset tile is no longer the cell it stands for, which
             // turned every gutter into a dead zone for drop targeting.
             val lp = view.layoutParams as RecyclerView.LayoutParams
-            val w = span.w.coerceIn(1, columns) * cw - lp.leftMargin - lp.rightMargin
-            val h = span.h.coerceAtLeast(1) * ch - lp.topMargin - lp.bottomMargin
-            view.measure(
-                View.MeasureSpec.makeMeasureSpec(w.coerceAtLeast(0), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(h.coerceAtLeast(0), View.MeasureSpec.EXACTLY),
-            )
+            val w = (span.w.coerceIn(1, columns) * cw - lp.leftMargin - lp.rightMargin).coerceAtLeast(0)
+            val h = (span.h.coerceAtLeast(1) * ch - lp.topMargin - lp.bottomMargin).coerceAtLeast(0)
+            // Measure only when needed: a freshly added/scrapped view (`existing == null`), one that
+            // asked for layout itself (a widget refreshing its RemoteViews sets this), or one whose
+            // target size actually changed. During a pure scroll the cell size is unchanged, so
+            // re-measuring every visible child each frame is wasted work -- and re-measuring an
+            // AppWidgetHostView re-runs its RemoteViews layout, which is the scroll stutter and the
+            // "repeated rendering" of widgets on a long list. Views entering via getViewForPosition
+            // never land in `attached`, so a real layout pass still measures everything.
+            if (existing == null || view.isLayoutRequested ||
+                view.measuredWidth != w || view.measuredHeight != h
+            ) {
+                view.measure(
+                    View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+                )
+            }
 
             val left = paddingLeft + cell.x * cw
             layoutDecoratedWithMargins(
