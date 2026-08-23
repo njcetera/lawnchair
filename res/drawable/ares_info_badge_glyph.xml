@@ -1,40 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-     AresLauncher - the information "i" itself. Composed into a backdrop by ares_info_badge.xml;
-     that file is what callers reference, this one is only its top layer.
+     AresLauncher - the info affordance itself. Composed into a backdrop by ares_info_badge.xml.
+     Tapping it raises the app's context menu (shortcuts, App info, Uninstall, Widgets).
 
-     REVERSED (2026-08-20). This was an exclamation mark, drawn that way because the owner asked
-     for one by name - "add another option in the top right with a ! icon" - and this file used to
-     argue the case against an "i" at some length: that the lowercase i in a circle is the Android
-     convention for App info *specifically*, while this control opens the whole context menu
-     (shortcuts, App info, Uninstall, Widgets), so naming only one of those entries under-promises.
-
-     The owner corrected it after living with it: "the menu icon on apps should be an !, its shoild
-     be the i in a circle as the information icon". Their call, and the reasoning above was in any
-     case the weaker half of the argument. An exclamation mark is the universal glyph for a WARNING
-     - it is what sits on error dialogs and on a widget that failed to load - so on a tile it reads
-     as "something is wrong with this app" rather than "there is more to know about it". Promising
-     slightly less than the menu delivers costs far less than a badge that looks like an alert on
-     every icon on the home screen.
-
-     Only the glyph changes. The backdrop, both sizes and the centred composition are untouched, so
-     it still matches the x on the opposite corner exactly - see ares_info_badge.xml.
-
-     Drawn as a dot over a rounded stem, mirroring the exclamation's own construction: the stem is
-     the same 10.5-unit rounded bar at the same 3-unit weight as the x's strokes, and the dot is the
-     same r=1.6 circle, so the swap changes the meaning without changing the weight.
+     OFFICIAL Google Material Symbols ROUNDED "info" glyph (Apache-2.0). The owner replaced the
+     earlier "!" with the standard Material info "i" (2026-08-23). Material Symbols' 0 -960 960 960
+     canvas maps into Android's viewport with a +960 Y translate. Tinted ?android:textColorPrimary.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="?android:attr/textColorPrimary">
-
-    <path
-        android:fillColor="@android:color/white"
-        android:pathData="M12,3.9c-0.88,0 -1.6,0.72 -1.6,1.6s0.72,1.6 1.6,1.6 1.6,-0.72 1.6,-1.6 -0.72,-1.6 -1.6,-1.6z" />
-
-    <path
-        android:fillColor="@android:color/white"
-        android:pathData="M12,9.3c-0.83,0 -1.5,0.67 -1.5,1.5v7.5c0,0.83 0.67,1.5 1.5,1.5s1.5,-0.67 1.5,-1.5V10.8c0,-0.83 -0.67,-1.5 -1.5,-1.5z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:tint="@color/ares_my_icon_button_icon">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M480-280q17 0 28.5-11.5T520-320v-160q0-17-11.5-28.5T480-520q-17 0-28.5 11.5T440-480v160q0 17 11.5 28.5T480-280Zm0-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z" />
+    </group>
 </vector>

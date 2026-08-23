@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-     AresLauncher - the cross itself. Composed into a backdrop by ares_remove_badge.xml; that file
-     is what callers reference, this one is only its top layer.
+     AresLauncher - the remove cross itself. Composed into a backdrop by ares_remove_badge.xml.
+     Tapping it takes the item off the HOME SCREEN (it does not uninstall).
 
-     A plain cross rather than a minus or a bin: a bin reads as "delete the app" which is exactly
-     the wrong promise (the item leaves the home screen, the app stays installed), and a minus reads
-     as "collapse".
+     OFFICIAL Google Material Symbols ROUNDED "close" glyph (Apache-2.0), per the owner's 2026-08-23
+     directive. Material Symbols' 0 -960 960 960 canvas maps into Android's viewport with a +960 Y
+     translate. Tinted ?android:textColorPrimary.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="?android:attr/textColorPrimary">
-
-    <path
-        android:fillColor="@android:color/white"
-        android:pathData="M18.3,5.71 16.89,4.3 12,9.19 7.11,4.3 5.7,5.71 10.59,10.6 5.7,15.49l1.41,1.41L12,12.01l4.89,4.89 1.41,-1.41 -4.89,-4.89z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:tint="@color/ares_my_icon_button_icon">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z" />
+    </group>
 </vector>

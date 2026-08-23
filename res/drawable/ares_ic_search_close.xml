@@ -1,27 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-     AresLauncher §17 — close (✕) glyph for the app-list search's tonal close button.
+     AresLauncher §17 — close (✕) glyph for the app-list search's tonal close button (task #25,
+     owner directive 2026-08-23: real Material You iconography, Rounded style).
 
-     Authored in the Material Symbols style (thin, round-capped strokes) to match the newer Material
-     You iconography on the keyboard's action buttons, rather than the older filled/sharp Material
-     Icons "close" (res/drawable/ic_close.xml, ic_gm_close_24.xml) which read as heavier.
-
-     Two round-capped diagonal strokes on a 24dp canvas. Stroke colour is white so the ImageView's
-     imageTintList (the on-tertiary-container tone) recolours it cleanly.
+     OFFICIAL Google Material Symbols ROUNDED "close" glyph (Apache-2.0), verbatim path data,
+     wrapped in a +960 Y translate to map the Material Symbols 0 -960 960 960 canvas into Android's
+     0,0-origin viewport. fillColor white so imageTintList (on-tertiary-container tone) recolours.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:strokeColor="@android:color/white"
-        android:strokeWidth="1.9"
-        android:strokeLineCap="round"
-        android:pathData="M7.5,7.5 L16.5,16.5" />
-    <path
-        android:strokeColor="@android:color/white"
-        android:strokeWidth="1.9"
-        android:strokeLineCap="round"
-        android:pathData="M16.5,7.5 L7.5,16.5" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z" />
+    </group>
 </vector>
