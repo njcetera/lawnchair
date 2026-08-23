@@ -2009,6 +2009,22 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
     companion object {
         /**
+         * True if [container] hosts the edge-to-edge home list. The list draws its content beyond the
+         * container's bounds -- behind the transparent system bars (see onMeasure's overscan). A
+         * hardware layer is sized to the view's bounds and would clip that overflow, so the workspace
+         * must not layer this container during transitions ([CellLayout.enableHardwareLayer]); doing so
+         * momentarily re-clips home content at the status-bar line while sliding to/from the app list.
+         * Strategy D uses a single page, so skipping its layer costs one live-rendered page.
+         */
+        @JvmStatic
+        fun hostsEdgeToEdgeList(container: ViewGroup): Boolean {
+            for (i in 0 until container.childCount) {
+                if (container.getChildAt(i) is AresHomeListView) return true
+            }
+            return false
+        }
+
+        /**
          * How the most recent gesture on this list ended. [AresHomeReorder]'s `clearView` reads
          * this to tell a real drop from everything else, because `ItemTouchHelper` calls
          * `clearView` for all of them identically (S3):

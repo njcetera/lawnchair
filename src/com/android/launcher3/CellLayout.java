@@ -79,6 +79,7 @@ import com.android.launcher3.util.Themes;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.widget.LauncherAppWidgetHostView;
+import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
 
 import com.google.android.msdl.data.model.MSDLToken;
@@ -395,6 +396,14 @@ public class CellLayout extends ViewGroup {
     }
 
     public void enableHardwareLayer(boolean hasLayer) {
+        // AresLauncher edge-to-edge: the home list draws its content beyond this container's bounds,
+        // behind the transparent system bars. A hardware layer is sized to the view's bounds and would
+        // clip that overflow, so the momentary re-clip at the status-bar line while sliding to/from the
+        // app list. Never layer this container while it hosts the edge-to-edge home list (a single
+        // page under Strategy D, so the cost is one live-rendered page during the transition).
+        if (hasLayer && AresHomeListView.hostsEdgeToEdgeList(mShortcutsAndWidgets)) {
+            hasLayer = false;
+        }
         mShortcutsAndWidgets.setLayerType(hasLayer ? LAYER_TYPE_HARDWARE : LAYER_TYPE_NONE, sPaint);
     }
 
