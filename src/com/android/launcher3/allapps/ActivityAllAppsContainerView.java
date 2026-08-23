@@ -1511,7 +1511,16 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     private void applyAdapterSideAndBottomPaddings(DeviceProfile grid) {
-        int bottomPadding = Math.max(mInsets.bottom, mNavBarScrimHeight);
+        int stockBottomPadding = Math.max(mInsets.bottom, mNavBarScrimHeight);
+        // Ergonomic scroll room at the bottom of the launcher's app list (owner): rows can scroll
+        // clear of the nav gesture area and the corner search pill. Gated on isAresAppListPane -- the
+        // SAME "is this the launcher's own app list" test the top ergo uses (via appListTopPaddingPx)
+        // -- not isAresWorkspacePanel(), which is narrower and left the bottom unpadded while the top
+        // was fine. So the Taskbar sheet and secondary-display host still keep stock padding. Kept as a
+        // single assignment so it stays effectively final for the lambda below.
+        final int bottomPadding = AresAllApps.isAresAppListPane(mActivityContext)
+                ? stockBottomPadding + AresAllApps.ergoBottomPaddingPx(getContext())
+                : stockBottomPadding;
         mAH.forEach(adapterHolder -> {
             adapterHolder.mPadding.bottom = bottomPadding;
             adapterHolder.mPadding.left = grid.allAppsPadding.left;

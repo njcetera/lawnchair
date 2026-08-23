@@ -100,6 +100,14 @@
          box instead of moving its content. Costs 7dp of home grid height. -->
     <dimen name="ares_home_list_top_padding">7dp</dimen>
 
+    <!-- Ergonomic scroll padding added to BOTH lists (home + app list), owner 2026-08-22: easier
+         one-handed reach, and room to scroll the last items clear of bottom UI (the nav gesture area,
+         and the app list's corner search pill). Layered ON TOP of the alignment paddings above and
+         added EQUALLY to both surfaces, so the §11c cross-pane icon alignment is preserved. Both lists
+         already run clipToPadding=false, so this is real scroll room, not dead space. Tuned by feel. -->
+    <dimen name="ares_list_ergo_top_padding">100dp</dimen>
+    <dimen name="ares_list_ergo_bottom_padding">100dp</dimen>
+
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->
     <dimen name="ares_search_collapsed_size">56dp</dimen>

@@ -433,12 +433,19 @@ class AresMasonryLayoutManager(
     private fun mayRecycle(child: View): Boolean =
         host?.getChildViewHolder(child)?.isRecyclable ?: true
 
-    /** True when the cell at [position] intersects the viewport at the current [scrollOffset]. */
+    /** True when the cell at [position] is on **screen** at the current [scrollOffset]. */
     private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int): Boolean {
         if (position !in l.cells.indices) return false
         val top = l.cells[position].y * ch
         val bottom = top + spanProvider.getSpan(position).h.coerceAtLeast(1) * ch
-        return bottom > scrollOffset && top < scrollOffset + (height - paddingTop - paddingBottom)
+        // Judge against the FULL screen [0, height], not the padding-inset content box: with
+        // clipToPadding=false the top/bottom padding is real on-screen scroll space, so a cell moving
+        // through it must stay laid out rather than be recycled at the content edge. Recycling at the
+        // content edge is what made tiles "de-render" scrolling into a large top/bottom padding
+        // (owner) -- they should render across the whole page. A cell is drawn at screen
+        // y = paddingTop + cellTop - scrollOffset, so it is on screen when that range overlaps [0, height].
+        return paddingTop + bottom - scrollOffset > 0 &&
+            paddingTop + top - scrollOffset < height
     }
 
     /**

@@ -58,7 +58,7 @@ object AresAllApps {
         } else {
             R.dimen.ares_app_list_top_padding_sheet
         }
-        return launcher.resources.getDimensionPixelSize(dimen)
+        return launcher.resources.getDimensionPixelSize(dimen) + ergoTopPaddingPx(launcher)
     }
 
     /**
@@ -72,5 +72,24 @@ object AresAllApps {
      */
     @JvmStatic
     fun homeListTopPaddingPx(context: Context): Int =
-        context.resources.getDimensionPixelSize(R.dimen.ares_home_list_top_padding)
+        context.resources.getDimensionPixelSize(R.dimen.ares_home_list_top_padding) +
+            ergoTopPaddingPx(context)
+
+    /**
+     * Ergonomic scroll padding added to the TOP of both lists (owner, 2026-08-22): easier one-handed
+     * reach and room to scroll. Added on top of each list's §11c alignment padding, and the SAME
+     * amount to both, so the cross-pane icon alignment is preserved. See [ergoBottomPaddingPx].
+     */
+    @JvmStatic
+    fun ergoTopPaddingPx(context: Context): Int =
+        context.resources.getDimensionPixelSize(R.dimen.ares_list_ergo_top_padding)
+
+    /**
+     * Ergonomic scroll padding added to the BOTTOM of both lists: room to scroll the last rows clear
+     * of the nav gesture area and, on the app list, the corner search pill. clipToPadding is already
+     * false on both, so this is genuine scroll room. Callers gate it to the launcher's own surfaces.
+     */
+    @JvmStatic
+    fun ergoBottomPaddingPx(context: Context): Int =
+        context.resources.getDimensionPixelSize(R.dimen.ares_list_ergo_bottom_padding)
 }

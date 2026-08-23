@@ -76,7 +76,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // ShortcutAndWidgetContainer would otherwise clobber this on every measure pass.
         // AresMasonryLayoutManager already lays every cell out from paddingTop, and AresEditGrid
         // derives its dot origin from the same value, so both follow this without further change.
-        super.setPadding(0, AresAllApps.homeListTopPaddingPx(context), 0, 0)
+        // Top = §11c alignment + ergonomic reach padding; bottom = ergonomic scroll room. With
+        // clipToPadding=false above, the bottom is real room to scroll the last rows clear of the nav
+        // gesture area rather than dead space (owner). Both are shared with the app list via AresAllApps.
+        super.setPadding(
+            0,
+            AresAllApps.homeListTopPaddingPx(context),
+            0,
+            AresAllApps.ergoBottomPaddingPx(context),
+        )
         addItemDecoration(editDots)
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)
