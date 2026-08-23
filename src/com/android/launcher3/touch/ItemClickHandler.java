@@ -166,6 +166,18 @@ public class ItemClickHandler {
                     + " isDestroyed=" + folder.isDestroyed()
                     + " hasParent=" + (folder.getParent() != null)
                     + " animating=" + folder.aresIsAnimating());
+            // H1 (state-seam, ledger row 40 / Bug B): the cheap detached-variant heal above
+            // declined, so the folder is wedged in a variant it does not cover (attached-invisible
+            // or destroyed) and is un-openable for the rest of the session. Rebind its home row to a
+            // fresh Folder — reload-equivalent, scoped to one row, clearing every facet at once —
+            // and open that. Home folders only; an app-drawer folder has no Ares home list and is
+            // left to the stock overlay. See AresHomeListView.aresRebindAndOpenFolder.
+            Launcher launcher = Launcher.getLauncher(v.getContext());
+            app.lawnchair.areslauncher.AresHomeListView list =
+                    launcher.getWorkspace() != null ? launcher.getWorkspace().getAresHomeList() : null;
+            if (list != null) {
+                list.aresRebindAndOpenFolder(folder);
+            }
         }
     }
 

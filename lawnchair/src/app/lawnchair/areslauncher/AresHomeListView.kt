@@ -12,6 +12,7 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
+import android.view.ViewTreeObserver
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.AbstractFloatingView
@@ -19,6 +20,7 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherState
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
+import com.android.launcher3.folder.Folder
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
@@ -130,6 +132,51 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             if (position != NO_POSITION && aresAdapter.itemAt(position) === info) return child
         }
         return null
+    }
+
+    /**
+     * H1 (state-seam, ledger row 40 / Bug B): reload-equivalent heal for a folder wedged
+     * un-openable. `Folder.aresRecoverStuckOpen` covers only the *detached* wedge
+     * (`getParent()==null`); when a tap is still declined the folder is wedged in a variant it does
+     * not cover — attached-invisible (`mIsOpen` true, still parented into the DragLayer) or destroyed
+     * (`mDestroyed` is write-once and can never be reset on the same view). Both are un-openable for
+     * the rest of the session, and only a reload has been observed to heal them.
+     *
+     * This is that reload, scoped to one row: **discard the stale view** and **rebind the folder's
+     * home row** to a fresh `FolderIcon`/`Folder`, which clears every facet at once
+     * (`mIsOpen`/`mState`/`mDestroyed`/attachment) because it is a *new instance*, then open it.
+     *
+     * Called ONLY from `ItemClickHandler.onClickFolderIcon`'s declined branch, so it can never touch
+     * a folder that opens normally — the normal path never reaches here.
+     */
+    fun aresRebindAndOpenFolder(stale: Folder) {
+        val info: FolderInfo = stale.info ?: return
+        // 1. Hard-discard the stale view (reload semantics — we are replacing it, not reconciling
+        //    it, so this deliberately does NOT go through the racy close animation that wedged it):
+        //    detach it from the DragLayer if it lingered there (the attached-invisible variant) and
+        //    drop its drop-target registration, so no ghost view or phantom target survives the
+        //    rebind.
+        (stale.parent as? ViewGroup)?.removeView(stale)
+        launcher.dragController.removeDropTarget(stale)
+        // 2. Rebind the row -> fresh FolderIcon + Folder. Folder rows are recyclable TYPE_ICON, so
+        //    notifyItemChanged re-inflates cleanly (onBindViewHolder does removeAllViews + inflate).
+        val index = aresAdapter.indexOf(info)
+        if (index < 0) return
+        aresAdapter.notifyItemChanged(index)
+        // 3. Open the fresh folder once the rebind has laid out. A pre-draw listener fires after
+        //    layout and before draw, so the fresh FolderIcon is guaranteed present (a bare post()
+        //    can race the rebind traversal).
+        viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                viewTreeObserver.removeOnPreDrawListener(this)
+                val container = childForItem(info) as? ViewGroup
+                val fresh = (container?.getChildAt(0) as? FolderIcon)?.folder
+                if (fresh != null && !fresh.isOpen && !fresh.isDestroyed) {
+                    fresh.animateOpen()
+                }
+                return true
+            }
+        })
     }
 
     /**
