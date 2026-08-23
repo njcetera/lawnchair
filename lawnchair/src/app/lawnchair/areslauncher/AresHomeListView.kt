@@ -442,6 +442,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (!editMode) return false
         editMode = false
         setReorderInProgress(false)
+        // Drop any i-menu label suppression BEFORE the un-hide walk below. If a popup is still open
+        // when the mode ends (HOME / a home gesture from another app runs exitEditMode before super
+        // closes floating views), a still-set flag would make the walk's un-hide read
+        // shouldTextBeVisible()==false and strand that tile's label blank. See
+        // AresEditLabel.clearMenuSuppression.
+        AresEditLabel.clearMenuSuppression()
         // An open folder's × badges belong to this mode too. They normally go with the folder --
         // it closes before edit mode can be left -- but HOME closes floating views and exits the
         // mode in one pass, so the two orders must both end clean.

@@ -353,6 +353,24 @@ object AresEditLabel {
     fun isMenuLabelSuppressed(item: View): Boolean = labelSuppressed[item] == true
 
     /**
+     * Drops **all** menu-label suppression. Called at the very top of `AresHomeListView.exitEditMode`,
+     * before the un-hide walk.
+     *
+     * The suppression flag forces `shouldTextBeVisible()` false, and the un-hide's `toAlpha` reads
+     * that method (both the settled and the animating branch of [setItem], and [resetItem]). If a
+     * popup were still open when edit mode ended -- `LawnchairLauncher.onNewIntent` runs
+     * `exitEditMode()` BEFORE `super` closes floating views, so HOME / a home gesture from another
+     * app hits exactly this order -- the un-hide would compute `toAlpha = 0` and strand that one
+     * tile's label blank for the rest of the session. Clearing here, before the walk, means the walk
+     * reads the true `shouldTextBeVisible()` and restores the label. The per-item posted release in
+     * `AresInfoBadge.showMenu` still handles the ordinary in-mode dismiss; this is the exit-race net.
+     */
+    @JvmStatic
+    fun clearMenuSuppression() {
+        labelSuppressed.clear()
+    }
+
+    /**
      * Puts the item inside [container] back to a visible label at rest, and forgets it.
      *
      * The counterpart to `AresEditWiggle.reset`, and called from the same place for the same

@@ -187,7 +187,14 @@ object AresInfoBadge {
         // fully returned. reassertIfHidden then snaps the alpha to 0 (a no-op if a menu action such
         // as App info or Uninstall ended edit mode), and the suppression is released last so normal
         // label life -- including the eventual un-hide on leaving edit mode -- resumes.
-        val popup = PopupContainerWithArrow.getOpen<Launcher>(Launcher.getLauncher(icon.context))
+        // Resolve the Launcher by walking the context chain rather than Launcher.getLauncher(),
+        // which CCEs on a non-Launcher ActivityContext (defect-ledger row 41). The badge is a
+        // home-only affordance today so this is latent, but the call rides a shared surface; if no
+        // Launcher is found the menu still showed, so just skip the suppression wiring.
+        val launcher = generateSequence(icon.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<Launcher>()
+            .firstOrNull() ?: return true
+        val popup = PopupContainerWithArrow.getOpen<Launcher>(launcher)
         if (popup != null && AresEditLabel.isHidden(icon)) {
             AresEditLabel.setMenuLabelSuppressed(icon, true)
             popup.addOnCloseCallback {
