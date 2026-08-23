@@ -1819,6 +1819,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
+        // The host's real window position is unknown during the first measure (it isn't laid out yet),
+        // so re-measure once it settles to apply the exact edge-to-edge overscan. Extending this child
+        // never moves the host, so this converges in one extra pass and then stays quiet.
+        (parent as? View)?.getLocationInWindow(tmpLoc)
+        if (tmpLoc[1] in 0 until Int.MAX_VALUE && tmpLoc[1] != measuredHostWindowTop) {
+            requestLayout()
+        }
         // Widget providers can only be told their box once the layout manager has assigned one.
         aresAdapter.reportPendingWidgetSizes()
         // And the label lift is measured from the cell, so it is stale for exactly the same reason:
@@ -1868,6 +1875,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         reassertLabelLift()
     }
 
+    // Current edge-to-edge overscan (the host's window offsets baked into bounds + padding). Tracked
+    // so the padding is only rewritten when they actually change; see onMeasure.
+    private var overscanTop = 0
+    private var overscanBottom = 0
+    // The host window-top used by the last measure. The host isn't laid out during the first measure,
+    // so onLayout re-measures once it settles (it never moves afterwards) -- see onLayout.
+    private var measuredHostWindowTop = -1
+    private val tmpLoc = IntArray(2)
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         // Re-read the grid metrics each measure: folding changes the device profile, and the
         // column count and cell height must follow it or the packing is computed against stale
@@ -1882,10 +1898,70 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
         val hostHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
 
+        // Keep the host ShortcutAndWidgetContainer from clipping our edge-to-edge overscan. Its
+        // onAttachedToWindow re-enables clipChildren/clipToPadding whenever the allow-widget-overlap
+        // pref is off (the default), which would clip the extended list back to the inset content
+        // rect [top=statusInset, bottom=navInset] -- exactly what we're extending past so scrolled
+        // rows can flow behind the transparent bars. Our cells never overflow their own bounds, so
+        // unclipping the host only frees the overscan region; it changes nothing else on the page.
+        host?.let {
+            it.clipChildren = false
+            it.clipToPadding = false
+            it.clipToOutline = false
+        }
+        // The Workspace (a PagedView) draws with clipChildren=true, which clips each page (the
+        // CellLayout) to the PAGE's own bounds -- and the page is inset to [statusInset .. windowH -
+        // navInset]. That is a DRAW-TIME clip (it isn't a property on any view between here and the
+        // page), so it re-clips our extended list at the status-bar line even though every view in
+        // the chain is unclipped. Free the pager so the page can overflow to the window edges. This
+        // fork flattens the desktop into a single page (Strategy D), so there is no adjacent page to
+        // bleed into. The app list avoids this entirely by living in the DragLayer, above the pager.
+        (host?.parent as? ViewGroup)?.clipChildren = false   // CellLayout (already false; belt-and-braces)
+        ((host?.parent as? ViewGroup)?.parent as? ViewGroup)?.let { workspace ->
+            workspace.clipChildren = false
+            workspace.clipToPadding = false
+        }
+
         // Start below the pinned smartspace rather than on top of it (it occupies grid row 0 of the
         // same container, so a full-bleed list would overlap row 1).
-        val top = pinnedHeaderBottom(host)
-        val height = (hostHeight - top).coerceAtLeast(0)
+        val headerTop = pinnedHeaderBottom(host)
+
+        // Edge-to-edge overscan (owner, 2026-08-22): let scrolled rows flow *behind* the transparent
+        // status and nav bars instead of clipping at the workspace's inset content rect. The cell
+        // hierarchy is unclipped (CellLayout is clipChildren=false; we unclip the host S&W above) and
+        // the Workspace fills the whole window, so extending this list to span the full window renders
+        // it edge-to-edge -- no ancestor change.
+        //
+        // We size the overscan from the host's REAL window position, not from the device insets: the
+        // host sits `statusInset + workspaceTopPadding` below the window top, so an inset-only extend
+        // stops short of the physical edge. getLocationInWindow is ground truth and reaches y=0 exactly.
+        //
+        // The SAME amounts are added to top/bottom padding below, so the resting first/last row, the
+        // masonry maxScroll, and the edit-mode availH -- all computed as height - padTop - padBottom --
+        // are unchanged; only the overscan region (empty scroll room behind the bars) is new. We do
+        // NOT extend up when a pinned smartspace occupies the top region (headerTop > 0), or rows would
+        // slide behind the at-a-glance rather than behind the status bar.
+        host?.getLocationInWindow(tmpLoc)
+        val hostWindowTop = tmpLoc[1].coerceAtLeast(0)
+        measuredHostWindowTop = hostWindowTop
+        val windowHeight = launcher.dragLayer.height.takeIf { it > 0 } ?: (hostWindowTop + hostHeight)
+        val ovTop = if (headerTop > 0) 0 else hostWindowTop
+        val ovBottom = (windowHeight - (hostWindowTop + hostHeight)).coerceAtLeast(0)
+        if (ovTop != overscanTop || ovBottom != overscanBottom) {
+            overscanTop = ovTop
+            overscanBottom = ovBottom
+            // Through super: our setPadding() is a deliberate no-op (see below). Runs only when the
+            // overscan actually changes (first settle, or a fold), so the extra requestLayout is rare.
+            super.setPadding(
+                0,
+                AresAllApps.homeListTopPaddingPx(context) + ovTop,
+                0,
+                AresAllApps.ergoBottomPaddingPx(context) + ovBottom,
+            )
+        }
+
+        val top = headerTop - ovTop
+        val height = (hostHeight - headerTop + ovTop + ovBottom).coerceAtLeast(0)
 
         // Mutating the existing lp's fields rather than calling setLayoutParams() avoids
         // triggering a nested requestLayout() from inside a measure pass.

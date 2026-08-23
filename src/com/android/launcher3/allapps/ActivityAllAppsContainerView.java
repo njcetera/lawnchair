@@ -851,7 +851,11 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         // Scoped to our own pane; the Taskbar's all-apps sheet and the secondary-display host share
         // this class, still show a search bar, and keep the stock padding.
         int padding = AresAllApps.appListTopPaddingPx(
-                mActivityContext, isAresWorkspacePanel(), stockPadding);
+                mActivityContext, isAresWorkspacePanel(), stockPadding)
+                // Edge-to-edge: fold the relocated top inset (removed from this container's padding in
+                // setInsets) into the recycler's own top padding, so the resting first row stays put
+                // while the recycler fills the full window and content flows behind the status bar.
+                + aresRelocatedTopInset();
         mAH.forEach(adapterHolder -> {
             adapterHolder.mPadding.top = padding;
             adapterHolder.applyPadding();
@@ -1432,6 +1436,30 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     @Override
     public void onDropCompleted(View target, DragObject d, boolean success) {}
 
+    /**
+     * AresLauncher edge-to-edge (owner, 2026-08-22): the top system-bar inset to relocate from this
+     * container's padding into the recycler's own top padding, so the recycler fills the full window
+     * and -- being clipToPadding=false -- scrolled rows flow behind the transparent status bar rather
+     * than clipping at the inset line. Returns 0 for every shared surface (the Taskbar all-apps sheet
+     * and the secondary-display host both share this class), which keep the stock insetting. The value
+     * mirrors exactly what {@link #setInsets} would otherwise put in this container's top padding.
+     */
+    private int aresRelocatedTopInset() {
+        if (!AresAllApps.isAresAppListPane(mActivityContext)) {
+            return 0;
+        }
+        DeviceProfile grid = mActivityContext.getDeviceProfile();
+        if (grid.isVerticalBarLayout() && !FeatureFlags.enableResponsiveWorkspace()) {
+            return 0;
+        }
+        int topPadding = grid.allAppsPadding.top;
+        if (isSearchBarFloating() && !grid.shouldShowAllAppsOnSheet()) {
+            topPadding += getResources().getDimensionPixelSize(
+                    R.dimen.all_apps_additional_top_padding_floating_search);
+        }
+        return topPadding;
+    }
+
     @Override
     public void setInsets(Rect insets) {
         mInsets.set(insets);
@@ -1454,6 +1482,15 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
             if (isSearchBarFloating() && !grid.shouldShowAllAppsOnSheet()) {
                 topPadding += getResources().getDimensionPixelSize(
                         R.dimen.all_apps_additional_top_padding_floating_search);
+            }
+            // AresLauncher edge-to-edge (owner, 2026-08-22): for the launcher's own app-list pane the
+            // top inset is relocated OUT of this container's padding and INTO the recycler's own top
+            // padding (see aresRelocatedTopInset() and the mPadding.top call site). The recycler is
+            // match_parent + clipToPadding=false, so once this container stops padding it down, the
+            // recycler fills the full window height and scrolled rows flow up behind the transparent
+            // status bar instead of clipping at the inset line. Shared surfaces keep the stock inset.
+            if (aresRelocatedTopInset() > 0) {
+                topPadding = 0;
             }
             setPadding(grid.allAppsLeftRightMargin, topPadding, grid.allAppsLeftRightMargin, 0);
         }

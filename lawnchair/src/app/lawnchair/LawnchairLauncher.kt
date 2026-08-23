@@ -626,6 +626,14 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onStateSetEnd(state: LauncherState) {
         super.onStateSetEnd(state)
         refreshPredictionContainersFromModel()
+        // AresLauncher edge-to-edge: the base Launcher re-clips the workspace pager to page bounds
+        // at the end of EVERY state transition (setClipChildren(!FLAG_MULTI_PAGE)), which re-clips
+        // the home list's edge-to-edge overscan back to the status/nav-bar line after visiting
+        // all-apps. Re-assert the unclip here so home content keeps flowing behind the bars. The
+        // Ares desktop is a single flattened page (Strategy D), so there is no adjacent page to
+        // bleed into. AresHomeListView.onMeasure keeps it unclipped on the first frame and on folds.
+        workspace.clipChildren = false
+        workspace.clipToPadding = false
     }
 
     override fun onDestroy() {
