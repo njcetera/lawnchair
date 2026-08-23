@@ -897,6 +897,35 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     }
 
     /**
+     * AresLauncher (state-seam P4a): logs, loudly and at origin, when this folder's
+     * open/closed/destroyed facets disagree. INV-1 (design/state-seam-proposal.md §2): a settled
+     * folder has {@code mIsOpen == attached == (mState == STATE_OPEN)} and {@code !mDestroyed}. The
+     * facets are written at different moments (mIsOpen leads, mState trails at animation end,
+     * mDestroyed is async), so {@code STATE_ANIMATING} is a legitimately-transient disagreement and
+     * is skipped; any other mismatch is a wedge FORMING — the shared root of the folder/handoff bugs
+     * (Bug B row 40, declined-latch row 36). This is inert: logging only, no behaviour change, so it
+     * cannot itself regress anything. Grep {@code AresFolderSeam} in logcat to catch the wedge at the
+     * instant it forms rather than at the next declined tap (which the existing AresFolderOpen
+     * diagnostic already covers).
+     */
+    public void aresLogSeamInvariants(String where) {
+        if (mState == STATE_ANIMATING) {
+            return;
+        }
+        boolean attached = getParent() != null;
+        boolean stateOpen = mState == STATE_OPEN;
+        if (mIsOpen != attached || mIsOpen != stateOpen || mDestroyed) {
+            Log.e(TAG, "AresFolderSeam INVARIANT VIOLATED @" + where
+                    + " id=" + (mInfo != null ? mInfo.id : -1)
+                    + " mIsOpen=" + mIsOpen
+                    + " mState=" + mState
+                    + " attached=" + attached
+                    + " mDestroyed=" + mDestroyed
+                    + " items=" + (mInfo != null ? mInfo.getContents().size() : -1));
+        }
+    }
+
+    /**
      * Recovers a folder wedged in the documented inconsistent state: mIsOpen (and/or a mid-close
      * STATE_ANIMATING) left set while the folder is NOT attached to the DragLayer. A §25 live-create
      * that opens the folder mid-drag can leave it here after a close race, and then
@@ -1192,6 +1221,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
             @Override
             public void onAnimationEnd(Animator animation) {
                 setState(STATE_OPEN);
+                aresLogSeamInvariants("open-complete");
                 announceAccessibilityChanges();
                 AccessibilityManagerCompat.sendTestProtocolEventToTest(getContext(),
                         FOLDER_OPENED_MESSAGE);
@@ -1438,6 +1468,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mSuppressFolderDeletion = false;
         clearDragInfo();
         setState(STATE_CLOSED);
+        aresLogSeamInvariants("close-complete");
         mContent.setCurrentPage(0);
 
         // Expressive folder animations dim the workspace scrim and scale workspace/hotseat. When the
