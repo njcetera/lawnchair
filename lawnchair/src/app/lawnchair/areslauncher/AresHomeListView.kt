@@ -88,6 +88,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             AresAllApps.ergoBottomPaddingPx(context),
         )
         addItemDecoration(editDots)
+        // Material-You bars bracketing an expanded WP folder's opened apps (owner 2026-08-24). Draws
+        // nothing unless a folder is expanded, so it is free to leave installed.
+        addItemDecoration(AresFolderBounds(context, this))
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
