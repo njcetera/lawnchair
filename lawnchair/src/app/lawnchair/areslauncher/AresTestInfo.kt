@@ -192,6 +192,23 @@ object AresTestInfo {
     const val REQUEST_WP_EXTRACT_DRAG = "ares-wp-extract-drag"
 
     /**
+     * WP folders Phase 3 #3: the packer's placement of EVERY item, one `id|x,y` per adapter
+     * position in order, so the reserved-run block (folder + children contiguous) can be verified
+     * off-screen too. Lets a test assert the children pack immediately after the folder in row-major
+     * order even when an upstream widget hole would otherwise scatter them.
+     */
+    const val REQUEST_PACK_CELLS = "ares-pack-cells"
+
+    /**
+     * WP folders Phase 3 #3: a self-contained proof that the reserved run keeps a folder+children
+     * block contiguous EVEN when an upstream hole would otherwise scatter it -- runs the real
+     * [AresPacker] on a crafted span list (a 3-wide item then a 2-wide item leave a 1-cell hole at
+     * (3,0)) with and without the run, and returns both placements. Independent of whatever the live
+     * grid happens to look like. `norun=...` `run=...`, each a list of `x,y`.
+     */
+    const val REQUEST_PACK_PROBE = "ares-pack-probe"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -313,6 +330,14 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpExtractDrag(launcher, arg) },
         )
+        REQUEST_PACK_CELLS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putStringArray(key, value) },
+            { launcher -> packCells(launcher) },
+        )
+        REQUEST_PACK_PROBE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putStringArray(key, value) },
+            { _ -> packProbe() },
+        )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> setFolderEdit(launcher, arg) },
@@ -423,6 +448,35 @@ object AresTestInfo {
             is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder(${a.folderId})"
             is AresWpMembership.Action.AddToFolder -> "AddToFolder(${a.folderId})"
         }
+    }
+
+    /** See [REQUEST_PACK_PROBE]. Runs the real packer on a crafted upstream-hole scenario. */
+    private fun packProbe(): Array<String> {
+        // 4 columns. A 3-wide then a 2-wide item leave a 1-cell hole at (3,0). Indices 2..5 are the
+        // folder tile + 3 children that must stay together.
+        val spans = listOf(
+            AresPacker.Span(3, 1),
+            AresPacker.Span(2, 1),
+            AresPacker.Span(1, 1),
+            AresPacker.Span(1, 1),
+            AresPacker.Span(1, 1),
+            AresPacker.Span(1, 1),
+        )
+        fun fmt(l: AresPacker.Layout) = l.cells.joinToString(" ") { "${it.x},${it.y}" }
+        val noRun = AresPacker.pack(spans, 4, null)
+        val withRun = AresPacker.pack(spans, 4, 2..5)
+        return arrayOf("norun=${fmt(noRun)}", "run=${fmt(withRun)}")
+    }
+
+    /** See [REQUEST_PACK_CELLS]. `id|x,y` per adapter position, in order. */
+    private fun packCells(launcher: Launcher): Array<String> {
+        val list = launcher.workspace?.aresHomeList ?: return emptyArray()
+        val lm = list.layoutManager as? AresMasonryLayoutManager ?: return emptyArray()
+        val cells = lm.currentCells()
+        return cells.mapIndexed { pos, cell ->
+            val id = list.aresAdapter.itemAt(pos)?.id ?: -1
+            "$id|${cell.x},${cell.y}"
+        }.toTypedArray()
     }
 
     /** See [REQUEST_WP_EXTRACT_DRAG]. Runs the drop handler's classify-then-extract decision. */

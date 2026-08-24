@@ -92,6 +92,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
         aresAdapter.gridColumns = { masonry.columns }
+        // WP folders Phase 3 #3: keep an expanded folder's children packed as one contiguous block
+        // with the folder, so the greedy packer's backfill can't strand a child in an upstream hole.
+        masonry.reservedRunProvider = { aresAdapter.expandedRunRange() }
         aresAdapter.resizeHost = { info, dx, dy, phase -> onResizeDrag(info, dx, dy, phase) }
         aresAdapter.removeHost = { info -> removeFromHome(info) }
         aresAdapter.boundHost = { info, container -> onRowBound(info, container) }

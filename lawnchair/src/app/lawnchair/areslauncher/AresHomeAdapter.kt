@@ -786,6 +786,26 @@ class AresHomeAdapter(private val launcher: Launcher) :
     /** The id of the inline-expanded WP folder, or -1. See [expandedWpFolderId]. */
     fun expandedWpFolder(): Int = expandedWpFolderId
 
+    /**
+     * WP folders Phase 3 #3: the contiguous adapter index range covering the inline-expanded folder
+     * tile and the children spliced immediately after it, or null when nothing is expanded. Handed to
+     * [AresPacker] so the run is packed as one block. Reads straight off [items] in its current
+     * order, so it stays correct through a mid-drag reorder of the children.
+     */
+    fun expandedRunRange(): IntRange? {
+        val fid = expandedWpFolderId
+        if (fid == -1) return null
+        val folderPos = items.indexOfFirst { it.id == fid }
+        if (folderPos < 0) return null
+        var end = folderPos
+        var k = folderPos + 1
+        while (k < items.size && items[k].container == fid) {
+            end = k
+            k++
+        }
+        return folderPos..end
+    }
+
     /** True when [folderInfo] is the one WP folder currently inline-expanded. */
     fun isWpExpanded(folderInfo: FolderInfo): Boolean = expandedWpFolderId == folderInfo.id
 

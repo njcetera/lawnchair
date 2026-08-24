@@ -43,13 +43,28 @@ object AresPacker {
      *
      * An item wider than the grid is clamped to the full width rather than dropped -- a widget
      * declaring more columns than the device has would otherwise vanish silently.
+     *
+     * [reservedRun] (WP folders Phase 3 #3): a contiguous index range that must be kept together as
+     * one visual block -- an inline-expanded folder tile plus its spliced children. Without it, the
+     * greedy backfill can pull a child up into an earlier hole (left by a wide widget), stranding it
+     * far from the folder it belongs to. When the run is given AND every member is a 1x1 footprint
+     * (which folder icons and app icons always are), the whole run is placed as one contiguous
+     * row-major block at the first position where all of its cells are free together -- so the
+     * children always flow immediately after the folder. A run with any non-1x1 member, or an
+     * out-of-range range, is ignored and those items pack individually (safe fallback, never a
+     * crash). Items outside the run pack first-fit exactly as before, so a no-run call is
+     * byte-for-byte the old behaviour.
+     *
+     * The self-non-collision guarantee is preserved: the block only ever occupies cells it has
+     * checked free, so a list still cannot collide with itself (see the class KDoc / row-34).
      */
-    fun pack(spans: List<Span>, columns: Int): Layout {
+    @JvmOverloads
+    fun pack(spans: List<Span>, columns: Int, reservedRun: IntRange? = null): Layout {
         if (columns <= 0 || spans.isEmpty()) return Layout(emptyList(), 0)
 
         // Occupancy grid, grown a row at a time as items are placed. Row-major: occupied[y][x].
         val occupied = ArrayList<BooleanArray>()
-        val cells = ArrayList<Cell>(spans.size)
+        val cells = arrayOfNulls<Cell>(spans.size)
         var rows = 0
 
         fun rowAt(y: Int): BooleanArray {
@@ -67,10 +82,9 @@ object AresPacker {
             return true
         }
 
-        for (span in spans) {
+        fun place(pos: Int, span: Span) {
             val w = span.w.coerceIn(1, columns)
             val h = span.h.coerceAtLeast(1)
-
             // Scan top-to-bottom, then left-to-right within each row: the first position that fits
             // wins. The scan is bounded because a fresh row is always empty, so an item can never
             // fail to place.
@@ -85,15 +99,53 @@ object AresPacker {
                 }
                 if (placed == null) y++
             }
-
             for (dy in 0 until h) {
                 val row = rowAt(placed.y + dy)
                 for (dx in 0 until w) row[placed.x + dx] = true
             }
-            cells.add(placed)
+            cells[pos] = placed
             rows = maxOf(rows, placed.y + h)
         }
 
-        return Layout(cells, rows)
+        // Is the reserved run usable? It must be in range and every member a 1x1 footprint -- the
+        // contiguous-block placement below reasons in single cells, so a wider member would be
+        // mis-placed. Anything else falls through to per-item first-fit.
+        val runUsable = reservedRun != null && !reservedRun.isEmpty() &&
+            reservedRun.first >= 0 && reservedRun.last < spans.size &&
+            reservedRun.all { spans[it].w.coerceIn(1, columns) == 1 && spans[it].h.coerceAtLeast(1) == 1 }
+
+        var i = 0
+        while (i < spans.size) {
+            if (runUsable && i == reservedRun!!.first) {
+                val n = reservedRun.last - reservedRun.first + 1
+                // First row-major start index whose n consecutive cells are ALL free. Fresh rows are
+                // empty, so such a window always exists at or before the frontier -- terminates.
+                var start = 0
+                while (true) {
+                    var ok = true
+                    for (k in 0 until n) {
+                        val idx = start + k
+                        if (rowAt(idx / columns)[idx % columns]) { ok = false; break }
+                    }
+                    if (ok) break
+                    start++
+                }
+                for (k in 0 until n) {
+                    val idx = start + k
+                    val x = idx % columns
+                    val y = idx / columns
+                    rowAt(y)[x] = true
+                    cells[reservedRun.first + k] = Cell(x, y)
+                    rows = maxOf(rows, y + 1)
+                }
+                i = reservedRun.last + 1
+            } else {
+                place(i, spans[i])
+                i++
+            }
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        return Layout((cells as Array<Cell>).toList(), rows)
     }
 }

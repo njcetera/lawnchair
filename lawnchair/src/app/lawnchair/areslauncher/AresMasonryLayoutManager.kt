@@ -68,6 +68,10 @@ class AresMasonryLayoutManager(
      * row 27) is an absolute jump of this value mid-drag, which layout bounds cannot show. */
     internal fun currentScrollOffset(): Int = scrollOffset
 
+    /** Read-only packer cells for the current layout, one per adapter position, for tests. Empty
+     * until the first layout pass. Lets a test read where EVERY item packs, on-screen or off. */
+    internal fun currentCells(): List<AresPacker.Cell> = layout?.cells ?: emptyList()
+
     /**
      * The scale items rest at when nothing is animating; the host keeps it in step with edit mode,
      * which shrinks every tile slightly.
@@ -156,10 +160,19 @@ class AresMasonryLayoutManager(
 
     private fun cellHeight(): Int = if (cellHeightPx > 0) cellHeightPx else cellWidth()
 
+    /**
+     * WP folders Phase 3 #3: supplies the contiguous adapter index range (expanded folder + its
+     * spliced children) that [AresPacker] must keep together as one block, or null when no folder is
+     * expanded. Set by the host; read fresh on every repack, so it always reflects the live expand
+     * state. The itemCount changes on expand/collapse, which already invalidates the layout cache
+     * below, so a stale run can never be paired with a live span list.
+     */
+    var reservedRunProvider: (() -> IntRange?)? = null
+
     private fun ensureLayout(state: RecyclerView.State): AresPacker.Layout {
         layout?.let { if (it.cells.size == state.itemCount) return it }
         val spans = (0 until state.itemCount).map { spanProvider.getSpan(it) }
-        return AresPacker.pack(spans, columns).also { layout = it }
+        return AresPacker.pack(spans, columns, reservedRunProvider?.invoke()).also { layout = it }
     }
 
     private fun contentHeight(l: AresPacker.Layout): Int = l.rows * cellHeight()
