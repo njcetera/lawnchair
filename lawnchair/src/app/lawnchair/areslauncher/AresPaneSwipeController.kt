@@ -102,14 +102,13 @@ class AresPaneSwipeController(launcher: Launcher) :
             return false
         }
         // Live-create ends the in-grid drag with a synthetic UP to form the folder, but the REAL
-        // finger is still down. In the ~200ms gap between that UP and the folder opening, edit-mode,
-        // a floating-view-open, and reorder-in-progress are ALL momentarily false, so the guards above
-        // miss it and this controller claims the still-down finger (measured on the fold 2026-08-23:
-        // "CLAIMED MID-GESTURE" the instant the drag ended). Once claimed, the grid never sees the
-        // pull-out, so the drag-out-to-destroy continuation is unreachable. Stand down for the whole
-        // live-create window (arming + the few seconds the just-opened folder is held) so the finger
-        // stays with the grid where the continuation can catch it.
-        if (AresFolderDrop.isLiveArming() || AresFolderDrop.recentLiveCreate()) {
+        // finger is still down. During that brief arming window this controller must not claim the
+        // still-down finger and start a NORMAL->ALL_APPS transition mid-create. The wider
+        // "recentLiveCreate" (4s) stand-down was removed: it existed only for the drag-out-to-destroy
+        // CONTINUATION, which was reverted, and it was suppressing legitimate app-list swipes for 4s
+        // after every folder create (adversarial review 2026-08-23, Mo1). isLiveArming is a ~1-frame
+        // window, so it cannot regress a real swipe.
+        if (AresFolderDrop.isLiveArming()) {
             return false
         }
         // Both directions work from anywhere on the pane. Opening was originally scoped to a

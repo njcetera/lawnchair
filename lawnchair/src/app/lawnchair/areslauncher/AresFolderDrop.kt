@@ -92,6 +92,14 @@ object AresFolderDrop {
     const val DWELL_MS = 500L
 
     /**
+     * Upper bound on the [liveArming] latch (Mo2). The synthetic UP that ends the in-grid drag lands
+     * in `clearView -> commitDrop` within a frame or two on a healthy create; this is comfortably
+     * longer than that so it never pre-empts a real create, yet short enough that a dropped UP can't
+     * leave the pane-swipe muted for a human-noticeable span.
+     */
+    private const val LIVE_ARM_FAILSAFE_MS = 300L
+
+    /**
      * How long to wait before re-trying a dwell that landed mid folder-animation.
      *
      * Well under [DWELL_MS], because this is not a fresh dwell — the user has already held still
@@ -190,14 +198,6 @@ object AresFolderDrop {
     @JvmStatic
     fun isLiveArming(): Boolean = liveArming
 
-    /** Diagnostic: uptime a live folder last opened via [commitDrop], for the continuation window. */
-    private var liveCreateOpenedAt = 0L
-
-    /** True for a few seconds after a live-create opened, while the finger is likely still down. */
-    @JvmStatic
-    fun recentLiveCreate(): Boolean =
-        android.os.SystemClock.uptimeMillis() - liveCreateOpenedAt < 4000L
-
     /**
      * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
      * `DragController` drag from the app list, the widget picker or another folder.
@@ -210,6 +210,24 @@ object AresFolderDrop {
     private val dwellElapsed = Runnable { arm() }
 
     private val previewExitElapsed = Runnable { closePreview() }
+
+    /**
+     * Time-based failsafe for the [liveArming] latch (adversarial review 2026-08-23, Mo2).
+     *
+     * [arm] sets `liveArming` and fires a synthetic UP, trusting `clearView -> commitDrop` (or a
+     * non-UP `clearTarget`) to clear it. Both existing resets are event-driven: they only run if a
+     * *further* drag event arrives. If the synthetic UP is dropped and no event follows, the latch
+     * stays set forever -- pinning `getAnimationDuration` to 0 for every later grid drop and muting
+     * the pane-swipe via [isLiveArming]. This bounds that window: if `liveArming` is still set
+     * [LIVE_ARM_FAILSAFE_MS] after arming, force it down. commitDrop/clearTarget cancel this the
+     * instant they clear the latch the normal way, so it never fires on a healthy create.
+     */
+    private val liveArmFailsafe = Runnable {
+        if (liveArming) {
+            liveArming = false
+            Log.w(TAG, "live-create: liveArming failsafe fired; latch was never cleared by a drop")
+        }
+    }
 
     /**
      * Reports where the drag currently is, in [list]'s own coordinate space.
@@ -496,6 +514,8 @@ object AresFolderDrop {
             candidateInfo != null && dragged != null
         ) {
             liveArming = true
+            list.removeCallbacks(liveArmFailsafe)
+            list.postDelayed(liveArmFailsafe, LIVE_ARM_FAILSAFE_MS)
             val now = android.os.SystemClock.uptimeMillis()
             list.dispatchSyntheticHandoffEvent(
                 android.view.MotionEvent.ACTION_UP, now, now, anchorX, anchorY,
@@ -542,6 +562,7 @@ object AresFolderDrop {
         // gate -- so it would hijack the next drop even with live-create OFF. Resetting here, the
         // fundamental teardown that every non-UP end routes through, makes it invariant-by-construction.
         liveArming = false
+        grid?.removeCallbacks(liveArmFailsafe)
     }
 
     private fun clear() {
@@ -628,16 +649,12 @@ object AresFolderDrop {
         // create-on-release so the pair still becomes a folder. Either way the drop is consumed.
         if (liveArming) {
             liveArming = false
+            grid?.removeCallbacks(liveArmFailsafe)
             val list = grid
             val target = candidateInfo
             val done = try {
                 if (list != null && target != null && candidateKind == Kind.CREATE) {
                     if (createLiveFolder(launcher, list, target, item) != null) {
-                        // Diagnostic (owner report 2026-08-23): a live folder just opened on the hold
-                        // with the finger STILL DOWN. Mark the continuation window so dispatchTouchEvent
-                        // can show whether the grid keeps receiving that finger's moves (the basis for
-                        // a drag-out-to-destroy continuation).
-                        liveCreateOpenedAt = android.os.SystemClock.uptimeMillis()
                         true
                     } else {
                         createFolder(launcher, list, target, item)
