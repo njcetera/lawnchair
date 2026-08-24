@@ -123,6 +123,10 @@ class AresSearchContainerView @JvmOverloads constructor(
     private val expandedPillColor by lazy { context.getColor(R.color.materialColorSurfaceContainerHigh) }
     private var pillColorAnimator: ValueAnimator? = null
 
+    /** The transient overlay that reveals the fob colour centre-out; see [revealPillColorCenterOut]. */
+    private var colorRevealView: View? = null
+    private var colorRevealAnimator: android.animation.Animator? = null
+
     /** Last known IME bottom inset (px), so [onEnd] of the insets animation can settle to it. */
     private var lastImeBottom = 0
 
@@ -667,6 +671,9 @@ class AresSearchContainerView @JvmOverloads constructor(
      * morph after a cancel would fight whatever cancelled us.
      */
     private fun animatePillColorTo(target: Int, durationMs: Long, onEnd: (() -> Unit)? = null) {
+        // A flat fade supersedes any in-flight centre-out reveal (e.g. a fast re-open during the
+        // collapse trail): tear the reveal overlay down first so the two never fight over the fill.
+        cleanupColorReveal()
         pillColorAnimator?.cancel()
         val start = pill.backgroundTintList?.defaultColor ?: collapsedPillColor
         pillColorAnimator = ValueAnimator.ofObject(android.animation.ArgbEvaluator(), start, target).apply {
@@ -689,6 +696,72 @@ class AresSearchContainerView @JvmOverloads constructor(
             }
             start()
         }
+    }
+
+    /**
+     * Recolours the collapsed fob to [target] with a Material **circular reveal** from its centre
+     * outward, rather than a flat cross-fade (owner, 2026-08-23: "an expansion from the centre out").
+     *
+     * The fob is a 56dp square with a 28dp corner radius, i.e. a circle, so a reveal whose radius
+     * grows to the half-width fills it exactly. A transient overlay carrying the [target] colour (in
+     * the same circular shape) is added to the pill BELOW the search glyph — the glyph is a later
+     * child, so it stays legible on top — and clipped by [android.view.ViewAnimationUtils]'s reveal.
+     * When it completes the pill's real `backgroundTint` is committed to [target] and the overlay is
+     * removed, so nothing lingers. Only ever runs on the settled, collapsed fob (from [collapse]'s
+     * morph end), so the square-circle geometry always holds.
+     */
+    private fun revealPillColorCenterOut(target: Int) {
+        cleanupColorReveal()
+        pillColorAnimator?.cancel()
+
+        val size = collapsedSize
+        if (size <= 0 || !pill.isAttachedToWindow) {
+            // No geometry to reveal into; fall back to committing the colour outright.
+            pill.backgroundTintList = android.content.res.ColorStateList.valueOf(target)
+            return
+        }
+        val overlay = View(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                size, size, android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL,
+            )
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = size / 2f
+                setColor(target)
+            }
+        }
+        // Below the glyph (the last child) so the magnifier stays visible over the growing fill.
+        val pillGroup = pill as android.view.ViewGroup
+        pillGroup.addView(overlay, pillGroup.indexOfChild(icon).coerceAtLeast(0))
+        colorRevealView = overlay
+
+        val reveal = android.view.ViewAnimationUtils.createCircularReveal(
+            overlay, size / 2, size / 2, 0f, size / 2f,
+        ).apply {
+            duration = PILL_COLOR_REVEAL_MS
+            interpolator = morphInterpolator
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    // Commit the real fill FIRST, then drop the overlay, so there is no one-frame flash.
+                    pill.backgroundTintList = android.content.res.ColorStateList.valueOf(target)
+                    if (colorRevealView === overlay) {
+                        (pill as android.view.ViewGroup).removeView(overlay)
+                        colorRevealView = null
+                        colorRevealAnimator = null
+                    }
+                }
+            })
+        }
+        colorRevealAnimator = reveal
+        reveal.start()
+    }
+
+    /** Tears down any in-flight centre-out reveal overlay so a superseding colour change is clean. */
+    private fun cleanupColorReveal() {
+        colorRevealAnimator?.cancel()
+        colorRevealAnimator = null
+        colorRevealView?.let { (pill as android.view.ViewGroup).removeView(it) }
+        colorRevealView = null
     }
 
     /**
@@ -717,8 +790,6 @@ class AresSearchContainerView @JvmOverloads constructor(
         input.setText("")
         searchBarController.reset()
         crossfadeIconToSearch()
-        // Return the pill to the bright fob colour as it shrinks back to a button.
-        animatePillColorTo(collapsedPillColor, MORPH_DURATION_COLLAPSE_MS)
         // Fade the input out and hide it only once the pill has finished shrinking, so the field
         // collapses smoothly instead of blanking the instant the close button is tapped. `expanded`
         // stays true (it reads input.isVisible) until then, keeping re-entrant taps a harmless no-op.
@@ -731,6 +802,10 @@ class AresSearchContainerView @JvmOverloads constructor(
             input.isVisible = false
             input.alpha = 1f
             collapsing = false
+            // Owner: the recolour back to the bright fob colour runs only AFTER the downsize
+            // completes, and as a Material circular reveal from the fob's centre outward (owner asked
+            // for "an expansion from the centre out ... some fun animation") rather than a flat fade.
+            revealPillColorCenterOut(collapsedPillColor)
         }
     }
 
@@ -876,6 +951,13 @@ class AresSearchContainerView @JvmOverloads constructor(
 
         /** Collapse morph — deliberately slower than the open so the close reads as a gentle settle. */
         const val MORPH_DURATION_COLLAPSE_MS = 360L
+
+        /**
+         * The centre-out circular reveal that recolours the fob AFTER it has finished collapsing
+         * (owner: "an expansion from the centre out ... some fun animation"). Longer than the flat
+         * [PILL_COLOR_LEAD_MS] fade it replaces so the reveal is legible as its own motion.
+         */
+        const val PILL_COLOR_REVEAL_MS = 320L
 
         /** Each half of the trailing icon's close->search crossfade on collapse. Paced to the close. */
         const val ICON_CROSSFADE_MS = 160L
