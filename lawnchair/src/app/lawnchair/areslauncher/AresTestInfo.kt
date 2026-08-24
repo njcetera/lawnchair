@@ -465,7 +465,21 @@ object AresTestInfo {
         fun fmt(l: AresPacker.Layout) = l.cells.joinToString(" ") { "${it.x},${it.y}" }
         val noRun = AresPacker.pack(spans, 4, null)
         val withRun = AresPacker.pack(spans, 4, 2..5)
-        return arrayOf("norun=${fmt(noRun)}", "run=${fmt(withRun)}")
+        // Folder-above-widget (owner report 2026-08-24): a 1x1 folder, then its 3 children (run
+        // 0..3), then a full-width 4x2 WIDGET, then a couple of apps. The widget must be PUSHED
+        // DOWN below the children, not sit between the folder and its apps. Expected: folder (0,0),
+        // children (0,1)(1,1)(2,1) on their own row, widget at rows 2-3, apps backfilling row 0.
+        val fw = listOf(
+            AresPacker.Span(1, 1), // 0 folder
+            AresPacker.Span(1, 1), // 1 child
+            AresPacker.Span(1, 1), // 2 child
+            AresPacker.Span(1, 1), // 3 child
+            AresPacker.Span(4, 2), // 4 widget
+            AresPacker.Span(1, 1), // 5 app
+            AresPacker.Span(1, 1), // 6 app
+        )
+        val fwRun = AresPacker.pack(fw, 4, 0..3)
+        return arrayOf("norun=${fmt(noRun)}", "run=${fmt(withRun)}", "folderAboveWidget=${fmt(fwRun)}")
     }
 
     /** See [REQUEST_PACK_CELLS]. `id|x,y` per adapter position, in order. */
