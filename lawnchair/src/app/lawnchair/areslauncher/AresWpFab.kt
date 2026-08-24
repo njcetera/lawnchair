@@ -142,6 +142,11 @@ object AresWpFab {
      */
     fun createEmptyWpFolder(launcher: Launcher): FolderInfo? {
         val list = launcher.workspace?.aresHomeList ?: return null
+        // Collapse any inline-expanded WP folder first: adding the new tile while a folder is
+        // expanded could splice it into the middle of the expanded child run and truncate the
+        // collapse scan (adversarial review 2026-08-23, finding 4). A collapsed list is a clean
+        // insert target.
+        list.aresAdapter.collapseWpFolder()
         val cell = IntArray(2)
         val screenId = AresWidgetAdd.findFreeCell(launcher, 1, 1, cell)
         if (screenId == AresWidgetAdd.NO_SCREEN) return null

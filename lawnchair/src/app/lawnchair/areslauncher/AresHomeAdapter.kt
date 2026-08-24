@@ -339,7 +339,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // Remove from the source folder's in-memory contents BEFORE the move, so getContents() is
         // accurate for the BL-6 empty check and the collapse scan. moveItemInDatabase does not touch
         // folder membership. child.container still names the source folder here.
-        (items.firstOrNull { it.id == child.container } as? FolderInfo)?.getContents()?.remove(child)
+        val sourceFolder = items.firstOrNull { it.id == child.container } as? FolderInfo
+        sourceFolder?.getContents()?.remove(child)
         launcher.modelWriter.moveItemInDatabase(
             child,
             Favorites.CONTAINER_DESKTOP,
@@ -351,6 +352,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // DESKTOP, so it sorts by rank and is ITH-draggable again). Mirrors AresFolderExitHandoff.
         removeItems { it.id == child.id }
         addItem(child)
+        // Resync the source folder tile: if this extract emptied it, its edit-mode X-delete badge
+        // must now appear (adversarial review 2026-08-23, finding 3). rebind is cheap and reasserts
+        // the badge state from the live count.
+        if (sourceFolder != null) {
+            val at = indexOf(sourceFolder)
+            if (at >= 0) notifyItemChanged(at)
+        }
         AresHomeReorder.persistOrder(launcher, snapshot())
         android.util.Log.i("AresFolderFlow", "wp-extract ${child.id} -> DESKTOP cell=(${cell[0]},${cell[1]})")
     }

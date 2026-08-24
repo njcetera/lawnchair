@@ -610,6 +610,13 @@ object AresFolderDrop {
      */
     private fun kindOf(target: ItemInfo, source: ItemInfo): Kind {
         if (target.id == source.id) return Kind.NONE
+        // WP folders: an inline-expanded folder CHILD is spliced into the grid as an ordinary tile
+        // but its container is the folder, not the desktop. It must NEVER be a dwell target --
+        // dwelling a dragged desktop app onto a spliced child would otherwise resolve to CREATE and
+        // build a stray OVERLAY folder out of that child, yanking it out of its WP folder into a
+        // wrong container (adversarial review 2026-08-23, finding 1: the reachable half of the
+        // deferred MJ-1/MJ-4 hazard). Only real desktop items are foldable targets.
+        if (target.container != Favorites.CONTAINER_DESKTOP) return Kind.NONE
         if (!Folder.willAccept(source)) return Kind.NONE
         if (target is FolderInfo) {
             return if (FolderInfo.willAcceptItemType(source.itemType)) Kind.ADD else Kind.NONE
@@ -1110,7 +1117,12 @@ object AresFolderDrop {
      */
     @JvmStatic
     fun spikeOneItemFolder(launcher: Launcher, list: AresHomeListView): String = try {
-        val seeds = list.aresAdapter.snapshot().filter { it !is FolderInfo && Folder.willAccept(it) }.take(2)
+        // container == DESKTOP: with a WP folder expanded, snapshot() also holds its spliced
+        // children (container = folder id); seeding a folder-create from one would double-parent it
+        // (adversarial review 2026-08-23, finding 2 / MJ-4). Only loose desktop items are seeds.
+        val seeds = list.aresAdapter.snapshot()
+            .filter { it !is FolderInfo && it.container == Favorites.CONTAINER_DESKTOP && Folder.willAccept(it) }
+            .take(2)
         if (seeds.size < 2) {
             "need 2 folderable seeds, found ${seeds.size}"
         } else {
