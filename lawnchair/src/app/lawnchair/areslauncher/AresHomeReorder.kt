@@ -297,11 +297,23 @@ object AresHomeReorder {
         override fun getMovementFlags(
             recyclerView: RecyclerView,
             viewHolder: RecyclerView.ViewHolder,
-        ): Int = makeMovementFlags(
-            ItemTouchHelper.UP or ItemTouchHelper.DOWN or
-                ItemTouchHelper.START or ItemTouchHelper.END,
-            0,
-        )
+        ): Int {
+            // WP folders BL-3 (design/wp-folder-design.md): a spliced folder-child row
+            // (container != CONTAINER_DESKTOP) must NOT be ITH-draggable until the Phase-2
+            // membership recomputation exists. persistOrder skips every non-DESKTOP row, so an ITH
+            // reorder/extract of a child produces a visual change that writes NOTHING and reverts on
+            // the next rebind -- indistinguishable from data loss. Membership changes in Phase 1 go
+            // through explicit affordances (dwell-add, the child extract badge), never a child drag.
+            val info = list.aresAdapter.itemAt(viewHolder.bindingAdapterPosition)
+            if (info != null && info.container != Favorites.CONTAINER_DESKTOP) {
+                return makeMovementFlags(0, 0)
+            }
+            return makeMovementFlags(
+                ItemTouchHelper.UP or ItemTouchHelper.DOWN or
+                    ItemTouchHelper.START or ItemTouchHelper.END,
+                0,
+            )
+        }
 
         /** The item being dragged, for the dwell's hit-test exclusion and its drop resolution. */
         private var draggedInfo: ItemInfo? = null

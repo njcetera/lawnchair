@@ -41,6 +41,23 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private val items = mutableListOf<ItemInfo>()
 
     /**
+     * WP folders (design/wp-folder-design.md): the id of the currently inline-expanded
+     * Windows-Phone-style folder, or -1 when none is expanded.
+     *
+     * TRANSIENT adapter state -- it writes NOTHING to the DB (that dodges the occupancy check and
+     * the state-seam entirely). On expand, the folder's children are spliced into [items] as
+     * ordinary rows immediately after the folder tile; on collapse they are removed. Children keep
+     * `container=<folderId>` throughout, so [snapshot] -> persistOrder skips them and they are
+     * non-draggable (BL-3). Reset on [clear] (a full rebind collapses everything).
+     *
+     * "One at a time": expanding a folder collapses any other first.
+     */
+    private var expandedWpFolderId: Int = -1
+
+    /** Invoked when a WP folder is inline-expanded or collapsed, so the host can anchor scroll. */
+    var wpExpandHost: ((folderInfo: FolderInfo, expanded: Boolean) -> Unit)? = null
+
+    /**
      * Invoked on item long-press to put the surface into edit mode (§4).
      *
      * A callback rather than a direct reference so the adapter stays unaware of its host view.
@@ -542,6 +559,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     fun clear() {
         val size = items.size
+        // A full rebind rebuilds every row from the model; any transient WP expansion is gone with
+        // it, so the expanded-id must not survive into the fresh list (else collapseWpFolder would
+        // later scan for a run that no longer exists). Reset unconditionally, before the early
+        // return, so an empty-list rebind clears it too.
+        expandedWpFolderId = -1
         if (size == 0) return
         for (i in 0 until size) releaseForRemoval(i)
         items.clear()
@@ -622,6 +644,71 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * and a mid-drag lifetime is exactly the shape that gets missed at one of them.
      */
     fun snapshot(): List<ItemInfo> = items.filter { it !== dropSlot }
+
+    // ------------------------------------------------------------- WP folder inline expand ---
+
+    /** The id of the inline-expanded WP folder, or -1. See [expandedWpFolderId]. */
+    fun expandedWpFolder(): Int = expandedWpFolderId
+
+    /** True when [folderInfo] is the one WP folder currently inline-expanded. */
+    fun isWpExpanded(folderInfo: FolderInfo): Boolean = expandedWpFolderId == folderInfo.id
+
+    /**
+     * Toggle a WP folder's inline expansion. Expanding collapses any other first ("one at a time").
+     * Returns true if the folder is expanded after the call.
+     */
+    fun toggleWpFolder(folderInfo: FolderInfo): Boolean {
+        if (expandedWpFolderId == folderInfo.id) {
+            collapseWpFolder()
+            return false
+        }
+        if (expandedWpFolderId != -1) collapseWpFolder()
+        expandWpFolder(folderInfo)
+        return true
+    }
+
+    /**
+     * Splice [folderInfo]'s children (rank order) into [items] immediately after its tile as
+     * ordinary rows, via a fine-grained range insert (never notifyDataSetChanged). Children keep
+     * `container=<folderId>`, so persistOrder skips them and ITH treats them as non-draggable.
+     */
+    private fun expandWpFolder(folderInfo: FolderInfo) {
+        val folderRow = items.indexOfFirst { it.id == folderInfo.id }
+        if (folderRow < 0) return
+        val children = folderInfo.getContents().sortedBy { it.rank }
+        expandedWpFolderId = folderInfo.id
+        if (children.isEmpty()) {
+            wpExpandHost?.invoke(folderInfo, true)
+            return
+        }
+        val at = folderRow + 1
+        items.addAll(at, children)
+        notifyItemRangeInserted(at, children.size)
+        wpExpandHost?.invoke(folderInfo, true)
+    }
+
+    /** Remove the spliced child rows of the expanded WP folder, if any. Idempotent. */
+    fun collapseWpFolder() {
+        val id = expandedWpFolderId
+        if (id == -1) return
+        val folderRow = items.indexOfFirst { it.id == id }
+        val folderInfo = items.getOrNull(folderRow) as? FolderInfo
+        expandedWpFolderId = -1
+        if (folderRow < 0) return
+        // Remove the contiguous run of this folder's children sitting after the tile. Recomputed
+        // from the live list (not a cached count) so it stays correct if membership changed.
+        var count = 0
+        while (folderRow + 1 + count < items.size &&
+            items[folderRow + 1 + count].container == id
+        ) {
+            count++
+        }
+        if (count > 0) {
+            repeat(count) { items.removeAt(folderRow + 1) }
+            notifyItemRangeRemoved(folderRow + 1, count)
+        }
+        if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
+    }
 
     // ------------------------------------------------------------------ §C4 drop slot ---
     //
@@ -774,6 +861,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is BubbleTextView) {
             applyGridStyle(itemView)
+        }
+
+        // WP folders BL-4 (design/wp-folder-design.md): a Windows-Phone-style folder NEVER opens the
+        // overlay Folder. inflateItem() has just bound the stock ItemClickHandler (which would
+        // animateOpen the overlay for any FolderInfo, in both normal and edit mode); override it
+        // here so a tap toggles inline expand instead. Scoped to WP folders by the flag, so overlay
+        // folders keep the stock click untouched. This is the click-seam separation the review
+        // required -- every other folder-open entry point (row-40 heal, app-pairs) still targets the
+        // overlay because they never reach a WP folder tile.
+        if (info is FolderInfo && info.isAresWpFolder) {
+            itemView.setOnClickListener { toggleWpFolder(info) }
         }
 
         // Long-press enters edit mode for EVERY item type. This was previously gated on
