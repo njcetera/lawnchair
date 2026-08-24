@@ -58,19 +58,35 @@ class AresFolderBounds(
         val firstChildVh = parent.findViewHolderForAdapterPosition(firstChildPos)
         val lastChildVh = parent.findViewHolderForAdapterPosition(lastChildPos)
 
-        // Bright zone = the folder tile's top through the last opened app's bottom. Dim the full-width
-        // strips above and below it. Drawn BEFORE the bars so the bars sit on top of the scrim edge.
-        val fullLeft = parent.paddingLeft.toFloat()
-        val fullRight = (parent.width - parent.paddingRight).toFloat()
-        val brightTop = (folderVh ?: firstChildVh)?.itemView?.top
-        val brightBottom = lastChildVh?.itemView?.bottom
-        if (brightTop != null && brightTop > 0) {
-            rect.set(fullLeft, 0f, fullRight, brightTop.toFloat())
-            c.drawRect(rect, scrim)
-        }
-        if (brightBottom != null && brightBottom < parent.height) {
-            rect.set(fullLeft, brightBottom.toFloat(), fullRight, parent.height.toFloat())
-            c.drawRect(rect, scrim)
+        // Dim the whole home background around the open folder, the way a normal folder does -- a
+        // uniform scrim everywhere EXCEPT a folder-shaped hole (the folder tile itself plus the band
+        // of its opened apps), so the folder is lit and its row-neighbours dim too. Drawn BEFORE the
+        // bars so the bars sit on top of the scrim edge. Built as the COMPLEMENT of the bright hole
+        // (four rects) rather than by erasing, so the tiles under the bright hole keep full brightness.
+        val w = parent.width.toFloat()
+        val h = parent.height.toFloat()
+        val folderView = folderVh?.itemView
+        val bandTop = (folderView ?: firstChildVh?.itemView)?.top
+        val bandBottom = lastChildVh?.itemView?.bottom
+        if (bandTop != null && bandBottom != null) {
+            // Above the folder region.
+            if (bandTop > 0) {
+                rect.set(0f, 0f, w, bandTop.toFloat())
+                c.drawRect(rect, scrim)
+            }
+            // The folder tile's own row: dim the cells on either side of the tile (its neighbours),
+            // leaving the tile lit. Only when the folder tile itself is on screen.
+            if (folderView != null) {
+                rect.set(0f, folderView.top.toFloat(), folderView.left.toFloat(), folderView.bottom.toFloat())
+                c.drawRect(rect, scrim)
+                rect.set(folderView.right.toFloat(), folderView.top.toFloat(), w, folderView.bottom.toFloat())
+                c.drawRect(rect, scrim)
+            }
+            // Below the opened apps.
+            if (bandBottom < parent.height) {
+                rect.set(0f, bandBottom.toFloat(), w, h)
+                c.drawRect(rect, scrim)
+            }
         }
 
         val left = parent.paddingLeft + barInset
@@ -87,8 +103,8 @@ class AresFolderBounds(
     }
 
     private companion object {
-        /** Scrim opacity over the non-folder rows. "Slightly" -- subtle enough to keep the dimmed
-         * tiles legible while clearly foregrounding the open folder. */
-        const val DIM_ALPHA = 0.3f
+        /** Scrim opacity over the dimmed background, in the ballpark of a normal folder's dim --
+         * enough to foreground the open folder while keeping the dimmed tiles legible. Owner-tunable. */
+        const val DIM_ALPHA = 0.4f
     }
 }
