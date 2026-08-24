@@ -129,6 +129,9 @@ object AresFolderExitHandoff : DragController.DragListener {
             "AresFolderFlow",
             "handoff-takeover item=${info.id} fromContainer=${info.container} -> DESKTOP at=$at",
         )
+        // Capture the source folder BEFORE addOrMoveItemInDatabase re-parents the item to DESKTOP;
+        // used below to dissolve that folder eagerly once its second-to-last member is on the grid.
+        val sourceFolderId = info.container
         info.rank = at
         launcher.modelWriter.addOrMoveItemInDatabase(
             info,
@@ -171,6 +174,12 @@ object AresFolderExitHandoff : DragController.DragListener {
         grid.dispatchSyntheticHandoffEvent(MotionEvent.ACTION_DOWN, downTime, downTime, x, y)
         grid.startHandoffDrag(holder)
         Log.i(TAG, "handoff: id=${info.id} joined the grid at $at under the finger")
+        // Owner decision 2026-08-23: the second-to-last member just left this folder onto the grid,
+        // so dissolve the source folder NOW rather than leaving a 1-item zombie until drop-time (the
+        // jank + failed put-back). Posted so it runs after this handoff's synthetic-event dispatch
+        // completes, not mid-adapter-mutation. No-op unless the source is genuinely a closed,
+        // <=1-item home folder (guard in Folder.aresDissolveIfBelowMinimum).
+        grid.post { grid.aresDissolveSourceFolder(sourceFolderId) }
         return true
     }
 

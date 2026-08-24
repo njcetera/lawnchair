@@ -455,6 +455,14 @@ object AresFolderDrop {
         armed = true
         if (candidateKind == Kind.ADD && fromGrid) {
             val icon = folderIconOf(view)
+            // AresFolderFlow: the zombie's state at the moment the user dwells to put an app back.
+            // itemCount==1 here is the degenerate 1-item folder pending dissolution.
+            val f = icon?.folder
+            Log.i(
+                "AresFolderFlow",
+                "dwell ADD target folder=${candidateInfo?.id} itemCount=${f?.itemCount} " +
+                    "destroyed=${f?.isDestroyed} open=${f?.isOpen} animating=${f?.aresIsAnimating()}",
+            )
             if (icon != null && AresFolderPreview.open(list.launcher, list, icon)) {
                 list.setFolderDropTarget(null)
                 Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; folder opened for placement")

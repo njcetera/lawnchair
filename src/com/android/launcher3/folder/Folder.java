@@ -547,6 +547,11 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // when the drop completes
         executeWithContentUpdateSuppressed(() -> removeFolderContent(true, dragObject.dragInfo));
 
+        // AresFolderFlow: the moment the zombie forms -- one member leaves the folder, dropping it
+        // (for a 2-item folder) to a single item that lingers until the drop-time dissolve.
+        android.util.Log.i("AresFolderFlow", "onDragStart: item " + dragObject.dragInfo.id
+                + " left folder " + mInfo.id + " -> now " + mInfo.getContents().size() + " item(s)");
+
         mIsDragInProgress = true;
         mItemAddedBackToSelfViaIcon = false;
     }
@@ -1684,6 +1689,12 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     public void onDropCompleted(final View target, final DragObject d,
             final boolean success) {
         if (success) {
+            // AresFolderFlow: the dissolve decision inputs. When itemCount<=1 this schedules the
+            // dissolve; the flags/target tell us why a put-back did or did not keep the folder.
+            android.util.Log.i("AresFolderFlow", "onDropCompleted folder=" + mInfo.id
+                    + " itemCount=" + getItemCount() + " deleteOnDrop=" + mDeleteFolderOnDropCompleted
+                    + " addedBackViaIcon=" + mItemAddedBackToSelfViaIcon
+                    + " targetIsSelf=" + (target == this));
             if (getItemCount() <= 1) {
                 mDeleteFolderOnDropCompleted = true;
             }
@@ -1940,7 +1951,18 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         return mInfo.getContents().size();
     }
 
+    /** AresFolderFlow: which caller triggered a dissolve (there are four call sites). Diagnostic. */
+    private static String aresDissolveCaller() {
+        StackTraceElement[] st = new Throwable().getStackTrace();
+        // [0]=getStackTrace, [1]=aresDissolveCaller, [2]=replaceFolderWithFinalItem, [3]=real caller
+        return st.length > 3 ? st[3].getMethodName() + ":" + st[3].getLineNumber() : "?";
+    }
+
     void replaceFolderWithFinalItem() {
+        android.util.Log.i("AresFolderFlow", "replaceFolderWithFinalItem folder="
+                + (mInfo != null ? mInfo.id : -1) + " items="
+                + (mInfo != null ? mInfo.getContents().size() : -1) + " mDestroyed=" + mDestroyed
+                + " caller=" + aresDissolveCaller());
         // Guard the §25 dissolve-vs-drag-out race (traced on the Pixel 2026-08-23). This is reached
         // on a folder that is ALREADY destroyed (the stock comment at onDropCompleted notes it "can
         // be called twice") or EMPTY (both items pulled out by rapid drag-out). The stock destroy
@@ -1972,6 +1994,27 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mDestroyed = mLauncherDelegate.replaceFolderWithFinalItem(this);
         android.util.Log.i("AresFolderFlow", "dissolve done folder="
                 + (mInfo != null ? mInfo.id : -1) + " mDestroyed=" + mDestroyed);
+    }
+
+    /**
+     * AresLauncher (owner decision 2026-08-23): dissolve this folder NOW if a drag-out has dropped
+     * it below the 2-item minimum, instead of waiting for onDropCompleted.
+     *
+     * Ares keeps the losing folder as a CLOSED grid icon (stock keeps it OPEN for the whole
+     * drag-out), so a deferred dissolve leaves a 1-item "zombie" folder the user can re-dwell on --
+     * the source of the jank, the failed put-back, and a near miss on the empty-folder crash.
+     * Stock's own {@code onRemove} dissolves a CLOSED folder immediately when {@code
+     * getItemCount() <= 1}; this does the same, called from AresFolderExitHandoff the instant the
+     * second-to-last member joins the grid. The survivor promotes to a real grid tile at once, so
+     * re-folding is a clean fresh create. Guarded to a closed, live, home folder genuinely at <= 1
+     * item, so it is a no-op on a 3+-item folder losing one, an open folder, or an app-drawer folder.
+     */
+    public void aresDissolveIfBelowMinimum() {
+        if (!mIsOpen && !mDestroyed && !isInAppDrawer() && getItemCount() <= 1) {
+            android.util.Log.i("AresFolderFlow", "eager-dissolve folder=" + mInfo.id
+                    + " (down to " + getItemCount() + " item)");
+            replaceFolderWithFinalItem();
+        }
     }
 
     public boolean isDestroyed() {

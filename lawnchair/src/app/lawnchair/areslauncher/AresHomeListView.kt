@@ -124,6 +124,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
     }
 
+    /**
+     * Dissolve the folder [folderId] eagerly if a drag-out just dropped it below the 2-item minimum
+     * (owner decision 2026-08-23). Called from AresFolderExitHandoff the instant the second-to-last
+     * member joins the grid, so the folder never lingers as an interactive 1-item zombie. No-op if
+     * the folder is not on screen, or is a 3+-item / open / already-destroyed folder (the guard
+     * lives in Folder.aresDissolveIfBelowMinimum).
+     */
+    fun aresDissolveSourceFolder(folderId: Int) {
+        if (folderId < 0) return
+        for (i in 0 until childCount) {
+            val item = (getChildAt(i) as? ViewGroup)?.getChildAt(0)
+            if (item is FolderIcon && item.mInfo?.id == folderId) {
+                item.folder?.aresDissolveIfBelowMinimum()
+                return
+            }
+        }
+    }
+
     /** The attached holder container currently bound to [info], or null if it is not on screen. */
     private fun childForItem(info: ItemInfo): View? {
         for (i in 0 until childCount) {
