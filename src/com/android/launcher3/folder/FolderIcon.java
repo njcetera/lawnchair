@@ -650,6 +650,11 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     public void setAresHidePreviewItems(boolean hide) {
         if (mAresHidePreviewItems == hide) return;
         mAresHidePreviewItems = hide;
+        // The label under the icon is redundant while expanded: AresFolderBounds draws the title at
+        // the top of the apps card instead (owner 2026-08-24). Restored on collapse.
+        if (mFolderName != null) {
+            mFolderName.setTextVisibility(!hide);
+        }
         invalidate();
     }
 

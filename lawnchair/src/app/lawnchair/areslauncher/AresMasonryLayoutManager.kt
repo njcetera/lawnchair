@@ -66,10 +66,20 @@ class AresMasonryLayoutManager(
      * its apps card is not crammed against the tiles above and below (owner request 2026-08-24). It
      * is applied as a pixel shift on the already-packed cells -- NOT by shrinking any cell -- so
      * icon layout inside a tile is untouched (the cell-shrink trap) and drop targeting, which is
-     * view-based, stays correct. A gap of this size opens between the folder tile and the first app,
-     * and the same again below the last app.
+     * view-based, stays correct. [expandPadTopPx] opens between the folder tile and the first app
+     * (large enough to hold the title band AresFolderBounds draws there); [expandPadBottomPx] opens
+     * below the last app. Set together from AresFolderBounds so the card geometry and the reserved
+     * space agree.
      */
-    var expandPadPx: Int = 0
+    var expandPadTopPx: Int = 0
+        set(value) {
+            if (field != value) {
+                field = value
+                requestLayout()
+            }
+        }
+
+    var expandPadBottomPx: Int = 0
         set(value) {
             if (field != value) {
                 field = value
@@ -227,17 +237,17 @@ class AresMasonryLayoutManager(
 
     /** Vertical shift, in px, for [position] under the current expanded-folder padding. */
     private fun expandedPad(position: Int): Int {
-        if (padFolderRow < 0 || expandPadPx <= 0) return 0
+        if (padFolderRow < 0) return 0
         val y = layout?.cells?.getOrNull(position)?.y ?: return 0
         var e = 0
-        if (y > padFolderRow) e += expandPadPx // gap between the folder tile and its first app
-        if (y >= padAfterRow) e += expandPadPx // gap between the last app and the following content
+        if (y > padFolderRow) e += expandPadTopPx // gap (holds the title) above the first app
+        if (y >= padAfterRow) e += expandPadBottomPx // gap between the last app and following content
         return e
     }
 
-    // A folder open adds up to two pad bands (above and below its card) to the scrollable height.
+    // A folder open adds a top and a bottom pad band around its card to the scrollable height.
     private fun contentHeight(l: AresPacker.Layout): Int =
-        l.rows * cellHeight() + (if (padFolderRow >= 0) 2 * expandPadPx else 0)
+        l.rows * cellHeight() + (if (padFolderRow >= 0) expandPadTopPx + expandPadBottomPx else 0)
 
     private fun maxScroll(l: AresPacker.Layout): Int =
         (contentHeight(l) - (height - paddingTop - paddingBottom)).coerceAtLeast(0)

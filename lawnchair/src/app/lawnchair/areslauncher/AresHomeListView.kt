@@ -88,9 +88,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             AresAllApps.ergoBottomPaddingPx(context),
         )
         addItemDecoration(editDots)
-        // Material-You bars bracketing an expanded WP folder's opened apps (owner 2026-08-24). Draws
-        // nothing unless a folder is expanded, so it is free to leave installed.
-        addItemDecoration(AresFolderBounds(context, this))
+        // Material-You card + title behind an expanded WP folder's opened apps (owner 2026-08-24).
+        // Draws nothing unless a folder is expanded, so it is free to leave installed. It also owns
+        // the vertical space an open folder needs (title band + gaps); hand those to the layout
+        // manager so the reserved space and the card geometry are derived from the same numbers.
+        val folderBounds = AresFolderBounds(context, this)
+        addItemDecoration(folderBounds)
+        masonry.expandPadTopPx = folderBounds.expandedTopPadPx
+        masonry.expandPadBottomPx = folderBounds.expandedBottomPadPx
         applyGridMetrics()
         itemTouchHelper.attachToRecyclerView(this)
         aresAdapter.editModeHost = { enterEditMode() }
@@ -1595,8 +1600,6 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val dp = launcher.deviceProfile
         masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
         masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
-        // Breathing room above and below an expanded WP folder's apps card (owner 2026-08-24).
-        masonry.expandPadPx = (12 * resources.displayMetrics.density).toInt()
     }
 
     /**
