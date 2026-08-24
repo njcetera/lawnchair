@@ -1857,7 +1857,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         ) {
             dragGestureEnd = end
         }
-        if (ev.actionMasked == MotionEvent.ACTION_CANCEL) AresFolderDrop.cancel()
+        // A CANCEL normally aborts the dwell -- EXCEPT while a live-create is arming. The live-create
+        // arm() dispatches a synthetic UP to end the in-grid drag, but the REAL finger is still down;
+        // on the fold, AresPaneSwipeController then claims that still-down finger and the framework
+        // sends the grid a CANCEL. Unguarded, that CANCEL calls cancel() -> clear(), wiping liveArming
+        // ~1 frame BEFORE the deferred clearView->commitDrop can build the folder, so live-create
+        // never completes on the fold (owner report 2026-08-23; the N1 race in AresFolderDrop.clearTarget,
+        // reliably triggered here). The synthetic UP has already latched dragGestureEnd=UP, so commitDrop
+        // still runs on the real end; suppressing only this cancel() lets it see liveArming and create.
+        if (ev.actionMasked == MotionEvent.ACTION_CANCEL && !AresFolderDrop.isLiveArming()) {
+            AresFolderDrop.cancel()
+        }
         trackEmptySpaceLongPress(ev)
         return super.dispatchTouchEvent(ev)
     }

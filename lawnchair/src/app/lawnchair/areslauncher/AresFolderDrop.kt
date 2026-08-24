@@ -155,13 +155,18 @@ object AresFolderDrop {
     fun declinedExitingCount(): Long = declinedExiting
 
     /**
-     * §25 live-create gate. OFF by default: dwelling an icon on an icon draws the ring and the
-     * folder forms on release ([createFolder]) — the owner-verified path, untouched. ON: the folder
-     * forms and OPENS on the hold ([createLiveFolder]) and the held app can be dragged back out to
-     * dissolve it. Experimental and drag-coupled (see live-create-enter-handoff-design.md); toggled
-     * from the test channel while the gesture's feel is verified on the owner's Pixel.
+     * §25 live-create gate. OFF: dwelling an icon on an icon draws the ring and the folder forms on
+     * release ([createFolder]). ON (owner-requested default, 2026-08-23): the folder forms and OPENS
+     * on the hold ([createLiveFolder]) with both apps editable inside, and the held app can be
+     * dragged back out to dissolve it — the owner wants create to mirror the add-to-existing-folder
+     * flow. Enabled now that the exit-handoff/dissolve machinery it leans on is owner-verified stable
+     * (eager-dissolve + relay-through-freeze + slot-centre DOWN, 2026-08-23). The synthetic-UP
+     * teardown ([arm]/[commitDrop]) and edit-session attach ([openLiveFolderWhenReady]) are the
+     * reviewed create+open half; the "without ever letting go" continuous drag-OUT is the measured
+     * next step per live-create-enter-handoff-design.md, not yet wired. Still togglable from the test
+     * channel via [setLiveCreateEnabled].
      */
-    private var liveCreateEnabled = false
+    private var liveCreateEnabled = true
 
     @JvmStatic
     fun setLiveCreateEnabled(on: Boolean) {
@@ -184,6 +189,14 @@ object AresFolderDrop {
     /** See [liveArming]. Read by [AresHomeReorder.Callback.getAnimationDuration]. */
     @JvmStatic
     fun isLiveArming(): Boolean = liveArming
+
+    /** Diagnostic: uptime a live folder last opened via [commitDrop], for the continuation window. */
+    private var liveCreateOpenedAt = 0L
+
+    /** True for a few seconds after a live-create opened, while the finger is likely still down. */
+    @JvmStatic
+    fun recentLiveCreate(): Boolean =
+        android.os.SystemClock.uptimeMillis() - liveCreateOpenedAt < 4000L
 
     /**
      * Which pipeline is feeding this drag: the in-grid `ItemTouchHelper` reorder, or a
@@ -618,9 +631,20 @@ object AresFolderDrop {
             val list = grid
             val target = candidateInfo
             val done = try {
-                list != null && target != null && candidateKind == Kind.CREATE &&
-                    (createLiveFolder(launcher, list, target, item) != null ||
-                        createFolder(launcher, list, target, item))
+                if (list != null && target != null && candidateKind == Kind.CREATE) {
+                    if (createLiveFolder(launcher, list, target, item) != null) {
+                        // Diagnostic (owner report 2026-08-23): a live folder just opened on the hold
+                        // with the finger STILL DOWN. Mark the continuation window so dispatchTouchEvent
+                        // can show whether the grid keeps receiving that finger's moves (the basis for
+                        // a drag-out-to-destroy continuation).
+                        liveCreateOpenedAt = android.os.SystemClock.uptimeMillis()
+                        true
+                    } else {
+                        createFolder(launcher, list, target, item)
+                    }
+                } else {
+                    false
+                }
             } catch (t: Throwable) {
                 // A double-fault -- createLiveFolder AND the createFolder fallback both throwing at
                 // the same model write -- must not propagate out of clearView and skip the clear()
