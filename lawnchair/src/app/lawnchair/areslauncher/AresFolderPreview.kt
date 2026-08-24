@@ -361,6 +361,18 @@ object AresFolderPreview {
         forget()
     }
 
+    /**
+     * Tears down an uncommitted preview only when [launcher] is the activity that opened it
+     * (state-seam P5 / ledger S5). Called from `LawnchairLauncher.onDestroy`. The identity guard
+     * mirrors `AresFolderExitHandoff.onLauncherDestroyed`: a fold that has already created the NEW
+     * Launcher and opened a fresh preview must NOT have it torn down by the OLD activity's onDestroy.
+     */
+    @JvmStatic
+    fun onLauncherDestroyed(launcher: Launcher) {
+        if (this.launcher !== launcher) return
+        close()
+    }
+
     private fun forget() {
         // Every exit runs through here -- commit, abandon, and a failed open -- so this is the one
         // place that can guarantee the ghost never outlives the preview. A ghost left behind is a

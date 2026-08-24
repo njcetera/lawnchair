@@ -676,7 +676,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         // relays into a detached grid, or a ghost icon outlives the activity. Both clears are safe
         // to call when nothing is in flight (guarded / no-op).
         AresFolderExitHandoff.onLauncherDestroyed(this)
-        AresFolderPreview.close()
+        AresFolderPreview.onLauncherDestroyed(this)
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()

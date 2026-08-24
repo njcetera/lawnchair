@@ -151,17 +151,27 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     fun aresRebindAndOpenFolder(stale: Folder) {
         val info: FolderInfo = stale.info ?: return
-        // 1. Hard-discard the stale view (reload semantics — we are replacing it, not reconciling
-        //    it, so this deliberately does NOT go through the racy close animation that wedged it):
-        //    detach it from the DragLayer if it lingered there (the attached-invisible variant) and
-        //    drop its drop-target registration, so no ghost view or phantom target survives the
-        //    rebind.
-        (stale.parent as? ViewGroup)?.removeView(stale)
-        launcher.dragController.removeDropTarget(stale)
-        // 2. Rebind the row -> fresh FolderIcon + Folder. Folder rows are recyclable TYPE_ICON, so
-        //    notifyItemChanged re-inflates cleanly (onBindViewHolder does removeAllViews + inflate).
+        // 0. Confirm this is actually one of OUR home rows BEFORE any destructive teardown.
+        //    indexOf matches the home adapter only, so a folder that reaches the declined branch but
+        //    is not a live home row -- an app-drawer folder, or a home folder whose model row was
+        //    already dropped by a dissolve race (the isDestroyed decline) -- must be left untouched.
+        //    Detaching-then-abandoning it (index<0 after teardown) would leave it strictly worse
+        //    than the wedge. Adversarial-review finding, 2026-08-23.
         val index = aresAdapter.indexOf(info)
         if (index < 0) return
+        // 1. Hard-discard the stale view (reload semantics — we are replacing it, not reconciling
+        //    it, so this deliberately does NOT go through the racy close animation that wedged it):
+        //    detach it from the DragLayer if it lingered there (the attached-invisible variant),
+        //    drop its drop-target AND drag-listener registrations (no-ops if absent), and reset its
+        //    open latches. The reset closes a sub-frame re-entrancy window: without it, a second
+        //    declined tap arriving before the rebind lays out would find the now-detached stale with
+        //    mIsOpen still true and aresRecoverStuckOpen would resurrect it alongside the fresh one.
+        (stale.parent as? ViewGroup)?.removeView(stale)
+        launcher.dragController.removeDropTarget(stale)
+        launcher.dragController.removeDragListener(stale)
+        stale.aresRecoverStuckOpen()
+        // 2. Rebind the row -> fresh FolderIcon + Folder. Folder rows are recyclable TYPE_ICON, so
+        //    notifyItemChanged re-inflates cleanly (onBindViewHolder does removeAllViews + inflate).
         aresAdapter.notifyItemChanged(index)
         // 3. Open the fresh folder once the rebind has laid out. A pre-draw listener fires after
         //    layout and before draw, so the fresh FolderIcon is guaranteed present (a bare post()

@@ -579,10 +579,15 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mAresDragContentHeight = 0;
         mActivityContext.getDragController().removeDragListener(this);
         // state-seam P4a: drag-end is the third checkpoint (with open-complete and close-complete)
-        // where the open/closed/destroyed facets should be settled and agreeing. A drag that ended
-        // by pulling the last item out, or a create/dissolve race, is exactly where a facet is left
-        // latched -- catch it forming here rather than at the next declined tap.
-        aresLogSeamInvariants("drag-end");
+        // where the open/closed/destroyed facets should be settled and agreeing. A create/dissolve
+        // race is exactly where a facet is left latched -- catch it forming here rather than at the
+        // next declined tap. But a folder that dissolved because its last item was dragged out is
+        // LEGITIMATELY destroyed and detached at drag-end, not a wedge; skip the check in that case
+        // so the seam diagnostic does not cry wolf on the normal dissolve path (open/close-complete
+        // still catch a wrongly-destroyed folder). Adversarial-review finding, 2026-08-23.
+        if (!mDestroyed) {
+            aresLogSeamInvariants("drag-end");
+        }
     }
 
     public void startEditingFolderName() {
