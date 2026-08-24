@@ -126,6 +126,9 @@ object AresDragGhost {
         ghost?.let { view ->
             (view.parent as? ViewGroup)?.removeView(view)
             view.setImageDrawable(null)
+            // AresFolderFlow trace: pairs with "ghost up". A "ghost up" with no matching "ghost
+            // down" before the next drag is a stranded ghost (ledger row 8).
+            Log.i("AresFolderFlow", "ghost down")
         }
         // Restored unconditionally, including on a row that has since been recycled: alpha 1 is
         // the resting value for every row, so putting it back can never be wrong, whereas leaving

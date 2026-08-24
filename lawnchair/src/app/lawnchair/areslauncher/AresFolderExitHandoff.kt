@@ -125,6 +125,10 @@ object AresFolderExitHandoff : DragController.DragListener {
             return false
         }
         val at = grid.dropIndexAt(x, y).coerceIn(0, grid.aresAdapter.itemCount)
+        Log.i(
+            "AresFolderFlow",
+            "handoff-takeover item=${info.id} fromContainer=${info.container} -> DESKTOP at=$at",
+        )
         info.rank = at
         launcher.modelWriter.addOrMoveItemInDatabase(
             info,

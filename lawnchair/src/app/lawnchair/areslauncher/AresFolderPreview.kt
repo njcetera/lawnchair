@@ -310,6 +310,15 @@ object AresFolderPreview {
     @JvmStatic
     fun commit(launcher: Launcher, item: ItemInfo): Boolean {
         val f = folder ?: return false
+        // Never commit into a DESTROYED folder (§25 dissolve-vs-drag-out race, traced 2026-08-23).
+        // Same failure as AresFolderDrop.addToFolder: the posted adapter.removeItems below would
+        // strip the item's grid tile after Folder.addFolderContent refused the model write, so the
+        // app vanishes from the home screen. Decline; the item stays where it is on the grid.
+        if (f.isDestroyed) {
+            Log.w(TAG, "commit declined: folder ${f.info.id} is destroyed; item ${item.id} stays on the grid")
+            close()
+            return false
+        }
         val icon = folderIcon
         val grid = list
         val info = f.info

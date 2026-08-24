@@ -464,6 +464,12 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val at = index.coerceIn(0, items.size)
         items.add(at, info)
         notifyItemInserted(at)
+        // AresFolderFlow trace: a grid tile appeared. If its container is not a desktop container,
+        // or a second tile for the same id is already present, that is the duplicate forming.
+        android.util.Log.i(
+            "AresFolderFlow",
+            "adapter.addItemAt id=${info.id} container=${info.container} at=$at count=${items.size}",
+        )
     }
 
     /** True when [existing] belongs strictly after [incoming] in the grid's total order. */
@@ -579,6 +585,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
         var removed = false
         for (i in items.indices.reversed()) {
             if (matcher.test(items[i])) {
+                // AresFolderFlow trace: a grid tile left the adapter.
+                android.util.Log.i(
+                    "AresFolderFlow",
+                    "adapter.removeItems id=${items[i].id} container=${items[i].container} at=$i",
+                )
                 releaseForRemoval(i)
                 items.removeAt(i)
                 notifyItemRemoved(i)

@@ -1941,7 +1941,37 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     }
 
     void replaceFolderWithFinalItem() {
+        // Guard the §25 dissolve-vs-drag-out race (traced on the Pixel 2026-08-23). This is reached
+        // on a folder that is ALREADY destroyed (the stock comment at onDropCompleted notes it "can
+        // be called twice") or EMPTY (both items pulled out by rapid drag-out). The stock destroy
+        // animation (FolderIcon.performDestroyAnimation -> PreviewItemManager.createFirstItemAnimation)
+        // indexes preview item [0] of the contents, so an EMPTY folder throws
+        // IndexOutOfBoundsException -- a real launcher crash that drops the user out of edit mode.
+        // Never animate a destroy with nothing to promote: if already destroyed, do nothing; if
+        // empty, delete the row directly.
+        if (mDestroyed) {
+            return;
+        }
+        if (mInfo != null && mInfo.getContents().isEmpty()) {
+            android.util.Log.w("AresFolderFlow", "dissolve: folder " + mInfo.id
+                    + " is empty; deleting the row without the destroy animation");
+            ModelWriter mw = getModelWriter();
+            if (mw != null) {
+                mw.deleteItemFromDatabase(mInfo, "ares-empty-folder-dissolve");
+            }
+            mDestroyed = true;
+            return;
+        }
+        // AresFolderFlow trace: the dissolve. A folder reaching here with != 1 item, or whose sole
+        // survivor is promoted to a container other than the desktop, is the dissolve half of the
+        // ghost/duplicate. Diagnostic only.
+        android.util.Log.i("AresFolderFlow", "dissolve folder=" + (mInfo != null ? mInfo.id : -1)
+                + " itemsLeft=" + (mInfo != null ? mInfo.getContents().size() : -1)
+                + " survivor=" + (mInfo != null && !mInfo.getContents().isEmpty()
+                        ? mInfo.getContents().get(0).id : -1));
         mDestroyed = mLauncherDelegate.replaceFolderWithFinalItem(this);
+        android.util.Log.i("AresFolderFlow", "dissolve done folder="
+                + (mInfo != null ? mInfo.id : -1) + " mDestroyed=" + mDestroyed);
     }
 
     public boolean isDestroyed() {
@@ -2118,6 +2148,28 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (!willAcceptItemType(item.itemType)) {
             throw new RuntimeException("tried to add an illegal type into a folder");
         }
+
+        // Never file into a DESTROYED folder. The §25 dissolve-vs-drag-out race (traced on the
+        // Pixel 2026-08-23) commits a dragged item back into a folder that already dissolved
+        // mid-drag: the item then vanishes from the grid into a dead folder (the stranded ghost,
+        // ledger row 8), and re-populating then re-emptying the folder drives the empty-dissolve
+        // crash below. The item is already placed on the desktop by AresFolderExitHandoff, so
+        // refusing here leaves it correctly on the grid rather than lost in a destroyed folder.
+        if (mDestroyed) {
+            android.util.Log.w("AresFolderFlow", "addFolderContent REFUSED: folder "
+                    + (mInfo != null ? mInfo.id : -1) + " is destroyed; item " + item.id
+                    + " stays on the desktop");
+            return;
+        }
+
+        // AresFolderFlow trace: item.container is still the OLD container here (the
+        // addOrMoveItemInDatabase below re-parents it into this folder). A line showing an item
+        // filed into a folder while it is already another folder's child, or while a grid copy of
+        // it still exists, is the create/dissolve/handoff duplication forming. Diagnostic only.
+        android.util.Log.i("AresFolderFlow", "addFolderContent item=" + item.id
+                + " fromContainer=" + item.container + " -> folder=" + (mInfo != null ? mInfo.id : -1)
+                + " rank=" + rank + " folderItemsBefore="
+                + (mInfo != null ? mInfo.getContents().size() : -1));
 
         rank = Utilities.boundToRange(rank, 0, mInfo.getContents().size());
         mInfo.getContents().add(rank, item);

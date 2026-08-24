@@ -750,6 +750,17 @@ object AresFolderDrop {
             Log.e(TAG, "folder icon ${folderInfo.id} has no Folder view; drop declined")
             return false
         }
+        // Never commit into a DESTROYED folder (§25 dissolve-vs-drag-out race, traced on the Pixel
+        // 2026-08-23). If the target dissolved mid-drag, filing the item is refused by
+        // Folder.addFolderContent -- but this method would still post adapter.removeItems for the
+        // item's grid tile and return true, so the item loses its tile without ever entering a
+        // folder: the app "disappears" from the home screen. Decline the whole commit; the item
+        // stays on the grid where AresFolderExitHandoff already placed it.
+        if (folder.isDestroyed) {
+            Log.w(TAG, "addToFolder declined: folder ${folderInfo.id} is destroyed; " +
+                "item ${item.id} stays on the grid")
+            return false
+        }
         folder.addFolderContent(item, folderInfo.getContents().size, true)
         // Force-write the ranks for the reason given on Folder#aresPersistContentRanks: stock's
         // batch skips rows whose in-memory rank already matches their index, and that is not always
@@ -814,6 +825,11 @@ object AresFolderDrop {
         targetInfo: ItemInfo,
         item: ItemInfo,
     ): Boolean {
+        android.util.Log.i(
+            "AresFolderFlow",
+            "createFolder-attempt target=${targetInfo.id} container=${targetInfo.container} " +
+                "dragged=${item.id} container=${item.container}",
+        )
         // A legal desktop cell before anything is written. Order under masonry is `rank` alone, but
         // LoaderCursor.checkItemPlacement validates cells on every load and deletes what it
         // rejects. Excluding the target guarantees an answer: its own cell is about to be vacated
@@ -915,6 +931,11 @@ object AresFolderDrop {
         target: ItemInfo,
         dragged: ItemInfo,
     ): FolderInfo? {
+        android.util.Log.i(
+            "AresFolderFlow",
+            "createLiveFolder-attempt target=${target.id} container=${target.container} " +
+                "dragged=${dragged.id} container=${dragged.container}",
+        )
         val cell = IntArray(2)
         val screenId = AresWidgetAdd.findFreeCell(launcher, 1, 1, cell, target.id)
         if (screenId == AresWidgetAdd.NO_SCREEN) {
