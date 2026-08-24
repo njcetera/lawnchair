@@ -33,7 +33,9 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.Looper;
@@ -125,6 +127,14 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
      * stroke) still draws; only the preview items are suppressed. No effect on overlay folders.
      */
     private boolean mAresHidePreviewItems = false;
+
+    // Ares WP folders: while expanded, the empty folder circle is redrawn as a downward-pointing
+    // "teardrop" -- the app-list fast-scroller thumb's shape, rotated to point down at the apps the
+    // folder just spilled onto the grid (owner request 2026-08-24). Reused, allocation-free.
+    private final Path mAresPointerPath = new Path();
+    private final Matrix mAresPointerMatrix = new Matrix();
+    private final Paint mAresPointerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Rect mAresPointerBounds = new Rect();
 
     FolderGridOrganizer mPreviewVerifier;
     ClippedFolderIconLayoutRule mPreviewLayoutRule;
@@ -608,15 +618,22 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         mPreviewItemManager.recomputePreviewDrawingParams();
 
+        // Ares WP folders: an inline-expanded folder draws the downward pointer instead of its
+        // circle-and-previews, and nothing else (background, stroke and preview items are all
+        // replaced by the teardrop). See setAresHidePreviewItems.
+        if (mAresHidePreviewItems) {
+            drawAresDownPointer(canvas);
+            drawDot(canvas);
+            return;
+        }
+
         if (!mBackground.drawingDelegated()) {
             mBackground.drawBackground(canvas);
         }
 
         if (mCurrentPreviewItems.isEmpty() && !mAnimating) return;
 
-        if (!mAresHidePreviewItems) {
-            mPreviewItemManager.draw(canvas);
-        }
+        mPreviewItemManager.draw(canvas);
 
         if (!mBackground.drawingDelegated()) {
             mBackground.drawBackgroundStroke(canvas);
@@ -634,6 +651,36 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         if (mAresHidePreviewItems == hide) return;
         mAresHidePreviewItems = hide;
         invalidate();
+    }
+
+    /**
+     * Ares WP folders: draw the folder circle as a downward-pointing teardrop, in the folder's own
+     * background colour. The shape is the app-list fast-scroller thumb's geometry
+     * ({@link com.android.launcher3.graphics.FastScrollThumbDrawable}): a circle of the preview
+     * radius with three round corners and one sharp corner, rotated so the sharp corner faces
+     * straight down -- so the folder reads as pointing at the apps it has spilled onto the grid.
+     */
+    private void drawAresDownPointer(Canvas canvas) {
+        mBackground.getBounds(mAresPointerBounds);
+        float radius = mAresPointerBounds.width() * 0.5f;
+        if (radius <= 0) return;
+        float cx = mAresPointerBounds.exactCenterX();
+        float cy = mAresPointerBounds.exactCenterY();
+        float r2 = radius / 5f; // the sharp corner, matching the fast-scroller thumb
+        float left = cx - radius;
+        float top = cy - radius;
+
+        mAresPointerPath.reset();
+        mAresPointerPath.addRoundRect(left, top, left + 2 * radius, top + 2 * radius,
+                new float[] {radius, radius, radius, radius, r2, r2, radius, radius},
+                Path.Direction.CCW);
+        // The sharp corner is bottom-right; +45deg (clockwise) swings it to due south.
+        mAresPointerMatrix.setRotate(45f, cx, cy);
+        mAresPointerPath.transform(mAresPointerMatrix);
+
+        mAresPointerPaint.setStyle(Paint.Style.FILL);
+        mAresPointerPaint.setColor(mBackground.getBgColor());
+        canvas.drawPath(mAresPointerPath, mAresPointerPaint);
     }
 
     public void drawDot(Canvas canvas) {
