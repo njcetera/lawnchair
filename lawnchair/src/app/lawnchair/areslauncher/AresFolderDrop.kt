@@ -494,7 +494,14 @@ object AresFolderDrop {
                 "dwell ADD target folder=${candidateInfo?.id} itemCount=${f?.itemCount} " +
                     "destroyed=${f?.isDestroyed} open=${f?.isOpen} animating=${f?.aresIsAnimating()}",
             )
-            if (icon != null && AresFolderPreview.open(list.launcher, list, icon)) {
+            // WP folders (design/wp-folder-design.md, MJ-2) NEVER open the AresFolderPreview overlay.
+            // A dwell-add over a collapsed WP folder tile falls through to the highlight-ring path
+            // below (the same path an app-list drag already uses), so a release files the app into
+            // the folder via addToFolder -- inline, no overlay. The add MECHANISM (addToFolder ->
+            // Folder.addFolderContent) is identical to the verified overlay-folder add; only the
+            // placement-choice overlay is skipped. Overlay folders keep the preview.
+            val isWpFolder = (candidateInfo as? FolderInfo)?.isAresWpFolder == true
+            if (icon != null && !isWpFolder && AresFolderPreview.open(list.launcher, list, icon)) {
                 list.setFolderDropTarget(null)
                 Log.i(TAG, "dwell elapsed on ${candidateInfo?.id}; folder opened for placement")
                 return
