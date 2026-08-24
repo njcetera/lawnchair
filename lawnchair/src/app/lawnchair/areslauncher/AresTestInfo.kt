@@ -164,6 +164,14 @@ object AresTestInfo {
     const val REQUEST_WP_RESOLVE_DRAG = "ares-wp-resolve-drag"
 
     /**
+     * WP folders Phase 2: exercise the reorder-inside WRITE without a flaky drag. `arg` is a WP
+     * folder id; swaps its first two expanded children in the adapter (as an in-folder drag would)
+     * and calls `persistWpChildOrder`, returning the resulting child id order. Verifies folder-local
+     * rank persistence + reload survival; the real drag GESTURE is the owner-Pixel gate.
+     */
+    const val REQUEST_WP_REORDER_TEST = "ares-wp-reorder-test"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -272,6 +280,10 @@ object AresTestInfo {
         REQUEST_WP_RESOLVE_DRAG -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpResolveDrag(launcher, arg) },
+        )
+        REQUEST_WP_REORDER_TEST -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpReorderTest(launcher, arg) },
         )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
@@ -383,6 +395,22 @@ object AresTestInfo {
             is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder(${a.folderId})"
             is AresWpMembership.Action.AddToFolder -> "AddToFolder(${a.folderId})"
         }
+    }
+
+    /** See [REQUEST_WP_REORDER_TEST]. */
+    private fun wpReorderTest(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val fid = arg?.trim()?.toIntOrNull() ?: return "bad-arg"
+        val adapter = list.aresAdapter
+        val positions = (0 until adapter.itemCount).filter { adapter.itemAt(it)?.container == fid }
+        if (positions.size < 2) return "need-2-children(${positions.size})"
+        adapter.moveItem(positions[0], positions[1])
+        adapter.persistWpChildOrder(launcher, fid)
+        val order = (0 until adapter.itemCount)
+            .mapNotNull { adapter.itemAt(it) }
+            .filter { it.container == fid }
+            .map { it.id }
+        return "order=$order"
     }
 
     private fun tileMetrics(launcher: Launcher): Array<String> {

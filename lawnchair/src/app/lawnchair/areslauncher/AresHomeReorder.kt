@@ -298,16 +298,17 @@ object AresHomeReorder {
             recyclerView: RecyclerView,
             viewHolder: RecyclerView.ViewHolder,
         ): Int {
-            // WP folders BL-3 (design/wp-folder-design.md): a spliced folder-child row
-            // (container != CONTAINER_DESKTOP) must NOT be ITH-draggable until the Phase-2
-            // membership recomputation exists. persistOrder skips every non-DESKTOP row, so an ITH
-            // reorder/extract of a child produces a visual change that writes NOTHING and reverts on
-            // the next rebind -- indistinguishable from data loss. Membership changes in Phase 1 go
-            // through explicit affordances (dwell-add, the child extract badge), never a child drag.
+            // WP folders (design/wp-phase2-spike.md): a desktop tile is draggable; a spliced
+            // folder-child row (container != CONTAINER_DESKTOP) is draggable ONLY while its folder
+            // is the inline-expanded one -- that is the exact context the reorder-inside path
+            // covers, and nowhere else. A child of a non-expanded folder (shouldn't occur) or any
+            // other non-desktop row stays locked, because persistOrder skips non-DESKTOP rows and a
+            // stray drag of one would write nothing and revert (the BL-3 reason).
             val info = list.aresAdapter.itemAt(viewHolder.bindingAdapterPosition)
-            if (info != null && info.container != Favorites.CONTAINER_DESKTOP) {
-                return makeMovementFlags(0, 0)
-            }
+            val draggable = info == null ||
+                info.container == Favorites.CONTAINER_DESKTOP ||
+                info.container == list.aresAdapter.expandedWpFolder()
+            if (!draggable) return makeMovementFlags(0, 0)
             return makeMovementFlags(
                 ItemTouchHelper.UP or ItemTouchHelper.DOWN or
                     ItemTouchHelper.START or ItemTouchHelper.END,
@@ -625,6 +626,17 @@ object AresHomeReorder {
             if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
             // Read BEFORE the move: afterwards `to` holds the dragged item, not the target.
             val targetInfo = list.aresAdapter.itemAt(to)
+            // WP folders (design/wp-phase2-spike.md): keep the inline-expanded child run COHERENT.
+            // A child reorders only among its siblings, and a desktop tile never swaps across the
+            // boundary into/through the run -- so the run stays contiguous and a child-drop is an
+            // unambiguous in-folder reorder (the MJ-1 concern was the range moving under the finger;
+            // freezing the boundary removes it). Cross-boundary drags are refused, not committed.
+            val expanded = list.aresAdapter.expandedWpFolder()
+            if (expanded != -1) {
+                val draggedIsChild = draggedInfo?.container == expanded
+                val targetIsChild = targetInfo?.container == expanded
+                if (draggedIsChild != targetIsChild) return false
+            }
             val moved = list.aresAdapter.moveItem(from, to)
             // Arm the hysteresis from where the drag actually was when this swap committed, so the
             // next one needs real travel rather than another lap of the feedback loop.
@@ -774,6 +786,22 @@ object AresHomeReorder {
             val item = draggedInfo
             draggedInfo = null
             val end = list.dragGestureEnd
+            // WP folders reorder-inside (design/wp-phase2-spike.md): a child dragged among its
+            // siblings must write FOLDER-LOCAL ranks, never the desktop persistOrder (which skips
+            // non-DESKTOP rows and would silently drop the reorder -- the reviewers' Scenario C).
+            // onMove kept the child inside its run, so the children's current adapter order IS the
+            // new intra-folder order. This runs instead of the dwell-commit/persist path below; a
+            // child drag never arms a dwell (kindOf returns NONE for a non-desktop target), so
+            // there is nothing to commit, only to clear.
+            val expanded = list.aresAdapter.expandedWpFolder()
+            if (end == AresHomeListView.GESTURE_END_UP && item != null &&
+                expanded != -1 && item.container == expanded
+            ) {
+                AresFolderDrop.cancel()
+                list.setFolderDropTarget(null)
+                list.aresAdapter.persistWpChildOrder(launcher, expanded)
+                return
+            }
             val consumed = end == AresHomeListView.GESTURE_END_UP &&
                 item != null && AresFolderDrop.commitDrop(launcher, item)
             if (end != AresHomeListView.GESTURE_END_UP) AresFolderDrop.cancel()

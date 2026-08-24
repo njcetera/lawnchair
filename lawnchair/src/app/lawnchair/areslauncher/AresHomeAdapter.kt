@@ -768,6 +768,40 @@ class AresHomeAdapter(private val launcher: Launcher) :
         wpExpandHost?.invoke(folderInfo, true)
     }
 
+    /**
+     * WP folders reorder-inside (design/wp-phase2-spike.md): persist the new intra-folder order of
+     * [folderId]'s children from their CURRENT adapter order (the contiguous `container == folderId`
+     * run left by an in-folder drag). Writes folder-local ranks via `moveItemsInDatabase` -- the
+     * same write `Folder.aresPersistContentRanks` uses -- NOT the desktop `persistOrder` (which
+     * skips non-DESKTOP rows). Container is unchanged (the children stay in the folder).
+     *
+     * Safety: only reorders when the adapter run and the folder's contents are the same SET (they
+     * are, whenever the folder is expanded). If they differ, it skips rather than risk dropping a
+     * child from `getContents()`.
+     */
+    fun persistWpChildOrder(launcher: Launcher, folderId: Int) {
+        val folder = items.firstOrNull { it.id == folderId } as? FolderInfo ?: return
+        val newOrder = items.filter { it.container == folderId }
+        val contents = folder.getContents()
+        if (newOrder.size != contents.size || !newOrder.map { it.id }.toSet()
+                .containsAll(contents.map { it.id })
+        ) {
+            android.util.Log.w(
+                "AresFolderFlow",
+                "wp-reorder skipped: run(${newOrder.size}) != contents(${contents.size}) for $folderId",
+            )
+            return
+        }
+        contents.clear()
+        contents.addAll(newOrder)
+        newOrder.forEachIndexed { i, item -> item.rank = i }
+        launcher.modelWriter.moveItemsInDatabase(ArrayList(newOrder), folderId, 0)
+        android.util.Log.i(
+            "AresFolderFlow",
+            "wp-reorder folder=$folderId order=${newOrder.map { it.id }}",
+        )
+    }
+
     /** Remove the spliced child rows of the expanded WP folder, if any. Idempotent. */
     fun collapseWpFolder() {
         val id = expandedWpFolderId
