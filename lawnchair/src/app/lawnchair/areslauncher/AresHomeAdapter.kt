@@ -816,6 +816,18 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
+     * Hide (or restore) the mini-icon preview inside folder [folderId]'s live tile, if it is bound
+     * on screen. No-op when the tile is recycled off screen -- the bind-time set in
+     * [onBindViewHolder] re-applies the correct state whenever it scrolls back.
+     */
+    private fun setWpFolderPreviewHidden(folderId: Int, hide: Boolean) {
+        val list = launcher.workspace?.aresHomeList ?: return
+        val holder = list.findViewHolderForItemId(folderId.toLong()) ?: return
+        ((holder.itemView as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon)
+            ?.setAresHidePreviewItems(hide)
+    }
+
+    /**
      * Splice [folderInfo]'s children (rank order) into [items] immediately after its tile as
      * ordinary rows, via a fine-grained range insert (never notifyDataSetChanged). Children keep
      * `container=<folderId>`, so persistOrder skips them and ITH treats them as non-draggable.
@@ -825,6 +837,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (folderRow < 0) return
         val children = folderInfo.getContents().sortedBy { it.rank }
         expandedWpFolderId = folderInfo.id
+        // Hide the redundant mini-icon preview inside the (still-bound) folder tile.
+        setWpFolderPreviewHidden(folderInfo.id, true)
         if (children.isEmpty()) {
             wpExpandHost?.invoke(folderInfo, true)
             return
@@ -878,6 +892,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
     fun collapseWpFolder() {
         val id = expandedWpFolderId
         if (id == -1) return
+        // Restore the mini-icon preview inside the folder tile now that its members leave the grid.
+        setWpFolderPreviewHidden(id, false)
         val folderRow = items.indexOfFirst { it.id == id }
         val folderInfo = items.getOrNull(folderRow) as? FolderInfo
         expandedWpFolderId = -1
@@ -1068,6 +1084,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
             // review 2026-08-24, finding 2 -- an earlier build had edit-mode tap rename and thereby
             // made a collapsed folder un-openable in edit mode.)
             itemView.setOnClickListener { toggleWpFolder(info) }
+            // When this folder is currently inline-expanded, its members are drawn as real tiles
+            // below it, so the mini-icon preview inside the circle is redundant (owner 2026-08-24).
+            // Set at bind time too -- not only on the expand/collapse calls -- so a folder recycled
+            // back on screen while still expanded rebinds with its preview already hidden.
+            if (itemView is FolderIcon) itemView.setAresHidePreviewItems(isWpExpanded(info))
         }
 
         // Long-press enters edit mode for EVERY item type. This was previously gated on

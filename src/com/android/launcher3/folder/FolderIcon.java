@@ -118,6 +118,14 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     PreviewBackground mBackground = new PreviewBackground(getContext());
     private boolean mBackgroundIsVisible = true;
 
+    /**
+     * Ares WP folders: when this folder is inline-expanded on the home grid, its member apps are
+     * drawn as real tiles right below the folder, so the mini-icon preview inside the folder circle
+     * is redundant (owner request 2026-08-24). While set, the empty folder circle (background +
+     * stroke) still draws; only the preview items are suppressed. No effect on overlay folders.
+     */
+    private boolean mAresHidePreviewItems = false;
+
     FolderGridOrganizer mPreviewVerifier;
     ClippedFolderIconLayoutRule mPreviewLayoutRule;
     private PreviewItemManager mPreviewItemManager;
@@ -606,13 +614,26 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         if (mCurrentPreviewItems.isEmpty() && !mAnimating) return;
 
-        mPreviewItemManager.draw(canvas);
+        if (!mAresHidePreviewItems) {
+            mPreviewItemManager.draw(canvas);
+        }
 
         if (!mBackground.drawingDelegated()) {
             mBackground.drawBackgroundStroke(canvas);
         }
 
         drawDot(canvas);
+    }
+
+    /**
+     * Ares WP folders: hide (or restore) the mini-icon preview inside the folder circle. Set while
+     * the folder is inline-expanded on the home grid; cleared when it collapses. Idempotent, and
+     * invalidates only on a real change so a rebind that repeats the current state is free.
+     */
+    public void setAresHidePreviewItems(boolean hide) {
+        if (mAresHidePreviewItems == hide) return;
+        mAresHidePreviewItems = hide;
+        invalidate();
     }
 
     public void drawDot(Canvas canvas) {
