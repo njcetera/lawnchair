@@ -170,9 +170,23 @@ object AresFolderExitHandoff : DragController.DragListener {
 
         // The in-grid pipeline takes the gesture: synthetic DOWN seeds ItemTouchHelper's
         // coordinates, startDrag selects the holder, and the relayed MOVEs drive it from here.
+        //
+        // The DOWN is anchored at the NEW TILE'S SLOT CENTRE, not the finger. ItemTouchHelper draws
+        // the dragged view at `slotLeft + (finger - DOWN)`, so a DOWN at the finger would leave the
+        // tile offset from the thumb by exactly `(finger - slotCentre)` for the whole drag -- and
+        // that offset grows with pull-out SPEED, because a fast drag's first on-grid point lands
+        // deep, far from the centre of whatever slot `dropIndexAt` chose (owner report 2026-08-23:
+        // "pull an app out of any folder quickly" and it jumps ~an inch off the thumb, then tracks
+        // with that gap). Seat the DOWN at the slot centre and the MOVE below -- relayed in this same
+        // setup rather than a frame later -- puts the tile's centre back under the finger, offset-free
+        // at any speed. `getLeft()/getTop()` are the layout slot (translation excluded), matching the
+        // `mSelectedStartX = itemView.getLeft()` ItemTouchHelper captures in select().
         downTime = android.os.SystemClock.uptimeMillis()
-        grid.dispatchSyntheticHandoffEvent(MotionEvent.ACTION_DOWN, downTime, downTime, x, y)
+        val slotCentreX = holder.itemView.left + holder.itemView.width / 2f
+        val slotCentreY = holder.itemView.top + holder.itemView.height / 2f
+        grid.dispatchSyntheticHandoffEvent(MotionEvent.ACTION_DOWN, downTime, downTime, slotCentreX, slotCentreY)
         grid.startHandoffDrag(holder)
+        grid.dispatchSyntheticHandoffEvent(MotionEvent.ACTION_MOVE, downTime, downTime, x, y)
         Log.i(TAG, "handoff: id=${info.id} joined the grid at $at under the finger")
         // Owner decision 2026-08-23: the second-to-last member just left this folder onto the grid,
         // so dissolve the source folder NOW rather than leaving a 1-item zombie until drop-time (the
