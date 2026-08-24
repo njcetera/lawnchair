@@ -765,6 +765,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val at = folderRow + 1
         items.addAll(at, children)
         notifyItemRangeInserted(at, children.size)
+        // WP accordion (owner: "like Windows Phone"): slide the tiles BELOW the folder down into
+        // their new positions as the gap opens, rather than snapping. animateNextLayout captures the
+        // existing tiles' old bounds and tweens them; the folder tile itself is above the insert so
+        // it stays put (the anchor). Called after the adapter mutation, before the frame lays out.
+        launcher.workspace?.aresHomeList?.animateNextRelayout()
         wpExpandHost?.invoke(folderInfo, true)
     }
 
@@ -821,6 +826,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (count > 0) {
             repeat(count) { items.removeAt(folderRow + 1) }
             notifyItemRangeRemoved(folderRow + 1, count)
+            // Accordion close: slide the tiles below back UP into the closing gap (see expand).
+            launcher.workspace?.aresHomeList?.animateNextRelayout()
         }
         if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
     }
