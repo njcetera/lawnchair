@@ -620,8 +620,11 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         // Ares WP folders: an inline-expanded folder draws the downward pointer instead of its
         // circle-and-previews, and nothing else (background, stroke and preview items are all
-        // replaced by the teardrop). See setAresHidePreviewItems.
-        if (mAresHidePreviewItems) {
+        // replaced by the teardrop). See setAresHidePreviewItems. NOT in edit mode: there each tile
+        // gets a frost box sized to a centred icon, which clips the dropped pointer's tip -- so while
+        // editing the folder falls through to its normal preview circle, which fits the box (owner
+        // report 2026-08-24). setEditMode invalidates the tile so this re-evaluates on the toggle.
+        if (mAresHidePreviewItems && !isAresEditMode()) {
             drawAresDownPointer(canvas);
             drawDot(canvas);
             return;
@@ -665,6 +668,22 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
      * radius with three round corners and one sharp corner, rotated so the sharp corner faces
      * straight down -- so the folder reads as pointing at the apps it has spilled onto the grid.
      */
+    /**
+     * Ares WP folders: true while this folder is inline-expanded (preview hidden, pointer shown).
+     * Read by {@link com.android.launcher3.BubbleTextView#shouldTextBeVisible()} so the under-icon
+     * label stays hidden through every label-restore path while the title lives on the apps card.
+     */
+    public boolean isAresPreviewHidden() {
+        return mAresHidePreviewItems;
+    }
+
+    /** True while the home grid is in Ares edit mode, when the pointer must stay centred. */
+    private boolean isAresEditMode() {
+        return mActivity instanceof Launcher
+                && ((Launcher) mActivity).getWorkspace() != null
+                && ((Launcher) mActivity).getWorkspace().isAresEditMode();
+    }
+
     private void drawAresDownPointer(Canvas canvas) {
         mBackground.getBounds(mAresPointerBounds);
         float radius = mAresPointerBounds.width() * 0.5f;
@@ -672,8 +691,9 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         float cx = mAresPointerBounds.exactCenterX();
         // Drop the pointer toward the bottom of the tile so its tip sits just above the apps card
         // that follows, reading as pointing INTO the folder (owner 2026-08-24). The sharp corner is
-        // the rect corner, a distance radius*sqrt(2) from the centre; place the centre so that tip
-        // lands a hair above the tile's bottom edge, but never higher than its natural centre.
+        // the rect corner, a distance radius*sqrt(2) from the centre; place the centre so the tip
+        // lands a hair above the tile's bottom edge, but never higher than natural. (Only ever drawn
+        // outside edit mode -- dispatchDraw shows the normal preview circle while editing.)
         float tipToCentre = radius * 1.41421f;
         float tipInset = 2f * getResources().getDisplayMetrics().density;
         float cy = Math.max(mAresPointerBounds.exactCenterY(), getHeight() - tipInset - tipToCentre);

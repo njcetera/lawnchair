@@ -572,6 +572,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // mode. It is a DragLayer overlay, so it does not disturb the grid's own layout.
         AresWpFab.attach(launcher)
         applyEditModeVisual()
+        // Keep an open folder's tile showing its preview circle (not the frost-box-clipped pointer)
+        // and its label hidden, after the walk above (§ AresHomeAdapter.refreshExpandedFolderTile).
+        aresAdapter.refreshExpandedFolderTile()
         // Let the edge back GESTURE through. Stock suppresses it at NORMAL with nothing floating,
         // and edit mode is still NORMAL -- so without this the mode can only be left with the BACK
         // key. See LawnchairLauncher.aresWantsBackGesture.
@@ -606,6 +609,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // their animators would outlive the mode.
         clearWiggles()
         applyEditModeVisual()
+        // Restore the open folder's dropped pointer and re-hide its label -- the walk above un-hides
+        // tile labels, which would otherwise strand the folder's label showing over its pointer.
+        aresAdapter.refreshExpandedFolderTile()
         // Hand the edge back to the system again now that there is nothing here to dismiss.
         launcher.updateDisallowBack()
         return true

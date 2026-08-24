@@ -1197,6 +1197,12 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
         if (app.lawnchair.areslauncher.AresEditLabel.isMenuLabelSuppressed(this)) {
             return false;
         }
+        // AresLauncher WP folders: while a folder is inline-expanded its title is drawn on the apps
+        // card, so its under-icon label must stay hidden through every restore path (the edit-mode
+        // un-hide walk, popup close, Folder.closeComplete), all of which gate on this method.
+        if (getParent() instanceof FolderIcon && ((FolderIcon) getParent()).isAresPreviewHidden()) {
+            return false;
+        }
         // Text should be visible everywhere but the hotseat.
         Object tag = getParent() instanceof FolderIcon ? ((View) getParent()).getTag() : getTag();
         ItemInfo info = tag instanceof ItemInfo ? (ItemInfo) tag : null;

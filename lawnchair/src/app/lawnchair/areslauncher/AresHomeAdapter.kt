@@ -125,6 +125,25 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
+     * Re-assert the expanded WP folder tile's chrome after an edit-mode visual walk (call AFTER
+     * [AresHomeListView.applyEditModeVisual], on both enter and exit). Two things the walk disturbs:
+     * it un-hides tile labels on exit, which would strand the folder's label showing while it is
+     * still expanded (its title lives on the card instead); and the tile must redraw so its
+     * dispatchDraw re-picks pointer-vs-preview for the live edit state (invalidating the parent
+     * container alone will not re-run the FolderIcon's cached display list). No-op when nothing is
+     * expanded or the tile is off screen.
+     */
+    fun refreshExpandedFolderTile() {
+        val id = expandedWpFolderId
+        if (id == -1) return
+        val list = launcher.workspace?.aresHomeList ?: return
+        val holder = list.findViewHolderForItemId(id.toLong()) ?: return
+        val icon = (holder.itemView as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon ?: return
+        icon.folderName?.setTextVisibility(false)
+        icon.invalidate()
+    }
+
+    /**
      * Brings an attached row's edit-mode visuals -- × badge, resize chevron, cell outline and the
      * hidden label -- in line with the current mode.
      *
