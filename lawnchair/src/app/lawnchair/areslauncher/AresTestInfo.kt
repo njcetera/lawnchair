@@ -154,6 +154,16 @@ object AresTestInfo {
     const val REQUEST_REMOVE_ITEM = "ares-remove-item"
 
     /**
+     * WP folders Phase 2 spike (design/wp-phase2-spike.md): resolve the PURE drag-membership
+     * classifier for a hypothetical drag, WITHOUT performing one. `arg` is `"<draggedId>,<targetId>"`
+     * (targetId `none` = empty grid area). Returns the [AresWpMembership.Action] as a string, e.g.
+     * `Extract(960)` / `ReorderInFolder(960)` / `AddToFolder(960)` / `None`. Lets the truth table be
+     * verified exhaustively off a real gesture (which is ~2-in-5 flaky here). Expand the folder first
+     * so its children are in the adapter.
+     */
+    const val REQUEST_WP_RESOLVE_DRAG = "ares-wp-resolve-drag"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -259,6 +269,10 @@ object AresTestInfo {
             { b, key, value -> b.putInt(key, value) },
             { launcher -> removeFirst(launcher, arg) },
         )
+        REQUEST_WP_RESOLVE_DRAG -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpResolveDrag(launcher, arg) },
+        )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> setFolderEdit(launcher, arg) },
@@ -346,6 +360,29 @@ object AresTestInfo {
             return info.id
         }
         return -1
+    }
+
+    /** See [REQUEST_WP_RESOLVE_DRAG]. Resolves the pure classifier; no drag, no model write. */
+    private fun wpResolveDrag(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val parts = arg?.split(",") ?: return "bad-arg"
+        val draggedId = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return "bad-dragged"
+        val targetToken = parts.getOrNull(1)?.trim() ?: "none"
+        val items = list.aresAdapter.snapshot()
+        val dragged = items.firstOrNull { it.id == draggedId } ?: return "no-dragged($draggedId)"
+        val target = if (targetToken == "none") {
+            null
+        } else {
+            val tid = targetToken.toIntOrNull() ?: return "bad-target"
+            items.firstOrNull { it.id == tid } ?: return "no-target($tid)"
+        }
+        val expanded = list.aresAdapter.expandedWpFolder()
+        return when (val a = AresWpMembership.resolve(dragged, target, expanded)) {
+            is AresWpMembership.Action.None -> "None"
+            is AresWpMembership.Action.Extract -> "Extract(${a.folderId})"
+            is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder(${a.folderId})"
+            is AresWpMembership.Action.AddToFolder -> "AddToFolder(${a.folderId})"
+        }
     }
 
     private fun tileMetrics(launcher: Launcher): Array<String> {
