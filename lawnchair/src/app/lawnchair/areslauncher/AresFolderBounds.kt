@@ -2,6 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import androidx.recyclerview.widget.RecyclerView
@@ -37,6 +38,11 @@ class AresFolderBounds(
         style = Paint.Style.FILL
     }
 
+    // Scrim dimming the home screen OUTSIDE the open folder's rows (owner 2026-08-24), so the
+    // folder's contents read as the foreground. A plain black wash at a low alpha dims uniformly on
+    // any wallpaper, light or dark; "slightly" keeps it subtle.
+    private val scrim = Paint().apply { color = Color.argb((DIM_ALPHA * 255).toInt(), 0, 0, 0) }
+
     private val density = context.resources.displayMetrics.density
     private val barHeight = 3f * density
     private val barInset = 10f * density // horizontal inset from the content edges
@@ -48,21 +54,41 @@ class AresFolderBounds(
         val lastChildPos = run.last
         if (lastChildPos < firstChildPos) return // empty folder: no apps to bracket
 
+        val folderVh = parent.findViewHolderForAdapterPosition(run.first)
+        val firstChildVh = parent.findViewHolderForAdapterPosition(firstChildPos)
+        val lastChildVh = parent.findViewHolderForAdapterPosition(lastChildPos)
+
+        // Bright zone = the folder tile's top through the last opened app's bottom. Dim the full-width
+        // strips above and below it. Drawn BEFORE the bars so the bars sit on top of the scrim edge.
+        val fullLeft = parent.paddingLeft.toFloat()
+        val fullRight = (parent.width - parent.paddingRight).toFloat()
+        val brightTop = (folderVh ?: firstChildVh)?.itemView?.top
+        val brightBottom = lastChildVh?.itemView?.bottom
+        if (brightTop != null && brightTop > 0) {
+            rect.set(fullLeft, 0f, fullRight, brightTop.toFloat())
+            c.drawRect(rect, scrim)
+        }
+        if (brightBottom != null && brightBottom < parent.height) {
+            rect.set(fullLeft, brightBottom.toFloat(), fullRight, parent.height.toFloat())
+            c.drawRect(rect, scrim)
+        }
+
         val left = parent.paddingLeft + barInset
         val right = parent.width - parent.paddingRight - barInset
         if (right <= left) return
-
-        parent.findViewHolderForAdapterPosition(firstChildPos)?.let { vh ->
-            drawBar(c, left, right, vh.itemView.top.toFloat())
-        }
-        parent.findViewHolderForAdapterPosition(lastChildPos)?.let { vh ->
-            drawBar(c, left, right, vh.itemView.bottom.toFloat())
-        }
+        firstChildVh?.let { drawBar(c, left, right, it.itemView.top.toFloat()) }
+        lastChildVh?.let { drawBar(c, left, right, it.itemView.bottom.toFloat()) }
     }
 
     private fun drawBar(c: Canvas, left: Float, right: Float, centerY: Float) {
         val r = barHeight / 2f
         rect.set(left, centerY - r, right, centerY + r)
         c.drawRoundRect(rect, r, r, paint)
+    }
+
+    private companion object {
+        /** Scrim opacity over the non-folder rows. "Slightly" -- subtle enough to keep the dimmed
+         * tiles legible while clearly foregrounding the open folder. */
+        const val DIM_ALPHA = 0.3f
     }
 }
