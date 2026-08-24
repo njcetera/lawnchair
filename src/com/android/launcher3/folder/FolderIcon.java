@@ -723,16 +723,26 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
      */
     private void drawAresMorph(Canvas canvas, float p) {
         mBackground.getBounds(mAresPointerBounds);
-        float radius = mAresPointerBounds.width() * 0.5f;
-        if (radius <= 0) return;
+        float baseRadius = mAresPointerBounds.width() * 0.5f;
+        if (baseRadius <= 0) return;
         float cx = mAresPointerBounds.exactCenterX();
         float naturalCy = mAresPointerBounds.exactCenterY();
+
+        // As the folder expands, the teardrop GROWS DOWNWARD rather than sliding: its top edge stays
+        // put and its radius increases, so it gets larger and its point reaches down near the apps
+        // card below the tile (owner request 2026-08-24 -- the earlier "drop" read as awkward). In
+        // edit mode it stays at its natural size and centre so the per-tile frost box can't clip it.
+        float radius = baseRadius;
         float cy = naturalCy;
         if (!isAresEditMode()) {
-            float tipToCentre = radius * 1.41421f;
             float tipInset = 2f * getResources().getDisplayMetrics().density;
-            float dropped = Math.max(naturalCy, getHeight() - tipInset - tipToCentre);
-            cy = naturalCy + (dropped - naturalCy) * p;
+            float topAnchor = naturalCy - baseRadius;
+            // Radius whose tip (centre + r*sqrt2) reaches the tile's bottom with the top edge fixed:
+            //   topAnchor + r + r*sqrt2 = getHeight() - tipInset.
+            float grown = (getHeight() - tipInset - topAnchor) / (1f + 1.41421f);
+            grown = Math.max(baseRadius, Math.min(grown, getWidth() * 0.5f - tipInset));
+            radius = baseRadius + (grown - baseRadius) * p;
+            cy = topAnchor + radius;
         }
 
         // The shape: a circle whose south corner sharpens from round (p=0) toward a point (p=1).
@@ -750,12 +760,11 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         mAresPointerPaint.setColor(mBackground.getBgColor());
         canvas.drawPath(mAresPointerPath, mAresPointerPaint);
 
-        // Member previews on TOP of the shape, fading out (and sliding down with it) as it morphs.
+        // Member previews on TOP of the shape, at their natural position, fading out as it morphs.
         if (p < 1f && !mCurrentPreviewItems.isEmpty()) {
             int alpha = Math.round((1f - p) * 255f);
             if (alpha > 0) {
                 int save = canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), alpha);
-                canvas.translate(0, cy - naturalCy);
                 mPreviewItemManager.draw(canvas);
                 canvas.restoreToCount(save);
             }
