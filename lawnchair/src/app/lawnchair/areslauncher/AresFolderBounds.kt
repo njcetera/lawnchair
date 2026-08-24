@@ -54,7 +54,9 @@ class AresFolderBounds(
     private val cardPad = 8f * density // card grows this far past the app tiles
     private val titleVPad = 7f * density // above and below the title text within its band
     private val titleHPad = 16f * density // keep the title clear of the card's rounded corners
-    private val topGap = 12f * density // breathing gap between the folder tile and the card
+    // Small gap between the folder tile and the card: the teardrop pointer is drawn low in its tile
+    // (near its bottom edge), so a tight gap here makes it read as pointing INTO the card below it.
+    private val topGap = 6f * density
     private val bottomGap = 12f * density // breathing gap below the card
 
     /** Height of the title band at the top of the card, sized to the title text plus its padding. */

@@ -670,7 +670,13 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         float radius = mAresPointerBounds.width() * 0.5f;
         if (radius <= 0) return;
         float cx = mAresPointerBounds.exactCenterX();
-        float cy = mAresPointerBounds.exactCenterY();
+        // Drop the pointer toward the bottom of the tile so its tip sits just above the apps card
+        // that follows, reading as pointing INTO the folder (owner 2026-08-24). The sharp corner is
+        // the rect corner, a distance radius*sqrt(2) from the centre; place the centre so that tip
+        // lands a hair above the tile's bottom edge, but never higher than its natural centre.
+        float tipToCentre = radius * 1.41421f;
+        float tipInset = 2f * getResources().getDisplayMetrics().density;
+        float cy = Math.max(mAresPointerBounds.exactCenterY(), getHeight() - tipInset - tipToCentre);
         float r2 = radius / 5f; // the sharp corner, matching the fast-scroller thumb
         float left = cx - radius;
         float top = cy - radius;
