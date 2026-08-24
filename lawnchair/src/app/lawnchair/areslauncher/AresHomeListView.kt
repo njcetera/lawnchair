@@ -423,15 +423,22 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * header never leaves the top. Positive dy scrolls content up (reveals what is below).
      */
     private fun nudgeExpandedIntoView(folderInfo: FolderInfo, childIds: List<Int>) {
-        val lastHolder = findViewHolderForItemId(childIds.last().toLong()) ?: return
         val folderHolder = findViewHolderForItemId(folderInfo.id.toLong()) ?: return
-        val viewportBottom = height - paddingBottom
-        val overflow = lastHolder.itemView.bottom - viewportBottom
-        if (overflow <= 0) return // the whole opened run already fits on screen
         // Never scroll the folder header above the top: cap the nudge at how far the header can
         // travel before it reaches paddingTop.
         val maxNudge = (folderHolder.itemView.top - paddingTop).coerceAtLeast(0)
-        val nudge = overflow.coerceAtMost(maxNudge)
+        val lastHolder = findViewHolderForItemId(childIds.last().toLong())
+        val nudge = if (lastHolder != null) {
+            val overflow = lastHolder.itemView.bottom - (height - paddingBottom)
+            if (overflow <= 0) return // the whole opened run already fits on screen
+            overflow.coerceAtMost(maxNudge)
+        } else {
+            // The run is longer than the viewport, so the LAST child isn't laid out and can't be
+            // measured -- exactly the low-folder case MJ-3 targets, where the old early-return did
+            // nothing (adversarial review 2026-08-24, finding 7). Fall back to pulling the folder
+            // header to the top, which reveals as many children as fit below it.
+            maxNudge
+        }
         if (nudge > 0) smoothScrollBy(0, nudge)
     }
 

@@ -617,6 +617,13 @@ object AresFolderDrop {
         // wrong container (adversarial review 2026-08-23, finding 1: the reachable half of the
         // deferred MJ-1/MJ-4 hazard). Only real desktop items are foldable targets.
         if (target.container != Favorites.CONTAINER_DESKTOP) return Kind.NONE
+        // Symmetric SOURCE guard (adversarial review 2026-08-24, finding 4): a dragged item that is
+        // itself an inline-expanded folder CHILD (container is the folder, not the desktop) must
+        // never arm a dwell either. A child being EXTRACTED and paused over a desktop app would
+        // otherwise resolve to CREATE and flash the overlay create ring/preview mid-extract -- the
+        // very overlay WP folders must never raise (MJ-2). AresHomeReorder owns the extract drag;
+        // the dwell has no business in it.
+        if (source.container != Favorites.CONTAINER_DESKTOP) return Kind.NONE
         if (!Folder.willAccept(source)) return Kind.NONE
         if (target is FolderInfo) {
             return if (FolderInfo.willAcceptItemType(source.itemType)) Kind.ADD else Kind.NONE

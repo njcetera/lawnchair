@@ -410,10 +410,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     /**
      * Edit-mode rename affordance: an EditText dialog prefilled with the folder's current name,
-     * raised by TAPPING a WP folder tile while edit mode is on. In normal mode the same tap toggles
-     * inline expand (see the click override in onBindViewHolder); edit mode -- the "configure" mode
-     * that already shows the empty-folder X badge -- reassigns it to rename, so the two actions never
-     * contend for one gesture. Dialog feel is the owner's Pixel gate.
+     * raised by LONG-PRESSING a WP folder tile while edit mode is on (see the long-press listener in
+     * onBindViewHolder). The tap stays reserved for expand in both modes (spec line 88); long-press
+     * is the rename gesture, mirroring an icon's long-press-for-menu. Dialog feel is the owner's
+     * Pixel gate.
      */
     private fun promptRenameWpFolder(folder: FolderInfo) {
         val input = android.widget.EditText(launcher).apply {
@@ -1068,14 +1068,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // required -- every other folder-open entry point (row-40 heal, app-pairs) still targets the
         // overlay because they never reach a WP folder tile.
         if (info is FolderInfo && info.isAresWpFolder) {
-            // Normal mode: tap toggles inline expand. Edit mode: tap renames (Phase 3 #5) -- edit
-            // mode is the configure surface (it already carries the empty-folder X badge), so a tap
-            // there means "configure this folder", not "navigate into it". editMode is read LIVE at
-            // click time, not captured at bind: the same bound tile flips behaviour when the mode
-            // toggles, without a rebind.
-            itemView.setOnClickListener {
-                if (editMode) promptRenameWpFolder(info) else toggleWpFolder(info)
-            }
+            // A tap ALWAYS toggles inline expand -- in normal AND edit mode. wp-folder-design.md
+            // line 88 is explicit that edit-mode tap must still expand, because expanding is the
+            // precondition for the manage-contents actions (reorder-inside, extract) that require
+            // both edit mode and an open folder. Rename lives on the edit-mode LONG-PRESS instead
+            // (see the long-press listener below), so the two never contend for the tap. (Adversarial
+            // review 2026-08-24, finding 2 -- an earlier build had edit-mode tap rename and thereby
+            // made a collapsed folder un-openable in edit mode.)
+            itemView.setOnClickListener { toggleWpFolder(info) }
         }
 
         // Long-press enters edit mode for EVERY item type. This was previously gated on
@@ -1115,8 +1115,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
             // before the #5 state handler that leaves edit mode). That was the intermittent
             // "edit mode refuses to exit" wedge.
             val reordering = launcher.workspace?.aresHomeList?.isReorderInProgress() == true
-            if (editMode && !reordering && itemView is BubbleTextView) {
-                itemView.startLongPressAction()
+            if (editMode && !reordering) {
+                // Phase 3 #5 rename (finding 2): a WP folder renames on an edit-mode long-press --
+                // symmetric with an icon's long-press-for-menu, and it leaves the tap free to expand
+                // (spec line 88). A press-and-MOVE still drags the folder tile (drag starts on move
+                // past slop, not on the bare long-press -- see the fork's DragStarter), so this only
+                // fires on a held press that never moved.
+                if (info is FolderInfo && info.isAresWpFolder) {
+                    promptRenameWpFolder(info)
+                } else if (itemView is BubbleTextView) {
+                    itemView.startLongPressAction()
+                }
             }
             editModeHost?.invoke()
             true

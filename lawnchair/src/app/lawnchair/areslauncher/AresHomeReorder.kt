@@ -824,11 +824,13 @@ object AresHomeReorder {
                 val target = tileUnder(recyclerView, dropCx, dropCy)
                 val extract = target != null &&
                     AresWpMembership.resolve(item, target, expanded) is AresWpMembership.Action.Extract
-                if (extract) {
-                    list.aresAdapter.extractChildByDrag(item)
-                } else {
-                    list.aresAdapter.persistWpChildOrder(launcher, expanded)
-                }
+                if (extract) list.aresAdapter.extractChildByDrag(item)
+                // Persist the folder-local order in BOTH cases: on a plain reorder it saves the new
+                // order; on an extract it saves the REMAINING siblings' order, which the drag may
+                // also have changed via onMove -- extractChildByDrag alone would drop that reorder
+                // (adversarial review 2026-08-24, finding 9). The same-set guard passes because the
+                // extracted child has already left both the adapter run and getContents().
+                list.aresAdapter.persistWpChildOrder(launcher, expanded)
                 return
             }
             val consumed = end == AresHomeListView.GESTURE_END_UP &&

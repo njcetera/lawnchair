@@ -43,8 +43,9 @@ object AresWpMembership {
      *
      * The whole truth table:
      * - dragged is a CHILD of the open folder → [Action.ReorderInFolder] if the target is a sibling
-     *   child, else [Action.Extract] (it left the folder's own tiles). A spliced child is NEVER a
-     *   folder-create target, which is what closes the finding-1 stray-overlay hazard.
+     *   child OR the folder's own header tile (nudging a child up to the header keeps it in the
+     *   folder, finding 5), else [Action.Extract] (it left the folder's own tiles). A spliced child
+     *   is NEVER a folder-create target, which is what closes the finding-1 stray-overlay hazard.
      * - dragged is a DESKTOP app and the target is a child of the open folder → [Action.AddToFolder].
      * - everything else → [Action.None].
      */
@@ -55,11 +56,18 @@ object AresWpMembership {
 
         // Case A: the dragged item is a child of the currently-expanded WP folder.
         if (dragged.container == expandedFolderId) {
-            return if (target != null && target.container == expandedFolderId) {
-                Action.ReorderInFolder(expandedFolderId)
-            } else {
+            return when {
+                // Over a sibling child -> reorder within the folder.
+                target != null && target.container == expandedFolderId ->
+                    Action.ReorderInFolder(expandedFolderId)
+                // Over the folder's OWN tile (its header) -> keep it in the folder, do NOT extract.
+                // The header's container is DESKTOP, so without this it would read as "out onto
+                // another tile" and yank the child out -- surprising when a user nudges a child up
+                // toward the header to move it to the top (adversarial review 2026-08-24, finding 5).
+                target != null && target.id == expandedFolderId ->
+                    Action.ReorderInFolder(expandedFolderId)
                 // Out onto the desktop, another tile, or empty space -> take it out of the folder.
-                Action.Extract(expandedFolderId)
+                else -> Action.Extract(expandedFolderId)
             }
         }
 
