@@ -287,16 +287,45 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private fun syncRemoveBadgeFor(container: FrameLayout, info: ItemInfo?) {
         val existing = container.findViewWithTag<View>(AresRemoveBadge.BADGE_TAG)
-        val target = info?.takeIf { editMode && it !is FolderInfo }
-        if (target != null && existing == null) {
-            container.addView(
-                AresRemoveBadge.createBadge(container, spokenNameOf(container, target)) {
-                    removeHost?.invoke(target)
-                },
-            )
-        } else if (target == null && existing != null) {
+        // Ordinary items get the X in edit mode; it takes the item off home (D2 -- a folder never
+        // does). WP folders are the deliberate exception, and ONLY while empty (design D2 note):
+        // an empty WP folder shows an X that DELETES the folder. A non-empty WP folder shows none.
+        val removeTarget = info?.takeIf { editMode && it !is FolderInfo }
+        val deleteWpTarget = (info as? FolderInfo)?.takeIf {
+            editMode && it.isAresWpFolder && it.getContents().isEmpty()
+        }
+        val wantBadge = removeTarget != null || deleteWpTarget != null
+        if (wantBadge && existing == null) {
+            val badge = if (deleteWpTarget != null) {
+                AresRemoveBadge.createBadge(container, spokenNameOf(container, deleteWpTarget)) {
+                    deleteWpFolderIfEmpty(deleteWpTarget)
+                }
+            } else {
+                AresRemoveBadge.createBadge(container, spokenNameOf(container, removeTarget!!)) {
+                    removeHost?.invoke(removeTarget)
+                }
+            }
+            container.addView(badge)
+        } else if (!wantBadge && existing != null) {
             container.removeView(existing)
         }
+    }
+
+    /**
+     * BL-6: delete an empty WP folder from the X badge. Re-reads the LIVE model count immediately
+     * before deleting -- never a cached/adapter/UI flag -- so a membership change that landed after
+     * the badge was drawn (a drag-in that committed but has not repainted) cannot delete a non-empty
+     * folder and orphan its children (which the loader's deleteUnparentedApps would then eat).
+     */
+    private fun deleteWpFolderIfEmpty(folder: FolderInfo) {
+        if (folder.getContents().isNotEmpty()) {
+            // Membership changed under the badge; refuse and resync the row so the X goes away.
+            val at = indexOf(folder)
+            if (at >= 0) notifyItemChanged(at)
+            return
+        }
+        launcher.modelWriter.deleteItemFromDatabase(folder, "ares-wp-empty-folder-delete")
+        removeItems { it.id == folder.id }
     }
 
     /**
