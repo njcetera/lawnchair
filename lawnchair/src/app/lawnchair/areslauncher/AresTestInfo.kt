@@ -181,15 +181,10 @@ object AresTestInfo {
      */
     const val REQUEST_WP_RENAME = "ares-wp-rename"
 
-    /**
-     * WP folders Phase 3 #4: exercise the extract-by-drag DECISION+extract without a flaky drag.
-     * `arg` is `childId,targetId` (targetId may be `none` for empty space). Runs the SAME
-     * classify-then-extract the drop handler runs -- `AresWpMembership.resolve` and, on Extract,
-     * `extractChildByDrag` -- and returns `action|newContainer`. Confirms an Extract classification
-     * actually moves the child to CONTAINER_DESKTOP (-100). The finger->tile step (findChildViewUnder)
-     * is the only part left to the gesture, and that is the owner-Pixel gate.
-     */
-    const val REQUEST_WP_EXTRACT_DRAG = "ares-wp-extract-drag"
+    /** WP folders: toggle a folder's inline expansion by id (no gesture), for tests that need an
+     * open folder (e.g. reading [REQUEST_PACK_CELLS] with children spliced). `arg` is the folder id;
+     * returns `expanded=<bool>|contents=<n>`. */
+    const val REQUEST_WP_EXPAND = "ares-wp-expand"
 
     /**
      * WP folders Phase 3 #3: the packer's placement of EVERY item, one `id|x,y` per adapter
@@ -208,14 +203,6 @@ object AresTestInfo {
      */
     const val REQUEST_PACK_PROBE = "ares-pack-probe"
 
-    /**
-     * WP folders add-into-open-folder: exercise the drop handler's add without a flaky drag. `arg` is
-     * `appId,folderId` -- expands the (on-screen) folder, then files the desktop app into it via the
-     * same [AresFolderDrop.addAppToOpenWpFolder] the drop calls. Returns `ok|container|contents` so a
-     * test can confirm the app's container became the folder and getContents() grew; reload survival
-     * is checked with a forced reload afterward. The folder must be attached (on screen).
-     */
-    const val REQUEST_WP_ADD_DRAG = "ares-wp-add-drag"
 
     /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
@@ -335,9 +322,9 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpRename(launcher, arg) },
         )
-        REQUEST_WP_EXTRACT_DRAG -> TestInformationHandler.getLauncherUIProperty(
+        REQUEST_WP_EXPAND -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
-            { launcher -> wpExtractDrag(launcher, arg) },
+            { launcher -> wpExpand(launcher, arg) },
         )
         REQUEST_PACK_CELLS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
@@ -346,10 +333,6 @@ object AresTestInfo {
         REQUEST_PACK_PROBE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
             { _ -> packProbe() },
-        )
-        REQUEST_WP_ADD_DRAG -> TestInformationHandler.getLauncherUIProperty(
-            { b, key, value -> b.putString(key, value) },
-            { launcher -> wpAddDrag(launcher, arg) },
         )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
@@ -507,56 +490,15 @@ object AresTestInfo {
         }.toTypedArray()
     }
 
-    /** See [REQUEST_WP_ADD_DRAG]. Files a desktop app into an on-screen open WP folder. */
-    private fun wpAddDrag(launcher: Launcher, arg: String?): String {
+    /** See [REQUEST_WP_EXPAND]. Toggles a WP folder's inline expansion (no gesture). */
+    private fun wpExpand(launcher: Launcher, arg: String?): String {
         val list = launcher.workspace?.aresHomeList ?: return "no-list"
-        val parts = arg?.split(",") ?: return "bad-arg"
-        val appId = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return "bad-app"
-        val folderId = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: return "bad-folder"
-        val adapter = list.aresAdapter
-        val folderInfo = adapter.snapshot().firstOrNull { it.id == folderId } as? FolderInfo
-            ?: return "no-folder($folderId)"
-        if (!folderInfo.isAresWpFolder) return "not-wp"
-        val app = adapter.snapshot().firstOrNull { it.id == appId } ?: return "no-app($appId)"
-        if (app.container != Favorites.CONTAINER_DESKTOP) return "app-not-desktop(${app.container})"
-        if (adapter.expandedWpFolder() != folderId) adapter.toggleWpFolder(folderInfo)
-        val folderPos = adapter.indexOf(folderInfo)
-        val folderView = list.findViewHolderForAdapterPosition(folderPos)?.itemView
-            ?: return "folder-not-attached(pos=$folderPos)"
-        val ok = AresFolderDrop.addAppToOpenWpFolder(launcher, list, folderView, folderInfo, app)
-        return "ok=$ok|container=${app.container}|contents=${folderInfo.getContents().size}"
-    }
-
-    /** See [REQUEST_WP_EXTRACT_DRAG]. Runs the drop handler's classify-then-extract decision. */
-    private fun wpExtractDrag(launcher: Launcher, arg: String?): String {
-        val list = launcher.workspace?.aresHomeList ?: return "no-list"
-        val parts = arg?.split(",") ?: return "bad-arg"
-        val childId = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return "bad-child"
-        val targetToken = parts.getOrNull(1)?.trim() ?: "none"
-        // A collapsed folder's children are NOT in the adapter snapshot, so locate the child through
-        // the folder that owns it. Then expand that folder (direct toggle, not a gesture, so it is
-        // deterministic) -- the resolve gate needs expandedFolderId == child.container.
-        val folder = list.aresAdapter.snapshot().filterIsInstance<FolderInfo>()
-            .firstOrNull { f -> f.getContents().any { it.id == childId } }
-            ?: return "no-owning-folder($childId)"
-        if (!folder.isAresWpFolder) return "not-wp-folder(${folder.id})"
-        val child = folder.getContents().first { it.id == childId }
-        if (list.aresAdapter.expandedWpFolder() != folder.id) list.aresAdapter.toggleWpFolder(folder)
-        val items = list.aresAdapter.snapshot()
-        val target = if (targetToken == "none") null
-            else targetToken.toIntOrNull()?.let { tid -> items.firstOrNull { it.id == tid } }
-        val expanded = list.aresAdapter.expandedWpFolder()
-        val action = AresWpMembership.resolve(child, target, expanded)
-        // Mirror the drop handler's conservative gate: only a REAL non-sibling target extracts.
-        val extract = target != null && action is AresWpMembership.Action.Extract
-        if (extract) list.aresAdapter.extractChildByDrag(child)
-        val name = when (action) {
-            is AresWpMembership.Action.None -> "None"
-            is AresWpMembership.Action.Extract -> "Extract"
-            is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder"
-            is AresWpMembership.Action.AddToFolder -> "AddToFolder"
-        }
-        return "$name|${child.container}"
+        val fid = arg?.trim()?.toIntOrNull() ?: return "bad-arg"
+        val folder = list.aresAdapter.snapshot().firstOrNull { it.id == fid } as? FolderInfo
+            ?: return "no-folder($fid)"
+        if (!folder.isAresWpFolder) return "not-wp"
+        val expanded = list.aresAdapter.toggleWpFolder(folder)
+        return "expanded=$expanded|contents=${folder.getContents().size}"
     }
 
     /** See [REQUEST_WP_RENAME]. Drives the persistence path; the dialog's feel is the owner gate. */

@@ -329,14 +329,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * moveItemInDatabase, never a rank-only persist. Refuses (leaves the app in the folder) if the
      * grid is full.
      */
-    /**
-     * Phase 3 #4: extract-by-drag. Same operation as the edit-mode × badge, reached instead by
-     * dragging a child clear of its folder's run and releasing over the grid. Routed through the
-     * one verified [extractChildToDesktop] so both entry points share the row-34-safe placement and
-     * the empty-folder resync; the reorder callback decides WHEN (drop over a non-sibling tile).
-     */
-    fun extractChildByDrag(child: ItemInfo) = extractChildToDesktop(child)
-
     private fun extractChildToDesktop(child: ItemInfo) {
         val cell = IntArray(2)
         val screenId = AresWidgetAdd.findFreeCell(launcher, child.spanX, child.spanY, cell, child.id)
@@ -859,33 +851,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * are, whenever the folder is expanded). If they differ, it skips rather than risk dropping a
      * child from `getContents()`.
      */
-    /**
-     * WP folders add-into-open-folder: reconcile the adapter after a home-grid [app] has just been
-     * filed into the currently-expanded WP folder (its container is now the folder, and it already
-     * sits in getContents() -- the model write is done by the caller). The inverse of
-     * [extractChildToDesktop]'s adapter half: drop the app's old desktop tile and splice it in as the
-     * last child of the open run. No-op if nothing is expanded.
-     */
-    fun addAppToExpandedRun(app: ItemInfo) {
-        val fid = expandedWpFolderId
-        if (fid == -1) return
-        val from = items.indexOfFirst { it.id == app.id }
-        if (from >= 0) {
-            items.removeAt(from)
-            notifyItemRemoved(from)
-        }
-        val folderPos = items.indexOfFirst { it.id == fid }
-        if (folderPos < 0) return
-        var insertAt = folderPos + 1
-        while (insertAt < items.size && items[insertAt].container == fid) insertAt++
-        items.add(insertAt, app)
-        notifyItemInserted(insertAt)
-        android.util.Log.i(
-            "AresFolderFlow",
-            "adapter.addAppToExpandedRun id=${app.id} -> folder $fid at=$insertAt",
-        )
-    }
-
     fun persistWpChildOrder(launcher: Launcher, folderId: Int) {
         val folder = items.firstOrNull { it.id == folderId } as? FolderInfo ?: return
         val newOrder = items.filter { it.container == folderId }

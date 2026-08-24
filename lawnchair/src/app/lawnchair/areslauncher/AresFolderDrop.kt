@@ -847,46 +847,6 @@ object AresFolderDrop {
     }
 
     /**
-     * WP folders add-into-open-folder (owner 2026-08-24): file a home-grid [app] into an already-OPEN
-     * WP folder, from a deliberate edit-mode drop onto the folder's opened apps -- the inverse of
-     * extract-by-drag. Reuses the verified add machinery [addToFolder] uses:
-     * [Folder.addFolderContent] assigns a legal in-folder rank/cell through `FolderGridOrganizer`,
-     * persists and re-ranks; [Folder.aresPersistContentRanks] force-writes the append. Then the
-     * adapter is reconciled -- the app is spliced into the open child run and its old grid tile
-     * dropped -- posted for the same reason [addToFolder] posts (this runs from clearView, inside a
-     * recover animation's end callback, where notifying adapter changes mid-frame is unsafe).
-     *
-     * [folderIconContainer] is the folder tile's on-screen holder view -- present because the user is
-     * dragging into the folder's visible opened apps. Returns false (app left untouched on the grid)
-     * if that view or its Folder is gone, or the folder is destroyed.
-     */
-    fun addAppToOpenWpFolder(
-        launcher: Launcher,
-        list: AresHomeListView,
-        folderIconContainer: View,
-        folderInfo: FolderInfo,
-        app: ItemInfo,
-    ): Boolean {
-        val folder = folderOf(folderIconContainer) ?: run {
-            Log.e(TAG, "add-into-open-folder: folder ${folderInfo.id} has no Folder view; declined")
-            return false
-        }
-        if (folder.isDestroyed) {
-            Log.w(TAG, "add-into-open-folder declined: folder ${folderInfo.id} is destroyed")
-            return false
-        }
-        folder.addFolderContent(app, folderInfo.getContents().size, true)
-        folder.aresPersistContentRanks()
-        Log.i(TAG, "added app ${app.id} into open WP folder ${folderInfo.id}")
-        list.post {
-            list.aresAdapter.addAppToExpandedRun(app)
-            list.animateNextRelayout()
-            AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
-        }
-        return true
-    }
-
-    /**
      * Builds a new folder holding [targetInfo] and [item], and puts it where [targetInfo] was.
      *
      * ## The write order is the whole correctness argument
