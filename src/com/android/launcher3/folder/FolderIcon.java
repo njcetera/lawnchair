@@ -620,11 +620,11 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         // Ares WP folders: an inline-expanded folder draws the downward pointer instead of its
         // circle-and-previews, and nothing else (background, stroke and preview items are all
-        // replaced by the teardrop). See setAresHidePreviewItems. NOT in edit mode: there each tile
-        // gets a frost box sized to a centred icon, which clips the dropped pointer's tip -- so while
-        // editing the folder falls through to its normal preview circle, which fits the box (owner
-        // report 2026-08-24). setEditMode invalidates the tile so this re-evaluates on the toggle.
-        if (mAresHidePreviewItems && !isAresEditMode()) {
+        // replaced by the teardrop). See setAresHidePreviewItems. In edit mode the pointer stays
+        // CENTRED (drawAresDownPointer) so the per-tile frost box can't clip its dropped tip; the
+        // tile is invalidated on the edit toggle (AresHomeAdapter.refreshExpandedFolderTile) so this
+        // re-evaluates. Owner 2026-08-24: keep the teardrop in edit mode, just unclipped.
+        if (mAresHidePreviewItems) {
             drawAresDownPointer(canvas);
             drawDot(canvas);
             return;
@@ -689,14 +689,18 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         float radius = mAresPointerBounds.width() * 0.5f;
         if (radius <= 0) return;
         float cx = mAresPointerBounds.exactCenterX();
-        // Drop the pointer toward the bottom of the tile so its tip sits just above the apps card
-        // that follows, reading as pointing INTO the folder (owner 2026-08-24). The sharp corner is
-        // the rect corner, a distance radius*sqrt(2) from the centre; place the centre so the tip
-        // lands a hair above the tile's bottom edge, but never higher than natural. (Only ever drawn
-        // outside edit mode -- dispatchDraw shows the normal preview circle while editing.)
-        float tipToCentre = radius * 1.41421f;
-        float tipInset = 2f * getResources().getDisplayMetrics().density;
-        float cy = Math.max(mAresPointerBounds.exactCenterY(), getHeight() - tipInset - tipToCentre);
+        // Outside edit mode, drop the pointer toward the bottom of the tile so its tip sits just
+        // above the apps card that follows, reading as pointing INTO the folder (owner 2026-08-24).
+        // The sharp corner is the rect corner, a distance radius*sqrt(2) from the centre; place the
+        // centre so the tip lands a hair above the tile's bottom edge, but never higher than natural.
+        // In EDIT MODE keep it at its natural centre so the dropped tip can't clip against the
+        // per-tile frost box (owner: keep the teardrop, just centred/unclipped while editing).
+        float cy = mAresPointerBounds.exactCenterY();
+        if (!isAresEditMode()) {
+            float tipToCentre = radius * 1.41421f;
+            float tipInset = 2f * getResources().getDisplayMetrics().density;
+            cy = Math.max(cy, getHeight() - tipInset - tipToCentre);
+        }
         float r2 = radius / 5f; // the sharp corner, matching the fast-scroller thumb
         float left = cx - radius;
         float top = cy - radius;
