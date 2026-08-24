@@ -44,19 +44,29 @@ object AresPacker {
      * An item wider than the grid is clamped to the full width rather than dropped -- a widget
      * declaring more columns than the device has would otherwise vanish silently.
      *
-     * [reservedRun] (WP folders Phase 3 #3): a contiguous index range that must be kept together as
-     * one visual block -- an inline-expanded folder tile plus its spliced children. Without it, the
-     * greedy backfill can pull a child up into an earlier hole (left by a wide widget), stranding it
-     * far from the folder it belongs to. When the run is given AND every member is a 1x1 footprint
-     * (which folder icons and app icons always are), the whole run is placed as one contiguous
-     * row-major block at the first position where all of its cells are free together -- so the
-     * children always flow immediately after the folder. A run with any non-1x1 member, or an
-     * out-of-range range, is ignored and those items pack individually (safe fallback, never a
-     * crash). Items outside the run pack first-fit exactly as before, so a no-run call is
-     * byte-for-byte the old behaviour.
+     * [reservedRun] (WP folders): a contiguous index range whose FIRST index is an inline-expanded
+     * folder tile and whose remaining indices are that folder's spliced children. It is laid out
+     * Windows-Phone style (owner decision 2026-08-24), which is two rules working together:
      *
-     * The self-non-collision guarantee is preserved: the block only ever occupies cells it has
-     * checked free, so a list still cannot collide with itself (see the class KDoc / row-34).
+     *  1. The folder tile sits on the FRONTIER of the items before it -- the first free cell at or
+     *     below the highest row those items occupy. It never backfills an earlier hole (left by a
+     *     wide widget), so it keeps its natural in-flow position, may share its row with other
+     *     tiles, and always has empty space directly beneath it.
+     *  2. Its children then open into DEDICATED, EXCLUSIVE full-width rows starting on the row right
+     *     below the folder. The whole child band's rows are reserved, so no unrelated tile invades
+     *     them (the band's trailing empty cells are deliberate whitespace) and the grid resumes on a
+     *     fresh row after the band.
+     *
+     * The effect: an open folder gets its own horizontal space with its apps directly under it,
+     * instead of the apps flowing inline among other icons; everything after the folder is pushed
+     * down, exactly as tapping a folder open did on Windows Phone. A run with any non-1x1 member, or
+     * an out-of-range range, is ignored and those items pack individually (safe fallback, never a
+     * crash). Items outside the run pack first-fit, so a no-run call is byte-for-byte the old
+     * behaviour.
+     *
+     * The self-non-collision guarantee is preserved: the folder takes one checked-free cell and the
+     * child band is laid only on rows verified empty, so a list still cannot collide with itself
+     * (see the class KDoc / row-34).
      */
     @JvmOverloads
     fun pack(spans: List<Span>, columns: Int, reservedRun: IntRange? = null): Layout {
@@ -114,29 +124,48 @@ object AresPacker {
             reservedRun.first >= 0 && reservedRun.last < spans.size &&
             reservedRun.all { spans[it].w.coerceIn(1, columns) == 1 && spans[it].h.coerceAtLeast(1) == 1 }
 
+        // Is a whole row of the occupancy grid free of any occupied cell?
+        fun rowEmpty(y: Int): Boolean = rowAt(y).none { it }
+
         var i = 0
         while (i < spans.size) {
             if (runUsable && i == reservedRun!!.first) {
-                val n = reservedRun.last - reservedRun.first + 1
-                // First row-major start index whose n consecutive cells are ALL free. Fresh rows are
-                // empty, so such a window always exists at or before the frontier -- terminates.
-                var start = 0
-                while (true) {
-                    var ok = true
-                    for (k in 0 until n) {
-                        val idx = start + k
-                        if (rowAt(idx / columns)[idx % columns]) { ok = false; break }
-                    }
-                    if (ok) break
-                    start++
+                // (1) Folder on the FRONTIER of the items before it: scan for the first free cell at
+                // or below the highest currently-occupied row, so it never backfills an earlier
+                // hole and always has empty space beneath it.
+                var floor = 0
+                for (y in occupied.indices) if (occupied[y].any { it }) floor = y
+                var fy = floor
+                var fx = -1
+                while (fx < 0) {
+                    val row = rowAt(fy)
+                    val free = (0 until columns).firstOrNull { !row[it] }
+                    if (free != null) fx = free else fy++
                 }
-                for (k in 0 until n) {
-                    val idx = start + k
-                    val x = idx % columns
-                    val y = idx / columns
-                    rowAt(y)[x] = true
-                    cells[reservedRun.first + k] = Cell(x, y)
-                    rows = maxOf(rows, y + 1)
+                rowAt(fy)[fx] = true
+                cells[reservedRun.first] = Cell(fx, fy)
+                rows = maxOf(rows, fy + 1)
+
+                // (2) Children into exclusive full-width rows directly below the folder's row. fy is
+                // at or below the highest occupied row, so fy+1 is empty -- the band starts there.
+                // Reserve the whole band (including a partial last row's trailing cells) so no later
+                // tile drops into the folder's opened space.
+                val childCount = reservedRun.last - reservedRun.first
+                if (childCount > 0) {
+                    val bandRows = (childCount + columns - 1) / columns
+                    var startRow = fy + 1
+                    while (!(0 until bandRows).all { dr -> rowEmpty(startRow + dr) }) startRow++
+                    for (k in 0 until childCount) {
+                        val x = k % columns
+                        val y = startRow + k / columns
+                        rowAt(y)[x] = true
+                        cells[reservedRun.first + 1 + k] = Cell(x, y)
+                    }
+                    for (dr in 0 until bandRows) {
+                        val row = rowAt(startRow + dr)
+                        for (x in 0 until columns) row[x] = true
+                    }
+                    rows = maxOf(rows, startRow + bandRows)
                 }
                 i = reservedRun.last + 1
             } else {
