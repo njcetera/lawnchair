@@ -250,9 +250,17 @@ public class LauncherAppWidgetHostView extends BaseLauncherAppWidgetHostView
     public boolean onInterceptTouchEvent(MotionEvent ev) {
         if (ev.getAction() == MotionEvent.ACTION_DOWN) {
             BaseDragLayer<?> dragLayer = mActivityContext.getDragLayer();
-            if (mIsScrollable) {
-                dragLayer.requestDisallowInterceptTouchEvent(true);
-            }
+            // AresLauncher (design/widget-horizontal-swipe-solutions.md #1): the stock
+            // dragLayer.requestDisallowInterceptTouchEvent(true) for a scrollable widget is REMOVED.
+            // It muted the DragLayer WHOLESALE -- including AresPaneSwipeController -- so a horizontal
+            // swipe over a News/Stocks-style widget could not open the app list and the Workspace
+            // paged to the empty panel instead (the reported "swipe takes me to the blank page").
+            // The widget's own VERTICAL scroll no longer needs it: AresHomeScrollGuard already
+            // declines every wrapped vertical TouchController for any gesture starting over the home
+            // grid, and a widget sits INSIDE the grid -- so vertical falls through to the widget as
+            // before, while the pane controller (horizontal, unwrapped, first refusal) reclaims the
+            // sideways swipe. This restores the exact mechanism that works on empty space. Verified
+            // on the owner's Pixel Fold on real scrollable widgets (§27).
             dragLayer.setTouchCompleteListener(this);
         }
         mLongPressHelper.onTouchEvent(ev);
