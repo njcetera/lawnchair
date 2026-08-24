@@ -1487,6 +1487,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // A stationary touch. The gesture that *entered* edit mode is excluded, or the
                     // mode would end the instant the long-press finger lifted.
                     val tap = !movedPastSlop && !dragStarted && !enteredEditModeDuringGesture
+                    val downChild = downOnChild
                     val onItem = downOnChild != null
                     val onChevron = downOnChevron
                     val onFolder = downOnFolder
@@ -1500,6 +1501,25 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // Let the chevron's own OnClickListener fire: consuming here would deliver
                     // ACTION_CANCEL to it and the resize would never happen.
                     if (onChevron) return false
+                    // WP folders (owner 2026-08-24): while a folder is inline-expanded, a TAP OUTSIDE
+                    // it closes it -- in edit mode AND normal mode (this listener sees the UP in both,
+                    // and downChild was recorded at DOWN unconditionally). "Outside" is empty space or
+                    // any tile that is NOT the open folder or one of its children; a tap ON the folder
+                    // tile (which toggles) or on a child (launch, or inert in edit mode) keeps its
+                    // normal behaviour. The dismiss consumes the tap, so the first tap outside just
+                    // closes the folder rather than also launching an app or leaving edit mode. Gated
+                    // on a stationary tap, so scrolling the grid with a folder open is unaffected.
+                    val expandedFolderId = aresAdapter.expandedWpFolder()
+                    if (tap && expandedFolderId != -1) {
+                        val pos = downChild?.let { getChildAdapterPosition(it) } ?: NO_POSITION
+                        val info = if (pos != NO_POSITION) aresAdapter.itemAt(pos) else null
+                        val onOpenFolderOrChild = info != null &&
+                            (info.id == expandedFolderId || info.container == expandedFolderId)
+                        if (!onOpenFolderOrChild) {
+                            aresAdapter.collapseWpFolder()
+                            return true
+                        }
+                    }
                     if (editMode && tap) {
                         // On empty space: leave the mode. On an item: swallow it, so the tile stays
                         // inert. Either way the child gets ACTION_CANCEL and does not click.
