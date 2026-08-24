@@ -849,8 +849,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private fun setWpFolderPreviewHidden(folderId: Int, hide: Boolean) {
         val list = launcher.workspace?.aresHomeList ?: return
         val holder = list.findViewHolderForItemId(folderId.toLong()) ?: return
+        // animate = true: this is the expand/collapse toggle, so morph circle<->teardrop. The bind
+        // path (onBindViewHolder) uses the snapping overload instead.
         ((holder.itemView as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon)
-            ?.setAresHidePreviewItems(hide)
+            ?.setAresHidePreviewItems(hide, true)
     }
 
     /**

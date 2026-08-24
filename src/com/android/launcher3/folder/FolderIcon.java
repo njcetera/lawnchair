@@ -136,6 +136,13 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     private final Paint mAresPointerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Rect mAresPointerBounds = new Rect();
 
+    // Morph progress between the folder circle (0) and the teardrop (1). Animated on expand/collapse
+    // so the circle's bottom corner sharpens into the point while the member previews fade, instead
+    // of snapping (owner request 2026-08-24). Held at 0/1 on a rebind (no animation) so a recycled
+    // tile does not replay the morph.
+    private float mAresMorphProgress = 0f;
+    private android.animation.ValueAnimator mAresMorphAnim;
+
     FolderGridOrganizer mPreviewVerifier;
     ClippedFolderIconLayoutRule mPreviewLayoutRule;
     private PreviewItemManager mPreviewItemManager;
@@ -618,14 +625,15 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         mPreviewItemManager.recomputePreviewDrawingParams();
 
-        // Ares WP folders: an inline-expanded folder draws the downward pointer instead of its
-        // circle-and-previews, and nothing else (background, stroke and preview items are all
-        // replaced by the teardrop). See setAresHidePreviewItems. In edit mode the pointer stays
-        // CENTRED (drawAresDownPointer) so the per-tile frost box can't clip its dropped tip; the
-        // tile is invalidated on the edit toggle (AresHomeAdapter.refreshExpandedFolderTile) so this
-        // re-evaluates. Owner 2026-08-24: keep the teardrop in edit mode, just unclipped.
-        if (mAresHidePreviewItems) {
-            drawAresDownPointer(canvas);
+        // Ares WP folders: an inline-expanded folder draws a downward teardrop instead of its
+        // circle-and-previews; on expand/collapse it MORPHS between the two ([mAresMorphProgress]).
+        // While morphing (or fully expanded) drawAresMorph owns the whole tile; the stock path below
+        // resumes only once it has fully collapsed back to the circle. See setAresHidePreviewItems.
+        // In edit mode the teardrop stays CENTRED (drawAresMorph) so the per-tile frost box can't
+        // clip its dropped tip; the tile is invalidated on the edit toggle
+        // (AresHomeAdapter.refreshExpandedFolderTile) so this re-evaluates.
+        if (mAresHidePreviewItems || mAresMorphProgress > 0f) {
+            drawAresMorph(canvas, mAresMorphProgress);
             drawDot(canvas);
             return;
         }
@@ -646,11 +654,20 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     }
 
     /**
-     * Ares WP folders: hide (or restore) the mini-icon preview inside the folder circle. Set while
-     * the folder is inline-expanded on the home grid; cleared when it collapses. Idempotent, and
-     * invalidates only on a real change so a rebind that repeats the current state is free.
+     * Ares WP folders: hide (or restore) the mini-icon preview inside the folder circle -- i.e.
+     * switch the tile to/from the teardrop. Set while the folder is inline-expanded on the home
+     * grid; cleared when it collapses. This overload snaps (no animation) -- used on a rebind so a
+     * recycled tile lands in the right state without replaying the morph.
      */
     public void setAresHidePreviewItems(boolean hide) {
+        setAresHidePreviewItems(hide, false);
+    }
+
+    /**
+     * As above, but [animate] runs the circle&lt;-&gt;teardrop morph ([mAresMorphProgress]) instead
+     * of snapping. Used from the expand/collapse toggle. Idempotent on the target state.
+     */
+    public void setAresHidePreviewItems(boolean hide, boolean animate) {
         if (mAresHidePreviewItems == hide) return;
         mAresHidePreviewItems = hide;
         // The label under the icon is redundant while expanded: AresFolderBounds draws the title at
@@ -658,16 +675,26 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         if (mFolderName != null) {
             mFolderName.setTextVisibility(!hide);
         }
-        invalidate();
+        float target = hide ? 1f : 0f;
+        if (mAresMorphAnim != null) {
+            mAresMorphAnim.cancel();
+            mAresMorphAnim = null;
+        }
+        if (!animate) {
+            mAresMorphProgress = target;
+            invalidate();
+            return;
+        }
+        mAresMorphAnim = android.animation.ValueAnimator.ofFloat(mAresMorphProgress, target);
+        mAresMorphAnim.setDuration(220);
+        mAresMorphAnim.setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f));
+        mAresMorphAnim.addUpdateListener(a -> {
+            mAresMorphProgress = (float) a.getAnimatedValue();
+            invalidate();
+        });
+        mAresMorphAnim.start();
     }
 
-    /**
-     * Ares WP folders: draw the folder circle as a downward-pointing teardrop, in the folder's own
-     * background colour. The shape is the app-list fast-scroller thumb's geometry
-     * ({@link com.android.launcher3.graphics.FastScrollThumbDrawable}): a circle of the preview
-     * radius with three round corners and one sharp corner, rotated so the sharp corner faces
-     * straight down -- so the folder reads as pointing at the apps it has spilled onto the grid.
-     */
     /**
      * Ares WP folders: true while this folder is inline-expanded (preview hidden, pointer shown).
      * Read by {@link com.android.launcher3.BubbleTextView#shouldTextBeVisible()} so the under-icon
@@ -684,38 +711,55 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
                 && ((Launcher) mActivity).getWorkspace().isAresEditMode();
     }
 
-    private void drawAresDownPointer(Canvas canvas) {
+    /**
+     * Ares WP folders: draw the tile somewhere between the folder circle ([p]=0) and the downward
+     * teardrop ([p]=1), in the folder's own background colour. The teardrop is the app-list
+     * fast-scroller thumb's geometry ({@link com.android.launcher3.graphics.FastScrollThumbDrawable}):
+     * a circle of the preview radius with one corner sharpened, rotated so that corner faces down --
+     * so the folder reads as pointing at the apps it has spilled onto the grid. The morph is three
+     * blended quantities: that corner sharpens from round to a point, the shape drops toward the
+     * tile's bottom edge (except in edit mode, where it stays centred so the frost box can't clip
+     * it), and the member previews fade out on top.
+     */
+    private void drawAresMorph(Canvas canvas, float p) {
         mBackground.getBounds(mAresPointerBounds);
         float radius = mAresPointerBounds.width() * 0.5f;
         if (radius <= 0) return;
         float cx = mAresPointerBounds.exactCenterX();
-        // Outside edit mode, drop the pointer toward the bottom of the tile so its tip sits just
-        // above the apps card that follows, reading as pointing INTO the folder (owner 2026-08-24).
-        // The sharp corner is the rect corner, a distance radius*sqrt(2) from the centre; place the
-        // centre so the tip lands a hair above the tile's bottom edge, but never higher than natural.
-        // In EDIT MODE keep it at its natural centre so the dropped tip can't clip against the
-        // per-tile frost box (owner: keep the teardrop, just centred/unclipped while editing).
-        float cy = mAresPointerBounds.exactCenterY();
+        float naturalCy = mAresPointerBounds.exactCenterY();
+        float cy = naturalCy;
         if (!isAresEditMode()) {
             float tipToCentre = radius * 1.41421f;
             float tipInset = 2f * getResources().getDisplayMetrics().density;
-            cy = Math.max(cy, getHeight() - tipInset - tipToCentre);
+            float dropped = Math.max(naturalCy, getHeight() - tipInset - tipToCentre);
+            cy = naturalCy + (dropped - naturalCy) * p;
         }
-        float r2 = radius / 5f; // the sharp corner, matching the fast-scroller thumb
+
+        // The shape: a circle whose south corner sharpens from round (p=0) toward a point (p=1).
+        float sharp = radius - (radius - radius / 5f) * p;
         float left = cx - radius;
         float top = cy - radius;
-
         mAresPointerPath.reset();
         mAresPointerPath.addRoundRect(left, top, left + 2 * radius, top + 2 * radius,
-                new float[] {radius, radius, radius, radius, r2, r2, radius, radius},
+                new float[] {radius, radius, radius, radius, sharp, sharp, radius, radius},
                 Path.Direction.CCW);
-        // The sharp corner is bottom-right; +45deg (clockwise) swings it to due south.
+        // The sharpening corner is bottom-right; +45deg (clockwise) swings it to due south.
         mAresPointerMatrix.setRotate(45f, cx, cy);
         mAresPointerPath.transform(mAresPointerMatrix);
-
         mAresPointerPaint.setStyle(Paint.Style.FILL);
         mAresPointerPaint.setColor(mBackground.getBgColor());
         canvas.drawPath(mAresPointerPath, mAresPointerPaint);
+
+        // Member previews on TOP of the shape, fading out (and sliding down with it) as it morphs.
+        if (p < 1f && !mCurrentPreviewItems.isEmpty()) {
+            int alpha = Math.round((1f - p) * 255f);
+            if (alpha > 0) {
+                int save = canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), alpha);
+                canvas.translate(0, cy - naturalCy);
+                mPreviewItemManager.draw(canvas);
+                canvas.restoreToCount(save);
+            }
+        }
     }
 
     public void drawDot(Canvas canvas) {
