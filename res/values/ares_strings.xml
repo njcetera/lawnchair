@@ -48,4 +48,8 @@
          take it off home and never uninstalls. Distinct wording for a distinct action (BL-5/M4). -->
     <string name="ares_extract_from_folder">Take <xliff:g id="item_name" example="Chrome">%1$s</xliff:g> out of folder</string>
 
+    <!-- Phase 3 #5: title of the rename dialog raised by tapping a WP folder tile in edit mode.
+         Renaming stamps FLAG_MANUAL_FOLDER_NAME so the loader's auto-labeler never overwrites it. -->
+    <string name="ares_wp_rename_title">Rename folder</string>
+
 </resources>

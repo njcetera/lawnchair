@@ -10,6 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
+import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.Reorderable
 import com.android.launcher3.testing.TestInformationHandler
 import com.android.launcher3.AbstractFloatingView
@@ -172,6 +173,15 @@ object AresTestInfo {
     const val REQUEST_WP_REORDER_TEST = "ares-wp-reorder-test"
 
     /**
+     * WP folders Phase 3 #5: rename a WP folder without the edit-mode dialog (the dialog's FEEL is
+     * the owner-Pixel gate; the persistence is not). `arg` is `folderId,newTitle` -- split on the
+     * FIRST comma so the title may contain spaces. Calls the same `renameWpFolder` the dialog does,
+     * then returns `title|manual` where manual is whether FLAG_MANUAL_FOLDER_NAME is now set. Reload
+     * survival is checked by re-reading the title over `ares-home-order` after a forced reload.
+     */
+    const val REQUEST_WP_RENAME = "ares-wp-rename"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -285,6 +295,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpReorderTest(launcher, arg) },
         )
+        REQUEST_WP_RENAME -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpRename(launcher, arg) },
+        )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> setFolderEdit(launcher, arg) },
@@ -395,6 +409,20 @@ object AresTestInfo {
             is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder(${a.folderId})"
             is AresWpMembership.Action.AddToFolder -> "AddToFolder(${a.folderId})"
         }
+    }
+
+    /** See [REQUEST_WP_RENAME]. Drives the persistence path; the dialog's feel is the owner gate. */
+    private fun wpRename(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val comma = arg?.indexOf(',') ?: -1
+        if (comma < 0) return "bad-arg"
+        val fid = arg!!.substring(0, comma).trim().toIntOrNull() ?: return "bad-id"
+        val newTitle = arg.substring(comma + 1)
+        val folder = list.aresAdapter.snapshot().firstOrNull { it.id == fid } as? FolderInfo
+            ?: return "no-folder($fid)"
+        list.aresAdapter.renameWpFolder(folder, newTitle)
+        val manual = (folder.options and FolderInfo.FLAG_MANUAL_FOLDER_NAME) != 0
+        return "${folder.title}|$manual"
     }
 
     /** See [REQUEST_WP_REORDER_TEST]. */

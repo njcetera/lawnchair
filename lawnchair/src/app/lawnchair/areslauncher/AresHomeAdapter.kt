@@ -381,6 +381,53 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
+     * Phase 3 #5: rename a WP folder. Persists through [FolderInfo.setTitle], which stamps
+     * FLAG_MANUAL_FOLDER_NAME and calls updateItemInDatabase in one step -- so the name survives a
+     * reload AND the loader's auto-labeler leaves it alone (an UNLABELED/SUGGESTED folder gets
+     * relabelled the next time an app is added; a MANUAL one is frozen). Rebinds the row so the tile
+     * label repaints from the new title. A blank name is refused rather than cleared: clearing would
+     * drop the folder back to UNLABELED and hand the next add naming rights over the owner's choice.
+     * Scoped to WP folders; overlay folders still rename through the stock FolderNameEditText.
+     */
+    fun renameWpFolder(folder: FolderInfo, newTitle: CharSequence) {
+        if (!folder.isAresWpFolder) return
+        val trimmed = newTitle.toString().trim()
+        if (trimmed.isEmpty()) return
+        if (trimmed == folder.title?.toString()) return
+        folder.setTitle(trimmed, launcher.modelWriter)
+        val at = indexOf(folder)
+        if (at >= 0) notifyItemChanged(at)
+        android.util.Log.i("AresFolderFlow", "wp-rename ${folder.id} -> \"$trimmed\"")
+    }
+
+    /**
+     * Edit-mode rename affordance: an EditText dialog prefilled with the folder's current name,
+     * raised by TAPPING a WP folder tile while edit mode is on. In normal mode the same tap toggles
+     * inline expand (see the click override in onBindViewHolder); edit mode -- the "configure" mode
+     * that already shows the empty-folder X badge -- reassigns it to rename, so the two actions never
+     * contend for one gesture. Dialog feel is the owner's Pixel gate.
+     */
+    private fun promptRenameWpFolder(folder: FolderInfo) {
+        val input = android.widget.EditText(launcher).apply {
+            setText(folder.title ?: "")
+            setSelection(text.length)
+            setSingleLine(true)
+            hint = launcher.getString(R.string.ares_wp_folder_default_title)
+        }
+        val pad = launcher.resources.getDimensionPixelSize(R.dimen.ares_home_widget_inset)
+        val frame = FrameLayout(launcher).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        android.app.AlertDialog.Builder(launcher)
+            .setTitle(R.string.ares_wp_rename_title)
+            .setView(frame)
+            .setPositiveButton(android.R.string.ok) { _, _ -> renameWpFolder(folder, input.text) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
      * The name an affordance on this row should speak, or null when the row has no usable one.
      *
      * `ItemInfo.title` covers icons, shortcuts and folders. It is routinely **null for a widget** —
@@ -993,7 +1040,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // required -- every other folder-open entry point (row-40 heal, app-pairs) still targets the
         // overlay because they never reach a WP folder tile.
         if (info is FolderInfo && info.isAresWpFolder) {
-            itemView.setOnClickListener { toggleWpFolder(info) }
+            // Normal mode: tap toggles inline expand. Edit mode: tap renames (Phase 3 #5) -- edit
+            // mode is the configure surface (it already carries the empty-folder X badge), so a tap
+            // there means "configure this folder", not "navigate into it". editMode is read LIVE at
+            // click time, not captured at bind: the same bound tile flips behaviour when the mode
+            // toggles, without a rebind.
+            itemView.setOnClickListener {
+                if (editMode) promptRenameWpFolder(info) else toggleWpFolder(info)
+            }
         }
 
         // Long-press enters edit mode for EVERY item type. This was previously gated on
