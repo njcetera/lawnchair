@@ -209,6 +209,15 @@ object AresTestInfo {
     const val REQUEST_PACK_PROBE = "ares-pack-probe"
 
     /**
+     * WP folders add-into-open-folder: exercise the drop handler's add without a flaky drag. `arg` is
+     * `appId,folderId` -- expands the (on-screen) folder, then files the desktop app into it via the
+     * same [AresFolderDrop.addAppToOpenWpFolder] the drop calls. Returns `ok|container|contents` so a
+     * test can confirm the app's container became the folder and getContents() grew; reload survival
+     * is checked with a forced reload afterward. The folder must be attached (on screen).
+     */
+    const val REQUEST_WP_ADD_DRAG = "ares-wp-add-drag"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -337,6 +346,10 @@ object AresTestInfo {
         REQUEST_PACK_PROBE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
             { _ -> packProbe() },
+        )
+        REQUEST_WP_ADD_DRAG -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpAddDrag(launcher, arg) },
         )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
@@ -492,6 +505,26 @@ object AresTestInfo {
             val id = list.aresAdapter.itemAt(pos)?.id ?: -1
             "$id|${cell.x},${cell.y}"
         }.toTypedArray()
+    }
+
+    /** See [REQUEST_WP_ADD_DRAG]. Files a desktop app into an on-screen open WP folder. */
+    private fun wpAddDrag(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val parts = arg?.split(",") ?: return "bad-arg"
+        val appId = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return "bad-app"
+        val folderId = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: return "bad-folder"
+        val adapter = list.aresAdapter
+        val folderInfo = adapter.snapshot().firstOrNull { it.id == folderId } as? FolderInfo
+            ?: return "no-folder($folderId)"
+        if (!folderInfo.isAresWpFolder) return "not-wp"
+        val app = adapter.snapshot().firstOrNull { it.id == appId } ?: return "no-app($appId)"
+        if (app.container != Favorites.CONTAINER_DESKTOP) return "app-not-desktop(${app.container})"
+        if (adapter.expandedWpFolder() != folderId) adapter.toggleWpFolder(folderInfo)
+        val folderPos = adapter.indexOf(folderInfo)
+        val folderView = list.findViewHolderForAdapterPosition(folderPos)?.itemView
+            ?: return "folder-not-attached(pos=$folderPos)"
+        val ok = AresFolderDrop.addAppToOpenWpFolder(launcher, list, folderView, folderInfo, app)
+        return "ok=$ok|container=${app.container}|contents=${folderInfo.getContents().size}"
     }
 
     /** See [REQUEST_WP_EXTRACT_DRAG]. Runs the drop handler's classify-then-extract decision. */

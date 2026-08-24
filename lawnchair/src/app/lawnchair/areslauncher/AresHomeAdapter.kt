@@ -859,6 +859,33 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * are, whenever the folder is expanded). If they differ, it skips rather than risk dropping a
      * child from `getContents()`.
      */
+    /**
+     * WP folders add-into-open-folder: reconcile the adapter after a home-grid [app] has just been
+     * filed into the currently-expanded WP folder (its container is now the folder, and it already
+     * sits in getContents() -- the model write is done by the caller). The inverse of
+     * [extractChildToDesktop]'s adapter half: drop the app's old desktop tile and splice it in as the
+     * last child of the open run. No-op if nothing is expanded.
+     */
+    fun addAppToExpandedRun(app: ItemInfo) {
+        val fid = expandedWpFolderId
+        if (fid == -1) return
+        val from = items.indexOfFirst { it.id == app.id }
+        if (from >= 0) {
+            items.removeAt(from)
+            notifyItemRemoved(from)
+        }
+        val folderPos = items.indexOfFirst { it.id == fid }
+        if (folderPos < 0) return
+        var insertAt = folderPos + 1
+        while (insertAt < items.size && items[insertAt].container == fid) insertAt++
+        items.add(insertAt, app)
+        notifyItemInserted(insertAt)
+        android.util.Log.i(
+            "AresFolderFlow",
+            "adapter.addAppToExpandedRun id=${app.id} -> folder $fid at=$insertAt",
+        )
+    }
+
     fun persistWpChildOrder(launcher: Launcher, folderId: Int) {
         val folder = items.firstOrNull { it.id == folderId } as? FolderInfo ?: return
         val newOrder = items.filter { it.container == folderId }

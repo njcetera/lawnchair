@@ -9,6 +9,7 @@ import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.WorkspaceLayoutManager
+import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
 
 /**
@@ -832,6 +833,34 @@ object AresHomeReorder {
                 // extracted child has already left both the adapter run and getContents().
                 list.aresAdapter.persistWpChildOrder(launcher, expanded)
                 return
+            }
+            // WP folders add-into-open-folder (owner 2026-08-24): a home-grid app RELEASED over the
+            // OPEN folder's apps in edit mode is filed into that folder -- the inverse of
+            // extract-by-drag. Gated on the classifier's AddToFolder, which requires the drop target
+            // to be a CHILD of the expanded folder, so an ordinary desktop reorder ending anywhere
+            // else is untouched. Runs before the dwell/persist path: dragging a desktop app over a
+            // spliced child never arms a dwell (kindOf returns NONE for a non-desktop target), so
+            // there is nothing to commit here, and onMove left the app in its desktop slot (the
+            // float just tracked the finger), so declining leaves an ordinary, still-consistent grid.
+            if (end == AresHomeListView.GESTURE_END_UP && item != null && expanded != -1 &&
+                item.container == Favorites.CONTAINER_DESKTOP
+            ) {
+                val target = tileUnder(recyclerView, dropCx, dropCy)
+                if (target != null &&
+                    AresWpMembership.resolve(item, target, expanded) is AresWpMembership.Action.AddToFolder
+                ) {
+                    val folderPos = list.aresAdapter.expandedRunRange()?.first ?: -1
+                    val folderInfo = list.aresAdapter.itemAt(folderPos) as? FolderInfo
+                    val folderView = recyclerView
+                        .findViewHolderForAdapterPosition(folderPos)?.itemView
+                    if (folderInfo != null && folderView != null &&
+                        AresFolderDrop.addAppToOpenWpFolder(launcher, list, folderView, folderInfo, item)
+                    ) {
+                        AresFolderDrop.cancel()
+                        list.setFolderDropTarget(null)
+                        return
+                    }
+                }
             }
             val consumed = end == AresHomeListView.GESTURE_END_UP &&
                 item != null && AresFolderDrop.commitDrop(launcher, item)
