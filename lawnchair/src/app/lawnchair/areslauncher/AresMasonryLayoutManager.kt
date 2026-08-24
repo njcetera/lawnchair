@@ -61,6 +61,29 @@ class AresMasonryLayoutManager(
             }
         }
 
+    /**
+     * WP folders: vertical breathing room, in px, added around an inline-expanded folder's run so
+     * its apps card is not crammed against the tiles above and below (owner request 2026-08-24). It
+     * is applied as a pixel shift on the already-packed cells -- NOT by shrinking any cell -- so
+     * icon layout inside a tile is untouched (the cell-shrink trap) and drop targeting, which is
+     * view-based, stays correct. A gap of this size opens between the folder tile and the first app,
+     * and the same again below the last app.
+     */
+    var expandPadPx: Int = 0
+        set(value) {
+            if (field != value) {
+                field = value
+                requestLayout()
+            }
+        }
+
+    // Row bounds of the current expanded run, in packer-row units, recomputed on every repack.
+    // Cells strictly below [padFolderRow] shift down by [expandPadPx]; cells at or below
+    // [padAfterRow] shift down by a second [expandPadPx]. Inert (folder row -1) when nothing is
+    // expanded.
+    private var padFolderRow: Int = -1
+    private var padAfterRow: Int = Int.MAX_VALUE
+
     private var layout: AresPacker.Layout? = null
     private var scrollOffset = 0
 
@@ -172,10 +195,49 @@ class AresMasonryLayoutManager(
     private fun ensureLayout(state: RecyclerView.State): AresPacker.Layout {
         layout?.let { if (it.cells.size == state.itemCount) return it }
         val spans = (0 until state.itemCount).map { spanProvider.getSpan(it) }
-        return AresPacker.pack(spans, columns, reservedRunProvider?.invoke()).also { layout = it }
+        return AresPacker.pack(spans, columns, reservedRunProvider?.invoke()).also {
+            layout = it
+            computeExpandPadBounds(it)
+        }
     }
 
-    private fun contentHeight(l: AresPacker.Layout): Int = l.rows * cellHeight()
+    /**
+     * Derive [padFolderRow]/[padAfterRow] for the current expanded run: the folder tile's row, and
+     * the row just past its last child. Called once per repack (the run only changes on
+     * expand/collapse, which changes itemCount and forces a repack), so [expandedPad] can be a pure
+     * lookup per position.
+     */
+    private fun computeExpandPadBounds(l: AresPacker.Layout) {
+        val run = reservedRunProvider?.invoke()
+        if (run == null || run.isEmpty() ||
+            run.first !in l.cells.indices || run.last !in l.cells.indices
+        ) {
+            padFolderRow = -1
+            padAfterRow = Int.MAX_VALUE
+            return
+        }
+        padFolderRow = l.cells[run.first].y
+        var after = padFolderRow + 1
+        for (p in (run.first + 1)..run.last) {
+            val h = spanProvider.getSpan(p).h.coerceAtLeast(1)
+            after = maxOf(after, l.cells[p].y + h)
+        }
+        padAfterRow = after
+    }
+
+    /** Vertical shift, in px, for [position] under the current expanded-folder padding. */
+    private fun expandedPad(position: Int): Int {
+        if (padFolderRow < 0 || expandPadPx <= 0) return 0
+        val y = layout?.cells?.getOrNull(position)?.y ?: return 0
+        var e = 0
+        if (y > padFolderRow) e += expandPadPx // gap between the folder tile and its first app
+        if (y >= padAfterRow) e += expandPadPx // gap between the last app and the following content
+        return e
+    }
+
+    // A folder open adds up to two pad bands (above and below its card) to the scrollable height.
+    private fun contentHeight(l: AresPacker.Layout): Int =
+        l.rows * cellHeight() + (if (padFolderRow >= 0) 2 * expandPadPx else 0)
 
     private fun maxScroll(l: AresPacker.Layout): Int =
         (contentHeight(l) - (height - paddingTop - paddingBottom)).coerceAtLeast(0)
@@ -449,7 +511,8 @@ class AresMasonryLayoutManager(
     /** True when the cell at [position] is on **screen** at the current [scrollOffset]. */
     private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int): Boolean {
         if (position !in l.cells.indices) return false
-        val top = l.cells[position].y * ch
+        val pad = expandedPad(position)
+        val top = l.cells[position].y * ch + pad
         val bottom = top + spanProvider.getSpan(position).h.coerceAtLeast(1) * ch
         // Judge against the FULL screen [0, height], not the padding-inset content box: with
         // clipToPadding=false the top/bottom padding is real on-screen scroll space, so a cell moving
@@ -500,7 +563,8 @@ class AresMasonryLayoutManager(
             if (!isVisible(l, position, ch) && !attached.containsKey(position)) continue
             val cell = l.cells[position]
             val span = spanProvider.getSpan(position)
-            val top = cell.y * ch
+            val pad = expandedPad(position)
+            val top = cell.y * ch + pad
             val bottom = top + span.h.coerceAtLeast(1) * ch
 
             val existing = attached[position]

@@ -1595,6 +1595,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val dp = launcher.deviceProfile
         masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
         masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
+        // Breathing room above and below an expanded WP folder's apps card (owner 2026-08-24).
+        masonry.expandPadPx = (12 * resources.displayMetrics.density).toInt()
     }
 
     /**
