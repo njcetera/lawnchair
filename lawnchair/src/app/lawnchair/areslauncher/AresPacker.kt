@@ -46,27 +46,27 @@ object AresPacker {
      *
      * [reservedRun] (WP folders): a contiguous index range whose FIRST index is an inline-expanded
      * folder tile and whose remaining indices are that folder's spliced children. It is laid out
-     * Windows-Phone style (owner decision 2026-08-24), which is two rules working together:
+     * Windows-Phone style -- the folder OPENS IN PLACE (owner decision 2026-08-24): the folder tile
+     * keeps its natural collapsed cell, and its children open into the rows directly below it while
+     * everything under the folder slides down to make room. Three phases:
      *
-     *  1. The folder tile sits on the FRONTIER of the items before it -- the first free cell at or
-     *     below the highest row those items occupy. It never backfills an earlier hole (left by a
-     *     wide widget), so it keeps its natural in-flow position, may share its row with other
-     *     tiles, and always has empty space directly beneath it.
-     *  2. Its children then open into DEDICATED, EXCLUSIVE full-width rows starting on the row right
-     *     below the folder. The whole child band's rows are reserved, so no unrelated tile invades
-     *     them (the band's trailing empty cells are deliberate whitespace) and the grid resumes on a
-     *     fresh row after the band.
+     *  1. Pack the collapsed arrangement -- every tile except the children, in order, by ordinary
+     *     first-fit. This fixes the folder's own cell (backfill included) and every other tile's.
+     *  2. Open a band-height gap directly below the folder's row: slide every tile below the folder
+     *     down by the number of child rows. Relative order is preserved, so no overlap is created.
+     *  3. Drop the children into that gap, row-major from column 0. The band's trailing cells stay
+     *     empty (whitespace); nothing else can occupy them.
      *
-     * The effect: an open folder gets its own horizontal space with its apps directly under it,
-     * instead of the apps flowing inline among other icons; everything after the folder is pushed
-     * down, exactly as tapping a folder open did on Windows Phone. A run with any non-1x1 member, or
-     * an out-of-range range, is ignored and those items pack individually (safe fallback, never a
-     * crash). Items outside the run pack first-fit, so a no-run call is byte-for-byte the old
-     * behaviour.
+     * Because the folder does NOT move, a folder that sits above a widget it out-ranks stays above
+     * that widget and pushes the widget DOWN, instead of dropping beneath it (owner report
+     * 2026-08-24). A run with any non-1x1 member, or an out-of-range range, is ignored and those
+     * items pack individually (safe fallback). A no-run call is byte-for-byte the old behaviour.
+     * The rare case of a tall tile straddling the folder's own row falls back to placing the
+     * children on their own rows below all existing content.
      *
-     * The self-non-collision guarantee is preserved: the folder takes one checked-free cell and the
-     * child band is laid only on rows verified empty, so a list still cannot collide with itself
-     * (see the class KDoc / row-34).
+     * The self-non-collision guarantee is preserved: phase 1 places by checked first-fit, the slide
+     * moves a disjoint set of tiles uniformly downward, and the children land only in the vacated
+     * band -- so a list still cannot collide with itself (see the class KDoc / row-34).
      */
     @JvmOverloads
     fun pack(spans: List<Span>, columns: Int, reservedRun: IntRange? = null): Layout {
@@ -124,54 +124,72 @@ object AresPacker {
             reservedRun.first >= 0 && reservedRun.last < spans.size &&
             reservedRun.all { spans[it].w.coerceIn(1, columns) == 1 && spans[it].h.coerceAtLeast(1) == 1 }
 
-        // Is a whole row of the occupancy grid free of any occupied cell?
-        fun rowEmpty(y: Int): Boolean = rowAt(y).none { it }
+        if (!runUsable) {
+            // No reserved run: plain greedy first-fit, in order. Byte-for-byte the base behaviour.
+            for (i in spans.indices) place(i, spans[i])
+            @Suppress("UNCHECKED_CAST")
+            return Layout((cells as Array<Cell>).toList(), rows)
+        }
 
-        var i = 0
-        while (i < spans.size) {
-            if (runUsable && i == reservedRun!!.first) {
-                // (1) Folder on the FRONTIER of the items before it: scan for the first free cell at
-                // or below the highest currently-occupied row, so it never backfills an earlier
-                // hole and always has empty space beneath it.
-                var floor = 0
-                for (y in occupied.indices) if (occupied[y].any { it }) floor = y
-                var fy = floor
-                var fx = -1
-                while (fx < 0) {
-                    val row = rowAt(fy)
-                    val free = (0 until columns).firstOrNull { !row[it] }
-                    if (free != null) fx = free else fy++
-                }
-                rowAt(fy)[fx] = true
-                cells[reservedRun.first] = Cell(fx, fy)
-                rows = maxOf(rows, fy + 1)
+        // WP folders "open in place": the folder tile keeps its natural collapsed position (backfill
+        // and all), and its children open into the rows DIRECTLY BELOW it, pushing everything under
+        // the folder down -- exactly as tapping a folder did on Windows Phone. This is a visual
+        // INSERT, not a re-flow to the frontier: a folder whose rank is after a widget it sits above
+        // must stay above that widget and shove the widget down, not drop beneath it (owner report
+        // 2026-08-24). Done in three phases.
+        val runFirst = reservedRun!!.first
+        val runLast = reservedRun.last
+        val childCount = runLast - runFirst // the folder is runFirst; children are runFirst+1..runLast
+        fun isChild(idx: Int) = idx in (runFirst + 1)..runLast
 
-                // (2) Children into exclusive full-width rows directly below the folder's row. fy is
-                // at or below the highest occupied row, so fy+1 is empty -- the band starts there.
-                // Reserve the whole band (including a partial last row's trailing cells) so no later
-                // tile drops into the folder's opened space.
-                val childCount = reservedRun.last - reservedRun.first
-                if (childCount > 0) {
-                    val bandRows = (childCount + columns - 1) / columns
-                    var startRow = fy + 1
-                    while (!(0 until bandRows).all { dr -> rowEmpty(startRow + dr) }) startRow++
-                    for (k in 0 until childCount) {
-                        val x = k % columns
-                        val y = startRow + k / columns
-                        rowAt(y)[x] = true
-                        cells[reservedRun.first + 1 + k] = Cell(x, y)
-                    }
-                    for (dr in 0 until bandRows) {
-                        val row = rowAt(startRow + dr)
-                        for (x in 0 until columns) row[x] = true
-                    }
-                    rows = maxOf(rows, startRow + bandRows)
-                }
-                i = reservedRun.last + 1
-            } else {
-                place(i, spans[i])
-                i++
+        // Phase 1: pack the COLLAPSED arrangement -- every tile EXCEPT the folder's children, in
+        // order, by the same first-fit as always. This fixes the folder's in-place cell and every
+        // other tile's (widgets included) collapsed cell.
+        for (idx in spans.indices) if (!isChild(idx)) place(idx, spans[idx])
+
+        if (childCount > 0) {
+            val fy = cells[runFirst]!!.y
+            val bandRows = (childCount + columns - 1) / columns
+
+            // A tall tile that starts on or above the folder's row but reaches the row just beneath
+            // it would be sliced by inserting a band there. That arrangement is unusual; fall back to
+            // placing the children on their own rows below ALL existing content when it occurs.
+            val straddler = spans.indices.any { idx ->
+                if (isChild(idx)) return@any false
+                val c = cells[idx] ?: return@any false
+                c.y <= fy && c.y + spans[idx].h.coerceAtLeast(1) - 1 > fy
             }
+
+            if (straddler) {
+                var startRow = 0
+                for (y in occupied.indices) if (occupied[y].any { it }) startRow = y + 1
+                for (k in 0 until childCount) {
+                    cells[runFirst + 1 + k] = Cell(k % columns, startRow + k / columns)
+                }
+            } else {
+                // Phase 2: open a band-height gap directly below the folder's row -- slide every tile
+                // that sits below the folder down by the band height. Relative order is preserved, so
+                // this cannot introduce an overlap.
+                for (idx in spans.indices) {
+                    if (isChild(idx)) continue
+                    val c = cells[idx] ?: continue
+                    if (c.y > fy) cells[idx] = Cell(c.x, c.y + bandRows)
+                }
+                // Phase 3: drop the children into the opened band, row-major from column 0. The
+                // band's trailing cells (a partial last row) stay empty -- nothing else can be there,
+                // since tiles above are on rows <= fy and tiles below were slid past the band.
+                for (k in 0 until childCount) {
+                    cells[runFirst + 1 + k] = Cell(k % columns, fy + 1 + k / columns)
+                }
+            }
+        }
+
+        // Recompute the row count from the final cells (the occupancy grid is stale after the slide).
+        rows = 0
+        for (idx in spans.indices) {
+            val c = cells[idx] ?: continue
+            val h = if (isChild(idx)) 1 else spans[idx].h.coerceAtLeast(1)
+            rows = maxOf(rows, c.y + h)
         }
 
         @Suppress("UNCHECKED_CAST")
