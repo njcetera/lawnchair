@@ -96,6 +96,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         aresAdapter.removeHost = { info -> removeFromHome(info) }
         aresAdapter.boundHost = { info, container -> onRowBound(info, container) }
         aresAdapter.menuHost = { info -> showItemMenu(info) }
+        aresAdapter.wpExpandHost = { folderInfo, expanded -> onWpFolderExpanded(folderInfo, expanded) }
     }
 
     /**
@@ -385,6 +386,50 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     fun animateNextRelayout() {
         masonry.animateNextLayout()
         masonry.invalidatePacking()
+    }
+
+    /**
+     * WP folders accordion polish (owner 2026-08-24). On expand: (1) fade the newly-opened apps in
+     * -- the tiles below already slide via [animateNextRelayout], but the spliced children have no
+     * previous bounds so they would pop; a short staggered alpha fade makes them appear rather than
+     * snap; (2) nudge the list so the opened apps stay ON SCREEN when the folder sits low in a long
+     * list, without ever pushing the folder header off the top. Both run posted, after the insert's
+     * layout pass, when the child holders exist. Collapse needs neither (the slide covers it).
+     */
+    private fun onWpFolderExpanded(folderInfo: FolderInfo, expanded: Boolean) {
+        if (!expanded) return
+        val childIds = folderInfo.getContents().map { it.id }
+        if (childIds.isEmpty()) return
+        post {
+            childIds.forEachIndexed { i, id ->
+                val holder = findViewHolderForItemId(id.toLong()) ?: return@forEachIndexed
+                val v = holder.itemView
+                v.alpha = 0f
+                v.animate()
+                    .alpha(1f)
+                    .setStartDelay(i * WP_CHILD_FADE_STAGGER_MS)
+                    .setDuration(WP_CHILD_FADE_MS)
+                    .start()
+            }
+            nudgeExpandedIntoView(folderInfo, childIds)
+        }
+    }
+
+    /**
+     * Bring the expanded run into view when the folder is low in a long list, capped so the folder
+     * header never leaves the top. Positive dy scrolls content up (reveals what is below).
+     */
+    private fun nudgeExpandedIntoView(folderInfo: FolderInfo, childIds: List<Int>) {
+        val lastHolder = findViewHolderForItemId(childIds.last().toLong()) ?: return
+        val folderHolder = findViewHolderForItemId(folderInfo.id.toLong()) ?: return
+        val viewportBottom = height - paddingBottom
+        val overflow = lastHolder.itemView.bottom - viewportBottom
+        if (overflow <= 0) return // the whole opened run already fits on screen
+        // Never scroll the folder header above the top: cap the nudge at how far the header can
+        // travel before it reaches paddingTop.
+        val maxNudge = (folderHolder.itemView.top - paddingTop).coerceAtLeast(0)
+        val nudge = overflow.coerceAtMost(maxNudge)
+        if (nudge > 0) smoothScrollBy(0, nudge)
     }
 
     /**
@@ -2159,6 +2204,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
         /** Matches the edit-mode enter/exit scale animation. */
         const val EDIT_SCALE_MS = 120L
+
+        /** WP accordion: per-app fade-in as a folder opens, and the stagger between them. */
+        const val WP_CHILD_FADE_MS = 160L
+        const val WP_CHILD_FADE_STAGGER_MS = 22L
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L
