@@ -329,6 +329,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * moveItemInDatabase, never a rank-only persist. Refuses (leaves the app in the folder) if the
      * grid is full.
      */
+    /**
+     * Phase 3 #4: extract-by-drag. Same operation as the edit-mode × badge, reached instead by
+     * dragging a child clear of its folder's run and releasing over the grid. Routed through the
+     * one verified [extractChildToDesktop] so both entry points share the row-34-safe placement and
+     * the empty-folder resync; the reorder callback decides WHEN (drop over a non-sibling tile).
+     */
+    fun extractChildByDrag(child: ItemInfo) = extractChildToDesktop(child)
+
     private fun extractChildToDesktop(child: ItemInfo) {
         val cell = IntArray(2)
         val screenId = AresWidgetAdd.findFreeCell(launcher, child.spanX, child.spanY, cell, child.id)

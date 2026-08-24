@@ -182,6 +182,16 @@ object AresTestInfo {
     const val REQUEST_WP_RENAME = "ares-wp-rename"
 
     /**
+     * WP folders Phase 3 #4: exercise the extract-by-drag DECISION+extract without a flaky drag.
+     * `arg` is `childId,targetId` (targetId may be `none` for empty space). Runs the SAME
+     * classify-then-extract the drop handler runs -- `AresWpMembership.resolve` and, on Extract,
+     * `extractChildByDrag` -- and returns `action|newContainer`. Confirms an Extract classification
+     * actually moves the child to CONTAINER_DESKTOP (-100). The finger->tile step (findChildViewUnder)
+     * is the only part left to the gesture, and that is the owner-Pixel gate.
+     */
+    const val REQUEST_WP_EXTRACT_DRAG = "ares-wp-extract-drag"
+
+    /**
      * The folder surface's metrics, for S12 and D9. Empty array when no folder is open.
      *
      * Line 0 is the folder itself:
@@ -299,6 +309,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpRename(launcher, arg) },
         )
+        REQUEST_WP_EXTRACT_DRAG -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpExtractDrag(launcher, arg) },
+        )
         REQUEST_FOLDER_EDIT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putBoolean(key, value) },
             { launcher -> setFolderEdit(launcher, arg) },
@@ -409,6 +423,38 @@ object AresTestInfo {
             is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder(${a.folderId})"
             is AresWpMembership.Action.AddToFolder -> "AddToFolder(${a.folderId})"
         }
+    }
+
+    /** See [REQUEST_WP_EXTRACT_DRAG]. Runs the drop handler's classify-then-extract decision. */
+    private fun wpExtractDrag(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val parts = arg?.split(",") ?: return "bad-arg"
+        val childId = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return "bad-child"
+        val targetToken = parts.getOrNull(1)?.trim() ?: "none"
+        // A collapsed folder's children are NOT in the adapter snapshot, so locate the child through
+        // the folder that owns it. Then expand that folder (direct toggle, not a gesture, so it is
+        // deterministic) -- the resolve gate needs expandedFolderId == child.container.
+        val folder = list.aresAdapter.snapshot().filterIsInstance<FolderInfo>()
+            .firstOrNull { f -> f.getContents().any { it.id == childId } }
+            ?: return "no-owning-folder($childId)"
+        if (!folder.isAresWpFolder) return "not-wp-folder(${folder.id})"
+        val child = folder.getContents().first { it.id == childId }
+        if (list.aresAdapter.expandedWpFolder() != folder.id) list.aresAdapter.toggleWpFolder(folder)
+        val items = list.aresAdapter.snapshot()
+        val target = if (targetToken == "none") null
+            else targetToken.toIntOrNull()?.let { tid -> items.firstOrNull { it.id == tid } }
+        val expanded = list.aresAdapter.expandedWpFolder()
+        val action = AresWpMembership.resolve(child, target, expanded)
+        // Mirror the drop handler's conservative gate: only a REAL non-sibling target extracts.
+        val extract = target != null && action is AresWpMembership.Action.Extract
+        if (extract) list.aresAdapter.extractChildByDrag(child)
+        val name = when (action) {
+            is AresWpMembership.Action.None -> "None"
+            is AresWpMembership.Action.Extract -> "Extract"
+            is AresWpMembership.Action.ReorderInFolder -> "ReorderInFolder"
+            is AresWpMembership.Action.AddToFolder -> "AddToFolder"
+        }
+        return "$name|${child.container}"
     }
 
     /** See [REQUEST_WP_RENAME]. Drives the persistence path; the dialog's feel is the owner gate. */

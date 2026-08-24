@@ -265,6 +265,15 @@ object AresHomeReorder {
         private var curDragY = 0
 
         /**
+         * The dragged view's CENTRE, in RecyclerView coordinates, from the last drag frame
+         * ([onChildDraw]). Unlike [curDragX]/[curDragY] (widget-only, top-left) this is written for
+         * every dragged type, and it is what [clearView] reads to find the tile a child was released
+         * over for the Phase 3 #4 extract-by-drag decision. NaN until the first drag frame.
+         */
+        private var lastDragCx = Float.NaN
+        private var lastDragCy = Float.NaN
+
+        /**
          * False: edit mode starts drags, not long-press.
          *
          * The spec is Windows Phone's persistent edit mode — long-press puts the *whole surface*
@@ -353,12 +362,13 @@ object AresHomeReorder {
             if (actionState != ItemTouchHelper.ACTION_STATE_DRAG || !isCurrentlyActive) return
             val item = draggedInfo ?: return
             val view = viewHolder.itemView
-            AresFolderDrop.onDragPoint(
-                list,
-                item,
-                view.left + view.translationX + view.width / 2f,
-                view.top + view.translationY + view.height / 2f,
-            )
+            val cx = view.left + view.translationX + view.width / 2f
+            val cy = view.top + view.translationY + view.height / 2f
+            // Remember the finger for clearView's extract-by-drag decision (Phase 3 #4). onDragPoint
+            // gets the same centre for the dwell.
+            lastDragCx = cx
+            lastDragCy = cy
+            AresFolderDrop.onDragPoint(list, item, cx, cy)
         }
 
         /**
@@ -785,6 +795,12 @@ object AresHomeReorder {
             // done it, and a timer left armed past the drag is S1, already paid for once.
             val item = draggedInfo
             draggedInfo = null
+            // Snapshot and clear the finger position now so the next drag starts clean regardless of
+            // which branch below returns.
+            val dropCx = lastDragCx
+            val dropCy = lastDragCy
+            lastDragCx = Float.NaN
+            lastDragCy = Float.NaN
             val end = list.dragGestureEnd
             // WP folders reorder-inside (design/wp-phase2-spike.md): a child dragged among its
             // siblings must write FOLDER-LOCAL ranks, never the desktop persistOrder (which skips
@@ -799,7 +815,20 @@ object AresHomeReorder {
             ) {
                 AresFolderDrop.cancel()
                 list.setFolderDropTarget(null)
-                list.aresAdapter.persistWpChildOrder(launcher, expanded)
+                // Phase 3 #4 extract-by-drag: released over a REAL non-sibling tile means the child
+                // was dragged clear of the folder's run -> take it out, through the same verified
+                // extract the × badge uses. Conservative on purpose: a null/gap target (ambiguous)
+                // stays an in-folder reorder, so the owner-verified reorder-inside path can never
+                // mis-fire into an accidental extraction. onMove kept the child inside its run in
+                // either case, so when this is a plain reorder the adapter order is already right.
+                val target = tileUnder(recyclerView, dropCx, dropCy)
+                val extract = target != null &&
+                    AresWpMembership.resolve(item, target, expanded) is AresWpMembership.Action.Extract
+                if (extract) {
+                    list.aresAdapter.extractChildByDrag(item)
+                } else {
+                    list.aresAdapter.persistWpChildOrder(launcher, expanded)
+                }
                 return
             }
             val consumed = end == AresHomeListView.GESTURE_END_UP &&
@@ -809,6 +838,21 @@ object AresHomeReorder {
             if (!consumed && end != AresHomeListView.GESTURE_END_NONE) {
                 persistOrder(launcher, list.aresAdapter.snapshot())
             }
+        }
+
+        /**
+         * The [ItemInfo] whose view contains ([x], [y]) in RecyclerView coordinates, or null for a
+         * gap, empty space, or an unsampled ([Float.NaN]) point. Safe to call from [clearView]: it
+         * runs after `super.clearView` has reset the dragged view's drag translation, so the dragged
+         * tile is back at its rest position in the folder run and this reports the tile physically
+         * under the finger (a desktop tile, when the child was dragged clear) rather than the float.
+         */
+        private fun tileUnder(rv: RecyclerView, x: Float, y: Float): ItemInfo? {
+            if (x.isNaN() || y.isNaN()) return null
+            val view = rv.findChildViewUnder(x, y) ?: return null
+            val pos = rv.getChildAdapterPosition(view)
+            if (pos == RecyclerView.NO_POSITION) return null
+            return list.aresAdapter.itemAt(pos)
         }
     }
 }
