@@ -63,6 +63,33 @@ object AresRemoveBadge {
         label: CharSequence?,
         touchSizePx: Int = 0,
         onTap: () -> Unit,
+    ): View = build(container, label, touchSizePx, Kind.REMOVE, onTap)
+
+    /**
+     * The extract affordance for an expanded WP-folder child (design/wp-folder-design.md, BL-5/M4).
+     *
+     * Same geometry as the remove [createBadge], but a DISTINCT glyph (ares_extract_badge, an
+     * eject/lift mark) and its own spoken label: tapping it takes the app OUT of the folder and onto
+     * the home grid, which is not the remove cross's "off home" and must never read as delete. A
+     * folder child would otherwise inherit the remove cross, whose action deletes the row from the
+     * database -- the B1 data-loss bug. This is what the child gets instead.
+     */
+    @JvmOverloads
+    fun createExtractBadge(
+        container: FrameLayout,
+        label: CharSequence?,
+        touchSizePx: Int = 0,
+        onTap: () -> Unit,
+    ): View = build(container, label, touchSizePx, Kind.EXTRACT, onTap)
+
+    private enum class Kind { REMOVE, EXTRACT }
+
+    private fun build(
+        container: FrameLayout,
+        label: CharSequence?,
+        touchSizePx: Int,
+        kind: Kind,
+        onTap: () -> Unit,
     ): View {
         val res = container.resources
         // A caller may need a smaller target than the grid's. A folder cell is ~83dp, and two
@@ -106,14 +133,18 @@ object AresRemoveBadge {
             // larger touch target -- rather than as a background stretched across the whole view.
             // Painting it as the background made the circle fill all 48dp, which on a 1x1 tile is
             // about as wide as the app icon; see ares_remove_badge.xml.
-            setImageResource(R.drawable.ares_remove_badge)
+            setImageResource(
+                if (kind == Kind.EXTRACT) R.drawable.ares_extract_badge else R.drawable.ares_remove_badge,
+            )
             scaleType = ImageView.ScaleType.CENTER
             isClickable = true
             isFocusable = true
-            contentDescription = if (label.isNullOrBlank()) {
-                res.getString(R.string.remove_drop_target_label)
-            } else {
-                res.getString(R.string.ares_remove_from_home, label)
+            contentDescription = when {
+                kind == Kind.EXTRACT && !label.isNullOrBlank() ->
+                    res.getString(R.string.ares_extract_from_folder, label)
+                kind == Kind.EXTRACT -> res.getString(R.string.ares_extract_from_folder, "")
+                label.isNullOrBlank() -> res.getString(R.string.remove_drop_target_label)
+                else -> res.getString(R.string.ares_remove_from_home, label)
             }
             AresA11y.describeAsButton(this)
             setOnClickListener { onTap() }

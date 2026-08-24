@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher WP folders - the "lift out of folder" glyph, composed into a backdrop by
+     ares_extract_badge.xml. It sits on an expanded WP-folder child in edit mode; tapping it EXTRACTS
+     the app to the home grid (container -> DESKTOP with a legal cell). Deliberately NOT the remove
+     cross: extract is not delete, and the review (M4/BL-5) required distinct iconography so the owner
+     cannot confuse "take out of folder" with "remove from home". The upload/eject mark (arrow rising
+     over a baseline) reads as "lift this up onto the grid". Tinted to match the remove badge.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="@color/ares_edit_badge_icon">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z" />
+</vector>

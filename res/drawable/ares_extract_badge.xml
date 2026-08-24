@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     AresLauncher WP folders - the extract affordance on an expanded WP-folder child in edit mode.
+     Tapping it takes the app OUT of the folder and onto the home grid; it does not uninstall and,
+     unlike the remove cross, does not take it off home. Composed here (oval backdrop + eject glyph),
+     mirroring ares_remove_badge.xml, so AresRemoveBadge can render it CENTER at intrinsic size.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:width="@dimen/ares_remove_badge_size"
+        android:height="@dimen/ares_remove_badge_size"
+        android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="@color/ares_edit_badge_container" />
+        </shape>
+    </item>
+
+    <item
+        android:width="@dimen/ares_remove_badge_glyph_size"
+        android:height="@dimen/ares_remove_badge_glyph_size"
+        android:drawable="@drawable/ares_extract_badge_glyph"
+        android:gravity="center" />
+</layer-list>

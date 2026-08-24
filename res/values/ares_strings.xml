@@ -43,4 +43,9 @@
     <!-- Default title a freshly-created empty WP folder carries until the owner renames it. -->
     <string name="ares_wp_folder_default_title">Folder</string>
 
+    <!-- Spoken label for the extract badge on an expanded WP-folder child. %1$s is the app's name.
+         "Take out of folder" (not "remove"): extract moves the app onto the home grid, it does not
+         take it off home and never uninstalls. Distinct wording for a distinct action (BL-5/M4). -->
+    <string name="ares_extract_from_folder">Take <xliff:g id="item_name" example="Chrome">%1$s</xliff:g> out of folder</string>
+
 </resources>

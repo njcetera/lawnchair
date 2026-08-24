@@ -290,25 +290,69 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // Ordinary items get the X in edit mode; it takes the item off home (D2 -- a folder never
         // does). WP folders are the deliberate exception, and ONLY while empty (design D2 note):
         // an empty WP folder shows an X that DELETES the folder. A non-empty WP folder shows none.
-        val removeTarget = info?.takeIf { editMode && it !is FolderInfo }
+        // A spliced WP-folder CHILD (container != DESKTOP) is the B1 hazard: it is not a FolderInfo,
+        // so it would inherit the ordinary remove-X whose action DELETES the app row. It must get the
+        // EXTRACT badge instead (takes the app out of the folder onto the grid, never deletes).
+        val isFolderChild = info != null && info !is FolderInfo &&
+            info.container != Favorites.CONTAINER_DESKTOP
+        val removeTarget = info?.takeIf { editMode && it !is FolderInfo && !isFolderChild }
+        val extractTarget = info?.takeIf { editMode && isFolderChild }
         val deleteWpTarget = (info as? FolderInfo)?.takeIf {
             editMode && it.isAresWpFolder && it.getContents().isEmpty()
         }
-        val wantBadge = removeTarget != null || deleteWpTarget != null
+        val wantBadge = removeTarget != null || extractTarget != null || deleteWpTarget != null
         if (wantBadge && existing == null) {
-            val badge = if (deleteWpTarget != null) {
-                AresRemoveBadge.createBadge(container, spokenNameOf(container, deleteWpTarget)) {
-                    deleteWpFolderIfEmpty(deleteWpTarget)
-                }
-            } else {
-                AresRemoveBadge.createBadge(container, spokenNameOf(container, removeTarget!!)) {
-                    removeHost?.invoke(removeTarget)
-                }
+            val badge = when {
+                extractTarget != null ->
+                    AresRemoveBadge.createExtractBadge(container, spokenNameOf(container, extractTarget)) {
+                        extractChildToDesktop(extractTarget)
+                    }
+                deleteWpTarget != null ->
+                    AresRemoveBadge.createBadge(container, spokenNameOf(container, deleteWpTarget)) {
+                        deleteWpFolderIfEmpty(deleteWpTarget)
+                    }
+                else ->
+                    AresRemoveBadge.createBadge(container, spokenNameOf(container, removeTarget!!)) {
+                        removeHost?.invoke(removeTarget)
+                    }
             }
             container.addView(badge)
         } else if (!wantBadge && existing != null) {
             container.removeView(existing)
         }
+    }
+
+    /**
+     * BL-5/BL-2: take a WP-folder child OUT of its folder and onto the home grid, from the child's
+     * extract badge. NOT a delete: the app moves to CONTAINER_DESKTOP with a LEGAL, non-overlapping
+     * cell (or the loader's occupancy check would delete it -- row-34), via one atomic
+     * moveItemInDatabase, never a rank-only persist. Refuses (leaves the app in the folder) if the
+     * grid is full.
+     */
+    private fun extractChildToDesktop(child: ItemInfo) {
+        val cell = IntArray(2)
+        val screenId = AresWidgetAdd.findFreeCell(launcher, child.spanX, child.spanY, cell, child.id)
+        if (screenId == AresWidgetAdd.NO_SCREEN) {
+            android.util.Log.w("AresFolderFlow", "wp-extract declined: grid full for ${child.id}")
+            return
+        }
+        // Remove from the source folder's in-memory contents BEFORE the move, so getContents() is
+        // accurate for the BL-6 empty check and the collapse scan. moveItemInDatabase does not touch
+        // folder membership. child.container still names the source folder here.
+        (items.firstOrNull { it.id == child.container } as? FolderInfo)?.getContents()?.remove(child)
+        launcher.modelWriter.moveItemInDatabase(
+            child,
+            Favorites.CONTAINER_DESKTOP,
+            screenId,
+            cell[0],
+            cell[1],
+        )
+        // Drop the spliced child row and re-add it as an ordinary desktop tile (container is now
+        // DESKTOP, so it sorts by rank and is ITH-draggable again). Mirrors AresFolderExitHandoff.
+        removeItems { it.id == child.id }
+        addItem(child)
+        AresHomeReorder.persistOrder(launcher, snapshot())
+        android.util.Log.i("AresFolderFlow", "wp-extract ${child.id} -> DESKTOP cell=(${cell[0]},${cell[1]})")
     }
 
     /**
