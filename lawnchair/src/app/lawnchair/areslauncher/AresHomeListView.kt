@@ -505,6 +505,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Set BEFORE applyEditModeVisual: that walk calls back into the adapter to add chevrons,
         // and would otherwise read the previous mode and add none (§6).
         aresAdapter.setEditMode(true)
+        // WP folders (design/wp-folder-design.md): the create-new-folder FAB lives only in edit
+        // mode. It is a DragLayer overlay, so it does not disturb the grid's own layout.
+        AresWpFab.attach(launcher)
         applyEditModeVisual()
         // Let the edge back GESTURE through. Stock suppresses it at NORMAL with nothing floating,
         // and edit mode is still NORMAL -- so without this the mode can only be left with the BACK
@@ -533,6 +536,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         AresFolderDrop.cancel()
         // Set before the visual walk, for the same reason as enterEditMode (§6).
         aresAdapter.setEditMode(false)
+        // WP folders: the create-new-folder FAB belongs to the mode; drop it as the mode ends.
+        AresWpFab.detach()
         // Cancel every animator up front rather than relying on the per-child walk: children that
         // scrolled out while editing are no longer attached, so the walk would never reach them and
         // their animators would outlive the mode.
