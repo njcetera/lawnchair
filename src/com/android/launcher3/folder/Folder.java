@@ -1963,6 +1963,17 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
                 + (mInfo != null ? mInfo.id : -1) + " items="
                 + (mInfo != null ? mInfo.getContents().size() : -1) + " mDestroyed=" + mDestroyed
                 + " caller=" + aresDissolveCaller());
+        // AresLauncher WP folders (design/wp-folder-design.md): a Windows-Phone-style folder is
+        // persistent -- it is created empty by the FAB and stays a legal folder at 0/1 items until
+        // the owner explicitly deletes it. NEVER auto-dissolve one, whichever dissolve path arrives
+        // here (onRemove <=1, onDropCompleted, the eager AresFolderExitHandoff dissolve). This is the
+        // runtime half of the persistence exemption; the loader half is in
+        // ModelDbController.deleteEmptyFolders()'s SQL.
+        if (mInfo != null && mInfo.isAresWpFolder()) {
+            android.util.Log.i("AresFolderFlow", "dissolve skipped: folder " + mInfo.id
+                    + " is a WP folder (persistent)");
+            return;
+        }
         // Guard the §25 dissolve-vs-drag-out race (traced on the Pixel 2026-08-23). This is reached
         // on a folder that is ALREADY destroyed (the stock comment at onDropCompleted notes it "can
         // be called twice") or EMPTY (both items pulled out by rapid drag-out). The stock destroy

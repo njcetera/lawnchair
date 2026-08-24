@@ -59,6 +59,22 @@ public class FolderInfo extends CollectionInfo {
     public static final int FLAG_MANUAL_FOLDER_NAME = 0x00000008;
 
     /**
+     * AresLauncher: marks a Windows-Phone-style folder (FAB-created, persistent-when-empty,
+     * inline-expand, explicit delete). Coexists with overlay folders; every folder branch that must
+     * distinguish the two types reads this bit. See design/wp-folder-design.md.
+     *
+     * <p>Deliberately {@code 1 << 4} (0x10), not a lower free bit: stock Launcher3 historically used
+     * {@code 1 << 0} (FLAG_ITEMS_SORTED) / {@code 1 << 1} (FLAG_WORK_FOLDER), so a migrated DB could
+     * carry a stray low bit; 0x10 has never been assigned. {@code options} is a persisted folder
+     * column that round-trips through load and grid migration, so this marker survives reload.
+     *
+     * <p>The value is duplicated in {@code ModelDbController.deleteEmptyFolders()}'s SQL selection
+     * (that purge is a raw db.delete that never materialises a FolderInfo, so a runtime guard cannot
+     * reach it). Keep the two in sync.
+     */
+    public static final int FLAG_ARES_WP = 0x00000010;
+
+    /**
      * Different states of folder label.
      */
     public enum LabelState {
@@ -139,6 +155,11 @@ public class FolderInfo extends CollectionInfo {
 
     public boolean hasOption(int optionFlag) {
         return (options & optionFlag) != 0;
+    }
+
+    /** AresLauncher: true for a Windows-Phone-style folder (see {@link #FLAG_ARES_WP}). */
+    public boolean isAresWpFolder() {
+        return hasOption(FLAG_ARES_WP);
     }
 
     /**

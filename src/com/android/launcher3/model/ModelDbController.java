@@ -57,6 +57,7 @@ import com.android.launcher3.backuprestore.LauncherRestoreEventLogger.RestoreErr
 import com.android.launcher3.dagger.ApplicationContext;
 import com.android.launcher3.dagger.LauncherAppSingleton;
 import com.android.launcher3.logging.FileLog;
+import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.pm.UserCache;
 import com.android.launcher3.preview.PreviewContext;
 import com.android.launcher3.provider.LauncherDbUtils;
@@ -518,8 +519,16 @@ public class ModelDbController {
         SQLiteDatabase db = mOpenHelper.getWritableDatabase();
         try (SQLiteTransaction t = new SQLiteTransaction(db)) {
             // Select folders whose id do not match any container value.
+            //
+            // AresLauncher (BL-1): a Windows-Phone-style folder (FolderInfo.FLAG_ARES_WP = 0x10) is
+            // legal while empty and must NOT be purged here. This is a raw db.delete that never
+            // materialises a FolderInfo, so a runtime hasOption() guard cannot reach it -- the
+            // exemption has to live in the SQL, reading the persisted `options` column. Keep the
+            // 0x10 literal in sync with FolderInfo.FLAG_ARES_WP.
             String selection = LauncherSettings.Favorites.ITEM_TYPE + " = "
                     + LauncherSettings.Favorites.ITEM_TYPE_FOLDER + " AND "
+                    + "(" + LauncherSettings.Favorites.OPTIONS + " & "
+                    + FolderInfo.FLAG_ARES_WP + ") = 0 AND "
                     + LauncherSettings.Favorites._ID +  " NOT IN (SELECT "
                     + LauncherSettings.Favorites.CONTAINER + " FROM "
                     + Favorites.TABLE_NAME + ")";
