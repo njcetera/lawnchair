@@ -48,12 +48,12 @@ class AresFolderBounds(
         }
         if (appViews.isEmpty()) return
 
-        // Tight bounding box of the opened app tiles, grown by cardPad and clamped to the grid's
-        // content width so the card never runs under the screen edge.
-        val minLeft = parent.paddingLeft.toFloat()
-        val maxRight = (parent.width - parent.paddingRight).toFloat()
-        val left = (appViews.minOf { it.left } - cardPad).coerceAtLeast(minLeft)
-        val right = (appViews.maxOf { it.right } + cardPad).coerceAtMost(maxRight)
+        // Full grid-content WIDTH regardless of how many apps are in the folder (owner 2026-08-24):
+        // a folder with fewer apps than fill a row still gets a card the width of a full row, so the
+        // card reads as the folder's own strip rather than a box hugging a few icons. Vertically it
+        // spans just the opened app rows, grown by cardPad.
+        val left = parent.paddingLeft.toFloat()
+        val right = (parent.width - parent.paddingRight).toFloat()
         val top = appViews.minOf { it.top } - cardPad
         val bottom = appViews.maxOf { it.bottom } + cardPad
         if (right <= left || bottom <= top) return
