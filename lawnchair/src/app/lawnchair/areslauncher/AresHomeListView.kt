@@ -546,6 +546,32 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         for (child in frozenTiles.toList()) unfreezeTile(child)
     }
 
+    /**
+     * Immediately clears the inline-folder focus wash and freeze without animating. For a full model
+     * rebind ([AresHomeAdapter.clear]), where the washed rows are about to be discarded and the
+     * animated close path (`wpExpandHost(..., false)`) never runs for the vanishing folder. Without
+     * this, `washStrength` stays at [WASH_MAX] and [onRowBound] re-applies the dim + freeze to every
+     * tile of the fresh list -- leaving the whole home dimmed and (in edit mode) frozen with no
+     * folder open and no self-heal short of opening and closing another folder. (Adversarial review
+     * 2026-08-25, Finding 1.)
+     */
+    fun tearDownFolderWashImmediate() {
+        washAnimator?.cancel()
+        washAnimator = null
+        clearAllTileWash()
+    }
+
+    /**
+     * A recycled tile must not carry the focus wash into its next bind. [clearAllTileWash] walks only
+     * attached children, so a washed tile scrolled off-screen (recycled) while a folder is open keeps
+     * its hardware wash layer and would reattach dimmed if the wash is torn down while it is detached.
+     * Drop the layer and its freeze bookkeeping here. (Adversarial review 2026-08-25, Finding 2.)
+     */
+    fun onTileRecycled(view: View) {
+        if (view.layerType == LAYER_TYPE_HARDWARE) view.setLayerType(LAYER_TYPE_NONE, null)
+        frozenTiles.remove(view)
+    }
+
     /** Fades the focus wash in (folder opened) or out (closed). */
     private fun updateFolderWash(expanded: Boolean) {
         val target = if (expanded) WASH_MAX else 0f

@@ -734,6 +734,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // fire against the fresh list. (finishCollapse also guards on the id, but leave nothing posted.)
         pendingCollapse?.let { launcher.workspace?.aresHomeList?.removeCallbacks(it) }
         pendingCollapse = null
+        // Tear the inline-folder focus wash/freeze down NOW, before the rows are discarded. The
+        // animated close path (wpExpandHost false) never runs for a folder whose rows a rebind is
+        // throwing away, so without this washStrength stays at WASH_MAX and onRowBound re-applies
+        // the dim + freeze to every tile of the fresh list -- the whole home left dimmed and frozen
+        // with no folder open. (Adversarial review 2026-08-25, Finding 1.)
+        if (expandedWpFolderId != -1) {
+            launcher.workspace?.aresHomeList?.tearDownFolderWashImmediate()
+        }
         val size = items.size
         // A full rebind rebuilds every row from the model; any transient WP expansion is gone with
         // it, so the expanded-id must not survive into the fresh list (else collapseWpFolder would
@@ -1453,6 +1461,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.container.removeAllViews()
+        // Drop any focus-wash hardware layer/freeze bookkeeping this tile carried, so a tile
+        // recycled while a folder is open does not reattach dimmed. (Adversarial review 2026-08-25,
+        // Finding 2.)
+        launcher.workspace?.aresHomeList?.onTileRecycled(holder.container)
         // A WP close (or a close cut short by a folder switch) can leave a child tile mid-furl --
         // faded, shrunk, slid up. Cancel any running property animator and reset the transform so the
         // recycled holder rebinds from a clean baseline. (The open ends at these same values, so this
