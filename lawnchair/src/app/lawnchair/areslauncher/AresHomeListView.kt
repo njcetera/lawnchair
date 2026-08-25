@@ -614,8 +614,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     val u = WP_FALL_SPREAD_INTERP.getInterpolation(
                         ((t - WP_FALL_SEG) / (1f - WP_FALL_SEG)).coerceIn(0f, 1f),
                     )
-                    x = lerpF(dropOffX, 0f, u)
-                    y = lerpF(dropOffY, 0f, u)
+                    // CURVED fan-out (owner 2026-08-24, "dropped and curved into its final spot"): a
+                    // quadratic Bezier from the drop point (dropOffX, dropOffY) to the cell (0, 0) with
+                    // the control at (dropOffX, 0). The icon rises up out of the drop, then arcs
+                    // sideways into its cell -- one fluid curve instead of a straight diagonal that
+                    // kinked off the vertical drop. Closed forms: x = dropOffX*(1-u^2), y = dropOffY*(1-u)^2.
+                    // At u=1 both are 0 (lands dead-on the cell); u>1 (the overshoot) carries mostly
+                    // sideways past the column then springs back.
+                    val omu = 1f - u
+                    x = dropOffX * (1f - u * u)
+                    y = dropOffY * omu * omu
                     s = lerpF(midScale, 1f, u)
                     al = 1f
                     rot = lerpF(tiltDeg, 0f, u) // overshoots through 0 -> a little wobble, then level
