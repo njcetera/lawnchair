@@ -31,8 +31,8 @@ object AresHomeReveal {
     private const val STAGGER_MS = 20f          // wave spacing between successive items
     private const val MAX_TOTAL_MS = 1300L      // cap so a full screen never drags on
     private const val CLUSTER_X_FRAC = 0.5f     // items bunch to this x (screen centre)
-    private const val START_Y_FRAC = 0.82f      // the cluster starts this far down the screen
-    private const val RISEN_Y_FRAC = 0.62f      // and rises to here before it zooms out (~20% climb)
+    private const val START_Y_FRAC = 1.12f      // the cluster starts BELOW the bottom edge (off-screen)
+    private const val RISEN_Y_FRAC = 0.80f      // flies IN and rises to here (~20% up from the edge)
     private const val RISE_PHASE = 0.42f        // fraction of an item's life spent rising (grouped)
     // Per-item variation (like the folder open's wpRnd) so the spread reads organic, not in lockstep.
     private const val PACE_JITTER = 0.16f       // ±16% on each item's duration
