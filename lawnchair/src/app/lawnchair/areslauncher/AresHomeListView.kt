@@ -598,9 +598,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 val t = if (forward) anim.animatedFraction else 1f - anim.animatedFraction
                 val x: Float; val y: Float; val s: Float; val al: Float; val rot: Float
                 if (t <= WP_FALL_SEG) {
-                    val u = WP_FALL_FALL_INTERP.getInterpolation((t / WP_FALL_SEG).coerceIn(0f, 1f))
+                    val frac = (t / WP_FALL_SEG).coerceIn(0f, 1f)
+                    val u = WP_FALL_FALL_INTERP.getInterpolation(frac)
+                    // Vertical drop bounces at the bottom (open only); scale/alpha keep the plain fall.
+                    val uy = if (forward) WP_FALL_BOUNCE_INTERP.getInterpolation(frac) else u
                     x = lerpF(startOffX, dropOffX, u)
-                    y = lerpF(startOffY, dropOffY, u)
+                    y = lerpF(startOffY, dropOffY, uy)
                     s = lerpF(startScale, midScale, u)
                     // Slot-backed tiles stay fully opaque (they ARE the preview); slotless ones fade in.
                     al = if (hasSlot) 1f else (u * 2f).coerceIn(0f, 1f)
@@ -2536,9 +2539,18 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         const val WP_FALL_DROP_FRAC = 0.45f
         const val WP_FALL_TILT_DEG = 12f // how far a falling icon tips over; alternates sign per index
         const val WP_TEXT_FADE_MS = 130L // label derender/rerender as an icon lifts off / lands
-        /** Gravity feel for the fall segment. */
+        /** Gravity feel for the fall segment (drives scale + alpha; y uses the bounce below). */
         val WP_FALL_FALL_INTERP: android.view.animation.Interpolator =
             android.view.animation.AccelerateInterpolator(1.5f)
+        /**
+         * Bounce at the bottom of the drop (owner 2026-08-24, "bounce at the bottom before it fans
+         * out"): the VERTICAL fall lands on the drop point and rebounds a couple of decaying times
+         * before segment 2 fans the icon out to its cell. Open only -- on close the icon is rising back
+         * INTO the folder, where a bounce would read wrong. Reaches exactly 1 at input 1, so seg1 still
+         * ends dead-on the drop point and hands off to seg2 with no jump.
+         */
+        val WP_FALL_BOUNCE_INTERP: android.view.animation.Interpolator =
+            android.view.animation.BounceInterpolator()
         /**
          * Bouncy settle for the spread segment (owner 2026-08-24, "bouncier, more personality"): the
          * icon OVERSHOOTS its cell + full size, then springs back -- so position, scale and the tilt
