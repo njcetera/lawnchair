@@ -477,7 +477,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (!frozenTiles.remove(view)) return
         if (isEditMode()) {
             val pos = getChildAdapterPosition(view)
-            if (pos != NO_POSITION) AresEditWiggle.start(view, pos)?.let { wiggles[view] = it }
+            if (pos != NO_POSITION) {
+                AresEditWiggle.start(view, pos) { editMode }?.let { wiggles[view] = it }
+            }
             fadeInEditChrome(view)
         }
     }
@@ -815,16 +817,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
 
         // Pre-set the tile to its start frame so it is not briefly visible at its cell during the
-        // stagger delay (open only; on close it legitimately starts at the cell). A slot-backed tile
-        // starts at FULL alpha, sitting exactly over its (about-to-be-hidden) preview icon, so the
-        // preview->tile hand-off is a seamless swap rather than a cross-fade; a slotless overflow child
-        // (5th+ app, no preview) still fades in from the cluster centre.
+        // stagger delay (open only; on close it legitimately starts at the cell). The tile is kept
+        // HIDDEN (alpha 0) for the whole stagger delay and only appears when its fall actually
+        // begins -- the animator's first update frame (which fires only AFTER startDelay) sets the
+        // real alpha. Previously a slot-backed tile was pre-set to FULL alpha to sit over its preview
+        // mini-icon as a "seamless swap", but the enter delay is timed past the folder card's morph,
+        // so during it the card is still moving while the parked tile stays put -- it drifted off the
+        // card and read as a tiny static icon appearing early, below the folder (owner 2026-08-25,
+        // "small Instagram icon appears before the folder expands"). Hidden-until-flight removes that
+        // stray frame; the folder's own preview covers the spot until the child streams out.
         if (forward) {
             v.translationX = startOffX
             v.translationY = startOffY
             v.scaleX = startScale * endScale; v.scaleY = startScale * endScale
             v.rotation = tiltDeg
-            v.alpha = if (hasSlot) 1f else 0f
+            v.alpha = 0f
             // In edit mode, hide the ×/ⓘ/tint so only the icon flies; it fades back on landing.
             if (isEditMode()) setEditChromeAlpha(v, 0f)
         }
@@ -1555,7 +1562,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private fun syncWiggle(child: View) {
         AresEditWiggle.stop(child, wiggles.remove(child))
         if (!editMode || child === floatSuspendedFor) return
-        AresEditWiggle.start(child, getChildAdapterPosition(child))?.let { wiggles[child] = it }
+        AresEditWiggle.start(child, getChildAdapterPosition(child)) { editMode }
+            ?.let { wiggles[child] = it }
     }
 
     /**

@@ -99,8 +99,16 @@ object AresEditWiggle {
      * Returns null — leaving the view at rest — when the system's animator scale is off ("Remove
      * animations"). Items then simply hold the edit-mode scale, which still distinguishes the mode
      * without motion. Callers must cancel the returned animator themselves; see [stop].
+     *
+     * [active] is a self-guard: every frame the animator asks whether its owner is still in the mode
+     * that justifies the float, and the instant it answers false the animator **cancels and resets
+     * its own view**. This is a safety net under the caller's own tracking (the `wiggles` maps): an
+     * animator can escape those maps through view recycling or the folder-wash freeze/unfreeze churn,
+     * and then survive `clearWiggles`, leaving a tile visibly wiggling with edit mode already off
+     * (owner 2026-08-25, "home icons still wiggling", edit flag confirmed false). The guard bounds
+     * any such escape to a single frame. Null (the default) keeps the legacy caller-only teardown.
      */
-    fun start(view: View, index: Int): ValueAnimator? {
+    fun start(view: View, index: Int, active: (() -> Boolean)? = null): ValueAnimator? {
         if (!ValueAnimator.areAnimatorsEnabled()) {
             // clearFloat, NOT reset. The view has not stopped editing -- it is editing without
             // motion -- and reset() is the teardown funnel: it calls AresEditMotion.clear, which
@@ -129,6 +137,15 @@ object AresEditWiggle {
         // rest point, which is what makes an oscillation read as a twitch.
         animator.interpolator = LinearInterpolator()
         animator.addUpdateListener {
+            // Self-guard: if the owning mode has ended, stop this frame from writing and tear the
+            // float down NOW, whatever the caller's tracking did. cancel() from inside the listener
+            // is safe (it just stops future frames); reset() drops the orbit + tilt so the tile
+            // snaps back to rest. This is what bounds a stray, un-tracked wiggle to one frame.
+            if (active != null && !active()) {
+                it.cancel()
+                reset(view)
+                return@addUpdateListener
+            }
             // animatedFraction, not animatedValue: it is the fraction *within the current
             // iteration*, which is exactly the phase, and it avoids boxing a Float per frame per
             // tile. Interpolation is linear, so the two agree.
