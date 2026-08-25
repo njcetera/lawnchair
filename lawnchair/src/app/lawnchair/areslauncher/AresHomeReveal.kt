@@ -27,14 +27,18 @@ object AresHomeReveal {
     var enabled = false
 
     // Feel. All one-line tunable.
-    private const val START_SCALE = 0.30f       // size at the bottom edge, before it zooms in
-    private const val PER_ITEM_MS = 560f        // one item's rise + zoom
-    private const val STAGGER_MS = 22f          // wave spacing between successive items
-    private const val MAX_TOTAL_MS = 1250L      // cap so a full screen never drags on
-    private const val BOUNCE_TENSION = 2.3f     // playful overshoot as it lands
+    private const val START_SCALE = 0.26f       // size while bunched at the cluster, before zoom-out
+    private const val PER_ITEM_MS = 600f        // one item's rise + zoom-out
+    private const val STAGGER_MS = 20f          // wave spacing between successive items
+    private const val MAX_TOTAL_MS = 1300L      // cap so a full screen never drags on
+    private const val CLUSTER_X_FRAC = 0.5f     // items bunch to this x (screen centre)
+    private const val START_Y_FRAC = 0.82f      // the cluster starts this far down the screen
+    private const val RISEN_Y_FRAC = 0.50f      // and rises to here before it zooms out
+    private const val RISE_PHASE = 0.42f        // fraction of an item's life spent rising (grouped)
+    private const val BOUNCE_TENSION = 2.4f     // playful overshoot on the zoom-out
 
-    private val riseInterp = DecelerateInterpolator(1.6f)          // the entrance -- fly up and settle
-    private val zoomInterp = OvershootInterpolator(BOUNCE_TENSION) // the zoom-in, concurrent with the rise
+    private val riseInterp = DecelerateInterpolator(1.5f)            // the grouped rise up
+    private val spreadInterp = OvershootInterpolator(BOUNCE_TENSION) // the zoom-out + spread, with bounce
 
     private var running: ValueAnimator? = null
 
@@ -57,24 +61,28 @@ object AresHomeReveal {
         if (n == 0) return
         running?.cancel()
 
-        val bottomEdge = list.height.toFloat()
+        val clusterX = list.width * CLUSTER_X_FRAC
+        val startClusterY = list.height * START_Y_FRAC
+        val risenClusterY = list.height * RISEN_Y_FRAC
 
         // Wave ordering: top-to-bottom, then left-to-right, by on-screen position.
         val children = (0 until n).mapNotNull { list.getChildAt(it) }
             .sortedWith(compareBy({ it.top }, { it.left }))
 
-        // Each item starts with its centre at the bottom edge (so it slides straight up its column,
-        // no horizontal drift), small. translationX stays 0 the whole time.
-        val startDy = FloatArray(children.size)
+        // Every item is BUNCHED at one cluster point (screen-centre, low) at the start -- grouped,
+        // small. It then rises vertically as a group, then zooms OUT (spreads to its own cell +
+        // scales up with a bounce). Cell centres captured so the offsets can be computed each frame.
+        val cellCx = FloatArray(children.size)
+        val cellCy = FloatArray(children.size)
         children.forEachIndexed { i, v ->
-            val cy = v.top + v.height / 2f
-            startDy[i] = bottomEdge - cy
+            cellCx[i] = v.left + v.width / 2f
+            cellCy[i] = v.top + v.height / 2f
             v.pivotX = v.width / 2f
             v.pivotY = v.height / 2f
             v.scaleX = START_SCALE
             v.scaleY = START_SCALE
-            v.translationX = 0f
-            v.translationY = startDy[i]
+            v.translationX = clusterX - cellCx[i]
+            v.translationY = startClusterY - cellCy[i]
         }
 
         val staggerSpan = STAGGER_MS * (children.size - 1).coerceAtLeast(0)
@@ -91,12 +99,24 @@ object AresHomeReveal {
                 val t = it.animatedValue as Float
                 children.forEachIndexed { i, v ->
                     val local = ((t - i * stagger) / PER_ITEM_MS).coerceIn(0f, 1f)
-                    // Rise up from the bottom edge AND zoom in at the same time -- the entrance and the
-                    // zoom are concurrent, landing with a bounce.
-                    v.translationY = startDy[i] * (1f - riseInterp.getInterpolation(local))
-                    val s = START_SCALE + (1f - START_SCALE) * zoomInterp.getInterpolation(local)
-                    v.scaleX = s
-                    v.scaleY = s
+                    if (local <= RISE_PHASE) {
+                        // Phase 1: the whole cluster rises vertically, still bunched at centre, small.
+                        val u = riseInterp.getInterpolation(local / RISE_PHASE)
+                        val clusterY = startClusterY + (risenClusterY - startClusterY) * u
+                        v.translationX = clusterX - cellCx[i]
+                        v.translationY = clusterY - cellCy[i]
+                        v.scaleX = START_SCALE
+                        v.scaleY = START_SCALE
+                    } else {
+                        // Phase 2: zoom OUT -- spread from the risen cluster to the cell and scale up,
+                        // both on the overshoot so they bounce into place.
+                        val u = spreadInterp.getInterpolation((local - RISE_PHASE) / (1f - RISE_PHASE))
+                        v.translationX = (clusterX - cellCx[i]) * (1f - u)
+                        v.translationY = (risenClusterY - cellCy[i]) * (1f - u)
+                        val s = START_SCALE + (1f - START_SCALE) * u
+                        v.scaleX = s
+                        v.scaleY = s
+                    }
                 }
             }
             addListener(
