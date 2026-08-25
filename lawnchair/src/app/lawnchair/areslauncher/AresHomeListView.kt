@@ -723,6 +723,118 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     /**
+     * The CLOSE of one child -- the clean mirror of [playWpChildFall], played in FORWARD time (owner
+     * 2026-08-24: "apply the same principles ... they're a bit buggy and inconsistent"). The old close
+     * time-REVERSED the open, which flipped the settle overshoot into an outward lurch before the icon
+     * gathered in. Instead this runs its own two phases:
+     *   phase 1 (0..[WP_CLOSE_SEG]): the icon leaves its cell (0,0) and curves IN to the drop point,
+     *     along the same per-child Bezier the open used (control cxCtrl/cyCtrl), gathering speed;
+     *   phase 2 ([WP_CLOSE_SEG]..1): it RISES straight up from the drop point into its preview slot on
+     *     the folder face, shrinking to [startScale] and fading to 0 -- drawn back into the folder.
+     * Same per-child variation seed as the open (so an app closes consistently with how it opened) and
+     * the same card clamp. The tile ends invisible; the row is removed right after by finishCollapse.
+     */
+    private fun playWpChildClose(
+        v: View,
+        originX: Float,
+        originY: Float,
+        tipY: Float,
+        delayMs: Long,
+        durationMs: Long,
+        scaleMotion: Boolean,
+        tiltDeg: Float,
+        startScale: Float,
+        seed: Int,
+    ) {
+        val btv = (v as? ViewGroup)?.getChildAt(0) as? BubbleTextView
+        val iconPx = launcher.deviceProfile.iconSizePx.toFloat()
+        val pivotXv = btv?.let { it.left + it.width / 2f } ?: (v.width / 2f)
+        val pivotYv = btv?.let { it.top + it.paddingTop + iconPx / 2f } ?: (v.height / 2f)
+        v.pivotX = pivotXv
+        v.pivotY = pivotYv
+        val cx = v.left + pivotXv
+        val cy = v.top + pivotYv
+        val slotOffX = originX - cx // where it ends: the preview slot on the folder face
+        val slotOffY = originY - cy
+        // Per-child variation, SAME seeds as the open so the drop depth + arc match how it opened.
+        val rDrop = wpRnd(seed, 12.9898f)
+        val rBow = wpRnd(seed, 78.233f)
+        val rLift = wpRnd(seed, 55.31f)
+        val dropPx = WP_FALL_DROP_PX * (1f + (rDrop * 2f - 1f) * WP_FALL_DROP_JITTER)
+        val dropOffX = slotOffX // drop point is straight below the slot (same x)
+        val dropOffY = (tipY + dropPx * resources.displayMetrics.density) - cy
+        val cxCtrl = dropOffX * (1f - rBow * WP_FALL_BOW)
+        val cyCtrl = dropOffY * (WP_FALL_BOW_LIFT_MIN + rLift * WP_FALL_BOW_LIFT_SPAN)
+        val midScale = startScale + (1f - startScale) * WP_FALL_DROP_FRAC
+        val hasCard = folderBounds.cardContentRect(tmpCardRect)
+        val cardL = tmpCardRect.left
+        val cardR = tmpCardRect.right
+        val cardB = tmpCardRect.bottom
+        v.animate().cancel()
+        // Fade the label out as the icon lifts (it is leaving its place; row re-inflated fresh on bind).
+        btv?.createTextAlphaAnimator(false)?.setDuration(WP_TEXT_FADE_MS)?.start()
+
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            startDelay = delayMs
+            addUpdateListener { anim ->
+                val p = anim.animatedFraction
+                var x: Float; var y: Float; val s: Float; val al: Float; val rot: Float
+                if (p <= WP_CLOSE_SEG) {
+                    // Curve IN: cell (0,0) -> drop point, quadratic Bezier via the per-child control.
+                    val u = WP_CLOSE_IN_INTERP.getInterpolation((p / WP_CLOSE_SEG).coerceIn(0f, 1f))
+                    val omu = 1f - u
+                    x = 2f * omu * u * cxCtrl + u * u * dropOffX
+                    y = 2f * omu * u * cyCtrl + u * u * dropOffY
+                    s = lerpF(1f, midScale, u)
+                    al = 1f
+                    rot = lerpF(0f, tiltDeg, u) // tips over as it dives in
+                } else {
+                    // Rise INTO the folder: drop point -> preview slot, shrink + fade.
+                    val u = WP_CLOSE_RISE_INTERP.getInterpolation(
+                        ((p - WP_CLOSE_SEG) / (1f - WP_CLOSE_SEG)).coerceIn(0f, 1f),
+                    )
+                    x = lerpF(dropOffX, slotOffX, u)
+                    y = lerpF(dropOffY, slotOffY, u)
+                    s = lerpF(midScale, startScale, u)
+                    al = 1f - u
+                    rot = lerpF(tiltDeg, 0f, u)
+                }
+                if (hasCard) {
+                    // Keep the icon inside the folder background (sides + floor; top free, it rises out).
+                    val rad = iconPx * (if (scaleMotion) s else 1f) * 0.5f
+                    var cX = cx + x
+                    val loX = cardL + rad
+                    val hiX = cardR - rad
+                    if (hiX > loX) cX = cX.coerceIn(loX, hiX)
+                    var cY = cy + y
+                    val hiY = cardB - rad
+                    if (cY > hiY) cY = hiY
+                    x = cX - cx
+                    y = cY - cy
+                }
+                v.translationX = x
+                v.translationY = y
+                if (scaleMotion) { v.scaleX = s; v.scaleY = s }
+                v.rotation = rot
+                v.alpha = al
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    // End invisible at the folder; the row is about to be removed + recycled (which
+                    // resets transforms anyway).
+                    v.translationX = 0f
+                    v.translationY = 0f
+                    if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                    v.rotation = 0f
+                    v.alpha = 0f
+                }
+            })
+            start()
+        }
+    }
+
+    /**
      * WP accordion CLOSE (owner 2026-08-24) -- the exact reverse of [onWpFolderExpanded]. The opened
      * apps furl back UP into the folder tile (slide toward its bottom edge + fade + shrink) and the
      * card fades OUT, and only THEN (deferred by the adapter) do the rows get removed, the tiles
@@ -745,16 +857,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // Each child furls back to its OWN preview slot (mirror of the open), so it lands
             // pixel-exact where the restored preview icon will reappear. Reverse cascade: the FARTHEST
             // child leaves first, so the run zips back UP into the tile.
-            val hasSlot = wpChildStart(folderInfo, i, tmpStart)
-            playWpChildFall(
+            wpChildStart(folderInfo, i, tmpStart)
+            playWpChildClose(
                 v, tmpStart[0], tmpStart[1], tmpStart[2],
-                forward = false,
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
                 durationMs = WP_FALL_CLOSE_MS,
                 scaleMotion = scaleMotion,
                 tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
-                hasSlot = hasSlot,
                 seed = id,
             )
         }
@@ -2606,8 +2716,19 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // (segment 2). WP_FALL_SEG splits the two segments of one child's timeline.
         const val WP_FALL_MS = 650L // one child, open (drop+spread; owner: slightly slower)
         const val WP_FALL_STAGGER_MS = 54L // gap between successive children streaming out
-        const val WP_FALL_CLOSE_MS = 320L // one child, close (quicker -- M3 exits are faster)
-        const val WP_FALL_CLOSE_STAGGER_MS = 30L
+        // Close mirrors the open (owner 2026-08-24 "apply the same principles"): a clean FORWARD-time
+        // animation (NOT a time-reverse of the open, which flipped the settle overshoot into an
+        // outward lurch). One child: curve in from its cell to the drop point, then rise into the
+        // folder while shrinking + fading. A bit quicker than the 650ms open, but the same family.
+        const val WP_FALL_CLOSE_MS = 520L
+        const val WP_FALL_CLOSE_STAGGER_MS = 34L
+        const val WP_CLOSE_SEG = 0.56f // fraction of the close that is the curve-IN (rest = rise into folder)
+        /** Phase 1 (leave the cell, gather toward the drop point) accelerates. */
+        val WP_CLOSE_IN_INTERP: android.view.animation.Interpolator =
+            android.view.animation.AccelerateInterpolator(1.1f)
+        /** Phase 2 (rise into the folder + shrink + fade) accelerates -- the folder draws the icon in. */
+        val WP_CLOSE_RISE_INTERP: android.view.animation.Interpolator =
+            android.view.animation.AccelerateInterpolator(1.7f)
         const val WP_FALL_SEG = 0.44f // fraction of the timeline that is the fall (rest is the spread)
         const val WP_FALL_DROP_PX = 55f // dp the icon falls below the tip before spreading (owner tune)
         const val WP_FALL_TIP_SCALE = 0.3f // fallback start size (child past the 4 preview slots)
