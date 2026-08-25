@@ -427,7 +427,13 @@ class AresSearchContainerView @JvmOverloads constructor(
      * the pane shows (resetSearch already collapses on close, but a cancelled transition can skip it).
      */
     private fun applyState(state: LauncherState, animate: Boolean) {
-        val onAppList = state == LauncherState.ALL_APPS
+        // The persistent unfolded app-list PANE never enters LauncherState.ALL_APPS -- it lives in
+        // the workspace (NORMAL) as panel 1 -- so the stock ALL_APPS gate would keep its fob
+        // permanently GONE (measured: vis=8 on the pane's fob, which is why it never appeared). The
+        // pane's fob is owned by that pane and exists only while the pane is attached (unfolded), so
+        // gate it open whenever it belongs to the pane. The FOLDED sheet's fob keeps the ALL_APPS
+        // gate: it floats over the home screen and must stay hidden off the app list.
+        val onAppList = appsView is AresPanelAllAppsContainerView || state == LauncherState.ALL_APPS
         gateOpen = onAppList
         animateVisibility(onAppList, animate)
         if (!onAppList && expanded) collapse()
@@ -500,6 +506,15 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     override fun initializeSearch(containerView: ActivityAllAppsContainerView<*>) {
         appsView = containerView
+
+        // Ownership (folded sheet vs persistent pane) is only known once appsView is set, and this
+        // can run AFTER onAttachedToWindow's first applyState (which then gated on ALL_APPS with
+        // appsView still null and left the pane's fob GONE). Re-evaluate the gate now that we know:
+        // the pane's fob is permitted even in NORMAL. Harmless before attach -- onAttachedToWindow
+        // re-applies with appsView set either way.
+        if (isAttachedToWindow) {
+            applyState(Launcher.getLauncher(context).stateManager.state, animate = false)
+        }
 
         // Highlight the top result as the default selection (owner). Drawn behind the first result
         // row of the search recycler; toggled from the search callback below.
