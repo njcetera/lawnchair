@@ -113,7 +113,7 @@
     <dimen name="ares_search_collapsed_size">56dp</dimen>
     <!-- Extra touch slop around the collapsed corner fob, so it is easy to hit without growing the
          visible circle (owner 2026-08-25). Applied as a TouchDelegate, collapsed state only. -->
-    <dimen name="ares_search_touch_expand">16dp</dimen>
+    <dimen name="ares_search_touch_expand">28dp</dimen>
     <dimen name="ares_search_icon_padding">16dp</dimen>
     <dimen name="ares_search_input_start_margin">24dp</dimen>
 

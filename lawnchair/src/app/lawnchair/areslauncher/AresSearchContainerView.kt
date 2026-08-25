@@ -314,7 +314,13 @@ class AresSearchContainerView @JvmOverloads constructor(
         // margins moved into PADDING (owner 2026-08-25): the container's bounds then reach into the
         // corner and edge, so the enlarged tap target ([refreshCollapsedTouchTarget]) can cover them,
         // while the pill still draws exactly where it did (end|bottom against the padded content box).
-        lp.height = collapsedSize + marginBottom
+        //
+        // The EXTRA height on top -- touchExpand ABOVE the pill (owner 2026-08-25 "increase it
+        // vertically so it goes slightly above the fob") -- is headroom the delegate can grow up
+        // into. Without it the container top sits ON the pill top, so the hit rect clamped there and
+        // no amount of slop reached above the fob. Bottom gravity keeps the pill drawn in place.
+        val touchExpand = resources.getDimensionPixelSize(R.dimen.ares_search_touch_expand)
+        lp.height = collapsedSize + marginBottom + touchExpand
         lp.gravity = android.view.Gravity.BOTTOM
         lp.marginStart = marginHorizontal
         lp.marginEnd = 0
