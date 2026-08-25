@@ -455,6 +455,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         setEditChromeAlpha(view, 0f)
     }
 
+    /**
+     * While a folder is inline-expanded, only its own children may be picked up -- an OUTSIDE tile
+     * must not start a drag (owner 2026-08-25: "I can still drag apps outside the folder toward the
+     * folder"). That is the interaction half of the focus wash: the dim SAYS the rest is inert, this
+     * MAKES it inert, so a press-and-hold on an outside app scrolls instead of dragging into a
+     * cross-boundary move we do not support. No folder open -> normal rules.
+     */
+    private fun dragAllowedWhileFolderOpen(child: View?): Boolean {
+        val fid = aresAdapter.expandedWpFolder()
+        if (fid == -1) return true
+        val pos = child?.let { getChildAdapterPosition(it) } ?: return false
+        if (pos == NO_POSITION) return false
+        // Only the open folder's children (container == its id) are draggable; the folder tile and
+        // every other home tile are locked while it is open.
+        return aresAdapter.itemAt(pos)?.container == fid
+    }
+
     /** Restores a frozen tile's wiggle and edit chrome when the folder closes (or it recycles). */
     private fun unfreezeTile(view: View) {
         if (!frozenTiles.remove(view)) return
@@ -2112,7 +2129,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // A gesture that began on the chevron is a resize tap, not a drag handle --
                     // otherwise the smallest wobble while tapping would pick the widget up.
                     if (editMode && !dragStarted && movedPastSlop && !downOnChevron &&
-                        !pickUpForfeited && (enteredEditModeDuringGesture || heldLongEnough())
+                        !pickUpForfeited && (enteredEditModeDuringGesture || heldLongEnough()) &&
+                        dragAllowedWhileFolderOpen(downOnChild)
                     ) {
                         // getChildViewHolder THROWS IllegalArgumentException for a view that is no
                         // longer a direct child, and downOnChild was captured at ACTION_DOWN -- a
