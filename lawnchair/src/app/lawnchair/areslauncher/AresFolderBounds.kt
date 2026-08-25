@@ -134,7 +134,10 @@ class AresFolderBounds(
     }
 
     private companion object {
-        const val ENTER_MS = 300f // M3 medium-2
-        const val ENTER_DELAY_MS = 50L // let the reflow lead; content follows
+        const val ENTER_MS = 260f // M3 medium
+        // The content is sequenced AFTER the icon morph and the tiles-below reflow (owner 2026-08-24):
+        // the gap opens empty, THEN the card + apps unfurl into it. So there is never a card sitting
+        // under a sliding tile. Matches WP_CHILD_ENTER_DELAY_MS.
+        const val ENTER_DELAY_MS = 240L
     }
 }

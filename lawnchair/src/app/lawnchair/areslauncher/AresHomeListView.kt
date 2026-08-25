@@ -73,6 +73,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     init {
         layoutManager = masonry
         adapter = aresAdapter
+        // The masonry owns every move/insert/remove animation explicitly (animateNextRelayout, the
+        // WP child unfurl, edit-mode reflow). The default RecyclerView ItemAnimator would ALSO
+        // animate the same moves on its own ~250ms curve, double-animating each shifted tile -- which
+        // made the tiles below an opening folder keep sliding past our own reflow and collide with
+        // the revealed content (owner 2026-08-24). Drop it so the masonry is the sole animator.
+        itemAnimator = null
         clipToPadding = false
         // §11c. Goes through super because our own setPadding() is a deliberate no-op (see below):
         // ShortcutAndWidgetContainer would otherwise clobber this on every measure pass.
@@ -415,20 +421,26 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // owned by the edit-mode cue (EDIT_MODE_SCALE); there the apps just fade.
         val scaleEnter = !isEditMode()
         post {
+            // Shared origin: the apps start stacked at the folder tile's bottom edge and slide DOWN
+            // to their cells, so they read as unfurling out of the folder (owner 2026-08-24). The
+            // whole reveal is DELAYED past the icon morph and the tiles-below reflow, so the apps
+            // drop into an already-opened gap rather than crossing the still-moving tiles.
+            val folderBottom = findViewHolderForItemId(folderInfo.id.toLong())?.itemView?.bottom
             childIds.forEachIndexed { i, id ->
                 val holder = findViewHolderForItemId(id.toLong()) ?: return@forEachIndexed
                 val v = holder.itemView
-                // M3 "fade through" enter for the opened apps: fade in with a small scale-up from
-                // their own centre, on the emphasized-decelerate curve, staggered. The stagger plus
-                // the scale reads as the apps materialising into the card AFTER the tiles below have
-                // begun sliding clear -- so they no longer ghost under the moving tiles.
                 v.alpha = 0f
                 if (scaleEnter) {
                     v.scaleX = WP_CHILD_ENTER_SCALE
                     v.scaleY = WP_CHILD_ENTER_SCALE
                 }
+                if (folderBottom != null) {
+                    // Start at the folder's bottom (a hair above its final cell), never below it.
+                    v.translationY = (folderBottom - v.top).toFloat().coerceAtMost(0f)
+                }
                 val anim = v.animate()
                     .alpha(1f)
+                    .translationY(0f)
                     .setInterpolator(WP_ENTER_EASING)
                     .setStartDelay(WP_CHILD_ENTER_DELAY_MS + i * WP_CHILD_FADE_STAGGER_MS)
                     .setDuration(WP_CHILD_FADE_MS)
@@ -2266,7 +2278,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         const val WP_CHILD_FADE_MS = 250L // M3 medium-1
         const val WP_CHILD_FADE_STAGGER_MS = 30L
         const val WP_CHILD_ENTER_SCALE = 0.85f // fade-through incoming scale
-        const val WP_CHILD_ENTER_DELAY_MS = 50L // follow the container/reflow, not lead it
+        // Start the apps AFTER the icon morph (220ms) and the reflow (LAYOUT_ANIM_MS 200ms) have both
+        // fully settled, so they unfurl into an already-cleared gap and never cross a moving tile
+        // (owner 2026-08-24).
+        const val WP_CHILD_ENTER_DELAY_MS = 240L
         /** M3 emphasized-decelerate, for content entering the screen. */
         val WP_ENTER_EASING: android.view.animation.Interpolator =
             android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
