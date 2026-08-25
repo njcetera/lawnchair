@@ -3,7 +3,6 @@ package app.lawnchair.areslauncher
 import android.animation.ValueAnimator
 import android.view.View
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.Launcher
 
@@ -35,10 +34,28 @@ object AresHomeReveal {
     private const val START_Y_FRAC = 0.82f      // the cluster starts this far down the screen
     private const val RISEN_Y_FRAC = 0.50f      // and rises to here before it zooms out
     private const val RISE_PHASE = 0.42f        // fraction of an item's life spent rising (grouped)
-    private const val BOUNCE_TENSION = 2.4f     // playful overshoot on the zoom-out
+    // Per-item variation (like the folder open's wpRnd) so the spread reads organic, not in lockstep.
+    private const val PACE_JITTER = 0.16f       // ±16% on each item's duration
+    private const val BOUNCE_MIN = 1.8f         // per-item settle overshoot, low end
+    private const val BOUNCE_SPAN = 1.4f        // ...to BOUNCE_MIN+SPAN, seeded per item
+    private const val BOW_X_MIN = 0.35f         // Bézier control fraction along x (curve, per item)
+    private const val BOW_X_SPAN = 0.45f
+    private const val BOW_Y_MIN = 0.12f         // ...and along y, so the path arcs rather than straight
+    private const val BOW_Y_SPAN = 0.42f
 
     private val riseInterp = DecelerateInterpolator(1.5f)            // the grouped rise up
-    private val spreadInterp = OvershootInterpolator(BOUNCE_TENSION) // the zoom-out + spread, with bounce
+
+    /** Deterministic 0..1 hash per item index + salt (the folder open's wpRnd, standalone here). */
+    private fun rnd(i: Int, salt: Float): Float {
+        val x = kotlin.math.sin(i * 12.9898f + salt) * 43758.5453f
+        return x - kotlin.math.floor(x)
+    }
+
+    /** OvershootInterpolator's curve, inlined so each item can carry its own [tension]. */
+    private fun overshoot(t: Float, tension: Float): Float {
+        val u = t - 1f
+        return u * u * ((tension + 1f) * u + tension) + 1f
+    }
 
     private var running: ValueAnimator? = null
 
@@ -74,9 +91,19 @@ object AresHomeReveal {
         // scales up with a bounce). Cell centres captured so the offsets can be computed each frame.
         val cellCx = FloatArray(children.size)
         val cellCy = FloatArray(children.size)
+        // Per-item variation seeds (deterministic) -- pace, settle overshoot, and Bézier bow -- so the
+        // spread reads organic and fluid like the folder-open fall, not a rigid formation.
+        val pace = FloatArray(children.size)
+        val tension = FloatArray(children.size)
+        val bowX = FloatArray(children.size)
+        val bowY = FloatArray(children.size)
         children.forEachIndexed { i, v ->
             cellCx[i] = v.left + v.width / 2f
             cellCy[i] = v.top + v.height / 2f
+            pace[i] = 1f + (rnd(i, 12.9898f) * 2f - 1f) * PACE_JITTER
+            tension[i] = BOUNCE_MIN + rnd(i, 78.233f) * BOUNCE_SPAN
+            bowX[i] = BOW_X_MIN + rnd(i, 3.17f) * BOW_X_SPAN
+            bowY[i] = BOW_Y_MIN + rnd(i, 41.7f) * BOW_Y_SPAN
             v.pivotX = v.width / 2f
             v.pivotY = v.height / 2f
             v.scaleX = START_SCALE
@@ -85,12 +112,13 @@ object AresHomeReveal {
             v.translationY = startClusterY - cellCy[i]
         }
 
+        val budget = PER_ITEM_MS * (1f + PACE_JITTER) // the slowest-paced item's full duration
         val staggerSpan = STAGGER_MS * (children.size - 1).coerceAtLeast(0)
-        val total = (PER_ITEM_MS + staggerSpan).toLong().coerceAtMost(MAX_TOTAL_MS)
-        val stagger = if (PER_ITEM_MS + staggerSpan <= MAX_TOTAL_MS) {
+        val total = (budget + staggerSpan).toLong().coerceAtMost(MAX_TOTAL_MS)
+        val stagger = if (budget + staggerSpan <= MAX_TOTAL_MS) {
             STAGGER_MS
         } else {
-            ((MAX_TOTAL_MS - PER_ITEM_MS) / (children.size - 1).coerceAtLeast(1))
+            ((MAX_TOTAL_MS - budget) / (children.size - 1).coerceAtLeast(1))
         }
 
         running = ValueAnimator.ofFloat(0f, total.toFloat()).apply {
@@ -98,7 +126,7 @@ object AresHomeReveal {
             addUpdateListener {
                 val t = it.animatedValue as Float
                 children.forEachIndexed { i, v ->
-                    val local = ((t - i * stagger) / PER_ITEM_MS).coerceIn(0f, 1f)
+                    val local = ((t - i * stagger) / (PER_ITEM_MS * pace[i])).coerceIn(0f, 1f)
                     if (local <= RISE_PHASE) {
                         // Phase 1: the whole cluster rises vertically, still bunched at centre, small.
                         val u = riseInterp.getInterpolation(local / RISE_PHASE)
@@ -108,11 +136,18 @@ object AresHomeReveal {
                         v.scaleX = START_SCALE
                         v.scaleY = START_SCALE
                     } else {
-                        // Phase 2: zoom OUT -- spread from the risen cluster to the cell and scale up,
-                        // both on the overshoot so they bounce into place.
-                        val u = spreadInterp.getInterpolation((local - RISE_PHASE) / (1f - RISE_PHASE))
-                        v.translationX = (clusterX - cellCx[i]) * (1f - u)
-                        v.translationY = (risenClusterY - cellCy[i]) * (1f - u)
+                        // Phase 2: zoom OUT along a CURVED path with a per-item settle spring. A
+                        // quadratic Bézier carries each tile from the risen cluster (P0) to its cell
+                        // (P2 = 0,0) through a per-item control point (P1) so it arcs rather than sliding
+                        // straight; u overshoots past 1 (per-item tension) then springs back = bounce.
+                        val u = overshoot(((local - RISE_PHASE) / (1f - RISE_PHASE)).coerceIn(0f, 1f), tension[i])
+                        val p0x = clusterX - cellCx[i]
+                        val p0y = risenClusterY - cellCy[i]
+                        val ctrlX = p0x * bowX[i]
+                        val ctrlY = p0y * bowY[i]
+                        val omu = 1f - u
+                        v.translationX = omu * omu * p0x + 2f * omu * u * ctrlX
+                        v.translationY = omu * omu * p0y + 2f * omu * u * ctrlY
                         val s = START_SCALE + (1f - START_SCALE) * u
                         v.scaleX = s
                         v.scaleY = s
