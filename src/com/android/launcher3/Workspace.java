@@ -1662,6 +1662,19 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (isTrackpadMultiFingerSwipe(ev)) {
             return false;
         }
+        // AresLauncher §4: while the grid is in edit mode the workspace must never page. Strategy D
+        // flattens every CONTAINER_DESKTOP item onto a single home list on page 0; any further
+        // screen id exists only to satisfy the loader's cellX/cellY validation and renders as a
+        // blank CellLayout (see pruneAresStrayPages). In NORMAL that page is unreachable because
+        // AresPaneSwipeController claims horizontal drags before any child view sees them -- but in
+        // edit mode that controller stands down (a horizontal drag means "move this item"), which
+        // uncovered the stray page: a horizontal swipe on empty space paged the PagedView straight
+        // to it (owner report 2026-08-25). Declining interception here leaves the gesture with the
+        // grid, where a reorder can pick it up and empty space simply does nothing -- and it also
+        // keeps edit mode from opening the Discover-feed overlay, which paging would otherwise reach.
+        if (isAresEditMode()) {
+            return false;
+        }
         return super.onInterceptTouchEvent(ev);
     }
 
