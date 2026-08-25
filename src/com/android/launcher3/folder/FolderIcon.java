@@ -613,6 +613,19 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         return mBackground;
     }
 
+    /**
+     * Ares: the centre of the folder's preview cluster (where the mini member icons are drawn) in this
+     * FolderIcon's own coordinates, plus its size. The WP inline-open animation starts each app tile
+     * HERE -- on the folder's face, where its preview icon sits -- rather than at the teardrop tip
+     * below it, so the previews read as converting into the app icons that leave the folder (owner
+     * 2026-08-24). out = {centreX, centreY, previewSize}.
+     */
+    public void getAresPreviewCenter(float[] out) {
+        out[0] = mBackground.basePreviewOffsetX + mBackground.previewSize / 2f;
+        out[1] = mBackground.basePreviewOffsetY + mBackground.previewSize / 2f;
+        out[2] = mBackground.previewSize;
+    }
+
     public PreviewItemManager getPreviewItemManager() {
         return mPreviewItemManager;
     }

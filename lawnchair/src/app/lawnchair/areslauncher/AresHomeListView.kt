@@ -434,11 +434,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // appears small at the teardrop's tip, drops into the card, then spreads + enlarges to
             // its cell. Staggered so they stream out one after another. Delayed past the icon morph
             // and the tiles-below reflow, so they fall into an already-opened gap.
-            val tip = wpTeardropTip(folderInfo) ?: return@post
+            val o = wpFallOrigin(folderInfo) ?: return@post
             childIds.forEachIndexed { i, id ->
                 val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@forEachIndexed
                 playWpChildFall(
-                    v, tip.first, tip.second,
+                    v, o[0], o[1], o[2],
                     forward = true,
                     delayMs = WP_CHILD_ENTER_DELAY_MS + i * WP_FALL_STAGGER_MS,
                     durationMs = WP_FALL_MS,
@@ -457,9 +457,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     fun animateWpChildEnter(folderInfo: FolderInfo, id: Int) {
         post {
             val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@post
-            val tip = wpTeardropTip(folderInfo) ?: return@post
+            val o = wpFallOrigin(folderInfo) ?: return@post
             playWpChildFall(
-                v, tip.first, tip.second,
+                v, o[0], o[1], o[2],
                 forward = true,
                 delayMs = 0L,
                 durationMs = WP_FALL_MS,
@@ -469,24 +469,39 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
     }
 
-    /** The teardrop's tip in this list's coordinate space: bottom-centre of the folder tile. */
-    private fun wpTeardropTip(folderInfo: FolderInfo): Pair<Float, Float>? {
+    private val tmpPreview = FloatArray(3)
+
+    /**
+     * The fall's geometry in this list's coordinate space: {originX, originY, tipY}. The ORIGIN is the
+     * centre of the folder's PREVIEW cluster -- on the folder's face, where its mini member icons are
+     * drawn -- so an app tile starts exactly where its preview sits and reads as the preview converting
+     * into it (owner 2026-08-24), rather than materialising at the teardrop tip below the folder. tipY
+     * is still the teardrop tip (folder tile bottom), the reference for the mid-fall drop point.
+     */
+    private fun wpFallOrigin(folderInfo: FolderInfo): FloatArray? {
         val fv = findViewHolderForItemId(folderInfo.id.toLong())?.itemView ?: return null
-        return (fv.left + fv.width / 2f) to fv.bottom.toFloat()
+        val tipY = fv.bottom.toFloat()
+        val icon = (fv as? ViewGroup)?.getChildAt(0) as? FolderIcon
+        if (icon != null) {
+            icon.getAresPreviewCenter(tmpPreview)
+            return floatArrayOf(fv.left + icon.left + tmpPreview[0], fv.top + icon.top + tmpPreview[1], tipY)
+        }
+        return floatArrayOf(fv.left + fv.width / 2f, tipY, tipY) // fallback: the tip (old behaviour)
     }
 
     /**
      * The signature WP folder motion: a child icon FALLS out of the folder icon. It appears small at
-     * the teardrop's [tipX]/[tipY], drops a short way into the card ([WP_FALL_DROP_PX]) under gravity,
-     * then spreads + enlarges to its cell on an emphasized-decelerate settle. [forward]=false walks
-     * the same path backwards for the close (icon rises from its cell, gathers under the teardrop,
-     * then rises through it into the folder icon and fades). Driven by one ValueAnimator per child in
-     * "offset from the laid-out cell" space (translation 0 == the cell) so it lands exactly on the
-     * real layout with no drift. ValueAnimator honours the system animator duration scale.
+     * its PREVIEW slot on the folder's face ([originX]/[originY]), drops through the teardrop toward
+     * the card (down to [tipY] + [WP_FALL_DROP_PX]) under gravity, then spreads + enlarges to its cell
+     * on a bouncy settle. [forward]=false walks the same path backwards for the close (icon rises from
+     * its cell, gathers under the teardrop, then rises back into the folder's preview and fades).
+     * Driven by one ValueAnimator per child in "offset from the laid-out cell" space (translation 0 ==
+     * the cell) so it lands exactly on the real layout with no drift. Honours the animator scale.
      */
     private fun playWpChildFall(
         v: View,
-        tipX: Float,
+        originX: Float,
+        originY: Float,
         tipY: Float,
         forward: Boolean,
         delayMs: Long,
@@ -498,9 +513,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         v.pivotY = v.height / 2f
         val cx = v.left + v.width / 2f
         val cy = v.top + v.height / 2f
-        val tipOffX = tipX - cx
-        val tipOffY = tipY - cy
-        val dropOffX = tipX - cx // drop straight down from the tip
+        val startOffX = originX - cx
+        val startOffY = originY - cy
+        val dropOffX = originX - cx // drop straight down from the preview origin
         val dropOffY = (tipY + WP_FALL_DROP_PX * resources.displayMetrics.density) - cy
         v.animate().cancel()
 
@@ -519,8 +534,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Pre-set the tile to its start frame so it is not briefly visible at its cell during the
         // stagger delay (open only; on close it legitimately starts at the cell).
         if (forward) {
-            v.translationX = tipOffX
-            v.translationY = tipOffY
+            v.translationX = startOffX
+            v.translationY = startOffY
             if (scaleMotion) { v.scaleX = WP_FALL_TIP_SCALE; v.scaleY = WP_FALL_TIP_SCALE }
             v.rotation = tiltDeg
             v.alpha = 0f
@@ -534,8 +549,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 val x: Float; val y: Float; val s: Float; val al: Float; val rot: Float
                 if (t <= WP_FALL_SEG) {
                     val u = WP_FALL_FALL_INTERP.getInterpolation((t / WP_FALL_SEG).coerceIn(0f, 1f))
-                    x = lerpF(tipOffX, dropOffX, u)
-                    y = lerpF(tipOffY, dropOffY, u)
+                    x = lerpF(startOffX, dropOffX, u)
+                    y = lerpF(startOffY, dropOffY, u)
                     s = lerpF(WP_FALL_TIP_SCALE, WP_FALL_DROP_SCALE, u)
                     al = (u * 2f).coerceIn(0f, 1f) // fade in over the first half of the fall
                     rot = tiltDeg // hold the tilt while it tumbles out
@@ -591,7 +606,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return 0
         val scaleMotion = !isEditMode()
-        val tip = wpTeardropTip(folderInfo) ?: return 0
+        val o = wpFallOrigin(folderInfo) ?: return 0
         val n = childIds.size
         var any = false
         childIds.forEachIndexed { i, id ->
@@ -599,7 +614,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             any = true
             // Reverse cascade: the FARTHEST child leaves first, so the run zips back UP into the tile.
             playWpChildFall(
-                v, tip.first, tip.second,
+                v, o[0], o[1], o[2],
                 forward = false,
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
                 durationMs = WP_FALL_CLOSE_MS,
