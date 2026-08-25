@@ -20,9 +20,13 @@ import com.android.launcher3.Launcher
  */
 object AresHomeReveal {
 
-    /** When true, the reveal fires on every home appearance (the guarded onResume hook). */
+    /**
+     * When true, the reveal fires on every home appearance (the guarded onResume hook). Default ON
+     * (owner 2026-08-25, graduated from spike after the feel passes). The `ares-home-reveal` channel
+     * can still toggle it at runtime for A/B checks.
+     */
     @JvmField
-    var enabled = false
+    var enabled = true
 
     // Feel. All one-line tunable.
     private const val START_SCALE = 0.26f       // size while bunched at the cluster, before zoom-out
