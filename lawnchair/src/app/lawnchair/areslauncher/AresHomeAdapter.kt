@@ -891,6 +891,29 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
+     * Splice a just-added member into an already-OPEN folder's run so it appears immediately, rather
+     * than only after the next reload (owner bug 2026-08-24: "adding apps to the folder will not
+     * render them if the folder is already open"). No-op unless [folderInfo] is the expanded folder.
+     * The item's container is already the folder id (addFolderContent set it) so it binds as a child
+     * -- fresh-inflated by onBindViewHolder, which is why its icon renders correctly (bug: added apps'
+     * icons sometimes missing was the run never rebinding the row at all). Inserted at the END of the
+     * run to match the append rank addFolderContent gives it, then the tiles below reflow down and the
+     * new tile animates in.
+     */
+    fun addChildToExpandedRun(folderInfo: FolderInfo, item: ItemInfo) {
+        if (expandedWpFolderId != folderInfo.id) return
+        val folderRow = items.indexOfFirst { it.id == folderInfo.id }
+        if (folderRow < 0) return
+        if (items.any { it.id == item.id && it.container == folderInfo.id }) return // already spliced
+        var insertAt = folderRow + 1
+        while (insertAt < items.size && items[insertAt].container == folderInfo.id) insertAt++
+        items.add(insertAt, item)
+        notifyItemInserted(insertAt)
+        launcher.workspace?.aresHomeList?.animateNextRelayout()
+        launcher.workspace?.aresHomeList?.animateWpChildEnter(item.id)
+    }
+
+    /**
      * WP folders reorder-inside (design/wp-phase2-spike.md): persist the new intra-folder order of
      * [folderId]'s children from their CURRENT adapter order (the contiguous `container == folderId`
      * run left by an in-folder drag). Writes folder-local ranks via `moveItemsInDatabase` -- the

@@ -839,6 +839,9 @@ object AresFolderDrop {
         Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id}")
         list.post {
             list.aresAdapter.removeItems { it.id == item.id }
+            // If this folder is inline-OPEN, splice the new member into its run so it renders now,
+            // not only after a reload (owner bug 2026-08-24). No-op when the folder is collapsed.
+            list.aresAdapter.addChildToExpandedRun(folderInfo, item)
             // As in createFolder: this lands after the drag, so spring the tiles closing the gap.
             list.animateNextRelayout()
             AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())

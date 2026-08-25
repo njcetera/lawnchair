@@ -187,6 +187,16 @@ object AresTestInfo {
     const val REQUEST_WP_EXPAND = "ares-wp-expand"
 
     /**
+     * WP folders: move an existing grid app into a folder and (if the folder is OPEN) splice it into
+     * the run, exercising the RENDER path [AresHomeAdapter.addChildToExpandedRun] without the flaky
+     * dwell gesture (owner bug 2026-08-24: an app added to an already-open folder did not render).
+     * `arg` is `"<folderId>,<appId>"`. Does the minimal in-memory model move (container+rank) plus the
+     * adapter splice; persistence is the real dwell path's job and the owner-Pixel gate. Returns
+     * `added=<id>|contents=<n>|run=<range>`.
+     */
+    const val REQUEST_WP_ADD_CHILD = "ares-wp-add-child"
+
+    /**
      * WP folders Phase 3 #3: the packer's placement of EVERY item, one `id|x,y` per adapter
      * position in order, so the reserved-run block (folder + children contiguous) can be verified
      * off-screen too. Lets a test assert the children pack immediately after the folder in row-major
@@ -325,6 +335,10 @@ object AresTestInfo {
         REQUEST_WP_EXPAND -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpExpand(launcher, arg) },
+        )
+        REQUEST_WP_ADD_CHILD -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpAddChild(launcher, arg) },
         )
         REQUEST_PACK_CELLS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
@@ -499,6 +513,27 @@ object AresTestInfo {
         if (!folder.isAresWpFolder) return "not-wp"
         val expanded = list.aresAdapter.toggleWpFolder(folder)
         return "expanded=$expanded|contents=${folder.getContents().size}"
+    }
+
+    /** See [REQUEST_WP_ADD_CHILD]. Render-path check for adding into an OPEN folder (no gesture). */
+    private fun wpAddChild(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val comma = arg?.indexOf(',') ?: -1
+        if (comma < 0) return "bad-arg"
+        val fid = arg!!.substring(0, comma).trim().toIntOrNull() ?: return "bad-fid"
+        val aid = arg.substring(comma + 1).trim().toIntOrNull() ?: return "bad-aid"
+        val snap = list.aresAdapter.snapshot()
+        val folder = snap.firstOrNull { it.id == fid } as? FolderInfo ?: return "no-folder($fid)"
+        if (!folder.isAresWpFolder) return "not-wp"
+        val item = snap.firstOrNull { it.id == aid } ?: return "no-item($aid)"
+        if (item is FolderInfo) return "item-is-folder"
+        // Minimal in-memory model move so the row reads as this folder's child.
+        item.container = fid
+        item.rank = folder.getContents().size
+        if (folder.getContents().none { it.id == aid }) folder.add(item)
+        list.aresAdapter.removeItems { it.id == aid }
+        list.aresAdapter.addChildToExpandedRun(folder, item)
+        return "added=$aid|contents=${folder.getContents().size}|run=${list.aresAdapter.expandedRunRange()}"
     }
 
     /** See [REQUEST_WP_RENAME]. Drives the persistence path; the dialog's feel is the owner gate. */

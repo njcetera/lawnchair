@@ -458,6 +458,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     /**
+     * Entrance for a SINGLE child added to an already-open folder (dwell-add while expanded). Same M3
+     * fade-through the open uses, but posted for just this one tile once its holder exists.
+     */
+    fun animateWpChildEnter(id: Int) {
+        post {
+            val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@post
+            v.alpha = 0f
+            if (!isEditMode()) {
+                v.scaleX = WP_CHILD_ENTER_SCALE
+                v.scaleY = WP_CHILD_ENTER_SCALE
+            }
+            val anim = v.animate()
+                .alpha(1f)
+                .setInterpolator(WP_ENTER_EASING)
+                .setStartDelay(0L)
+                .setDuration(WP_CHILD_FADE_MS)
+            if (!isEditMode()) anim.scaleX(1f).scaleY(1f)
+            anim.start()
+        }
+    }
+
+    /**
      * WP accordion CLOSE (owner 2026-08-24) -- the exact reverse of [onWpFolderExpanded]. The opened
      * apps furl back UP into the folder tile (slide toward its bottom edge + fade + shrink) and the
      * card fades OUT, and only THEN (deferred by the adapter) do the rows get removed, the tiles
