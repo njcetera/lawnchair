@@ -58,14 +58,19 @@ object AresAllApps {
         } else {
             R.dimen.ares_app_list_top_padding_sheet
         }
-        // The ergonomic top band (one-handed reach on the folded handheld) is dropped on the
-        // UNFOLDED pane (isWorkspacePanel): there the pane is a fixed page of the workspace and the
-        // owner wants the single-column list to reach the pane's top edge, not sit a band below it
-        // (owner 2026-08-25, "reach the top and bottom edge like when it's closed"). The folded
-        // app-list sheet keeps the band. Bottom is dropped in the same posture -- see
-        // ActivityAllAppsContainerView.applyAdapterSideAndBottomPaddings.
-        val ergo = if (isWorkspacePanel) 0 else ergoTopPaddingPx(launcher)
-        return launcher.resources.getDimensionPixelSize(dimen) + ergo
+        // UNFOLDED pane (isWorkspacePanel): the pane is extended past its cell up behind the status
+        // bar (AresPanelAllAppsContainerView.onMeasure), so the app list flows to the physical top
+        // edge like the folded full-screen sheet (owner 2026-08-25, "reach the top and bottom edge
+        // like when it's closed"). The recycler's top padding must EQUAL that extension --
+        // insets.top + workspacePadding.top -- so content still RESTS at the cell's top while
+        // clipToPadding=false lets it scroll up behind the status bar. No ergonomic band here (that
+        // was one-handed reach on the folded handheld). The folded sheet keeps the band. Bottom is
+        // handled the same way in ActivityAllAppsContainerView.applyAdapterSideAndBottomPaddings.
+        if (isWorkspacePanel) {
+            val dp = launcher.deviceProfile
+            return dp.insets.top + dp.workspacePadding.top
+        }
+        return launcher.resources.getDimensionPixelSize(dimen) + ergoTopPaddingPx(launcher)
     }
 
     /**

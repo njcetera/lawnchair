@@ -1557,18 +1557,26 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
 
     private void applyAdapterSideAndBottomPaddings(DeviceProfile grid) {
         int stockBottomPadding = Math.max(mInsets.bottom, mNavBarScrimHeight);
-        // Ergonomic scroll room at the bottom of the launcher's app list (owner): rows can scroll
-        // clear of the nav gesture area and the corner search pill. Applied to the FOLDED app-list
-        // sheet (isAresAppListPane && !isAresWorkspacePanel), but dropped on the UNFOLDED pane, where
-        // the owner wants the single-column list to reach the pane's bottom edge rather than sit a
-        // band above it (owner 2026-08-25, "reach the top and bottom edge like when it's closed").
-        // The top band is dropped in the same posture -- see AresAllApps.appListTopPaddingPx. The
-        // Taskbar sheet and secondary-display host (not isAresAppListPane) keep stock padding. Kept as
-        // a single assignment so it stays effectively final for the lambda below.
-        final int bottomPadding =
-                (AresAllApps.isAresAppListPane(mActivityContext) && !isAresWorkspacePanel())
-                ? stockBottomPadding + AresAllApps.ergoBottomPaddingPx(getContext())
-                : stockBottomPadding;
+        // Bottom padding for the launcher's app list. Three cases, one assignment so it stays
+        // effectively final for the lambda below:
+        //  - UNFOLDED pane (isAresWorkspacePanel): the pane is extended DOWN past its cell behind the
+        //    nav/hotseat (AresPanelAllAppsContainerView.onMeasure) so the list reaches the physical
+        //    bottom edge like the folded sheet (owner 2026-08-25). The recycler's bottom padding must
+        //    EQUAL that extension -- insets.bottom + workspacePadding.bottom -- so content RESTS at
+        //    the cell's bottom while clipToPadding=false lets it scroll behind.
+        //  - FOLDED app-list sheet: the ergonomic one-handed-reach band on top of the stock inset.
+        //  - Taskbar / secondary-display host: stock inset.
+        final int bottomPadding;
+        if (AresAllApps.isAresAppListPane(mActivityContext)) {
+            if (isAresWorkspacePanel()) {
+                DeviceProfile dp = mActivityContext.getDeviceProfile();
+                bottomPadding = dp.getInsets().bottom + dp.workspacePadding.bottom;
+            } else {
+                bottomPadding = stockBottomPadding + AresAllApps.ergoBottomPaddingPx(getContext());
+            }
+        } else {
+            bottomPadding = stockBottomPadding;
+        }
         mAH.forEach(adapterHolder -> {
             adapterHolder.mPadding.bottom = bottomPadding;
             adapterHolder.mPadding.left = grid.allAppsPadding.left;

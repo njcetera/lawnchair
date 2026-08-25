@@ -80,14 +80,28 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // than from our measured size.
         val host = parent as? ViewGroup
         val width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
-        val height = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+        val cellHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+
+        // Extend the pane PAST its workspace cell -- up behind the status bar and down behind the
+        // nav/hotseat -- so the app list reaches the physical screen edges and scrolled rows flow
+        // behind those bars, exactly the folded full-screen sheet's behaviour (owner 2026-08-25,
+        // "reach the top and bottom edge like when it's closed"). The whole ancestor chain
+        // (ShortcutAndWidgetContainer/CellLayout/Workspace) is clipChildren=false, and layoutChild
+        // positions us straight from lp.x/y, so a negative lp.y lifts the pane above the cell.
+        // Extensions equal the recycler's top/bottom padding (AresAllApps), so content RESTS in the
+        // cell area and only SCROLLS behind the bars. Use mActivityContext (the resolved Launcher),
+        // NOT getContext(), which can be a wrapper and silently yield 0 here.
+        val dp = mActivityContext.deviceProfile
+        val topExtend = dp.insets.top + dp.workspacePadding.top
+        val botExtend = dp.insets.bottom + dp.workspacePadding.bottom
+        val height = cellHeight + topExtend + botExtend
 
         // Mutate the existing lp rather than calling setLayoutParams(), which would trigger a
         // nested requestLayout() from inside a measure pass.
         (layoutParams as? CellLayoutLayoutParams)?.let { lp ->
             lp.isLockedToGrid = false
             lp.x = 0
-            lp.y = 0
+            lp.y = -topExtend
             lp.width = width
             lp.height = height
         }
