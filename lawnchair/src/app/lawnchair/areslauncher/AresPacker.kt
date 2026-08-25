@@ -61,10 +61,9 @@ object AresPacker {
      * that widget and pushes the widget DOWN, instead of dropping beneath it (owner report
      * 2026-08-24). A run with any non-1x1 member, or an out-of-range range, is ignored and those
      * items pack individually (safe fallback). A no-run call is byte-for-byte the old behaviour.
-     * When a tall tile straddles the folder's own row (a band sliced directly under the folder would
-     * cut it), the children open into a band just below the folder's ROW BLOCK -- past the bottom of
-     * every tile sitting on/over that row -- and content below slides down, so they stay right under
-     * the folder area rather than dropping to the page bottom (owner 2026-08-25).
+     * When a tall tile straddles the folder's own row, the folder still opens IN PLACE with its
+     * children directly beneath it, and the straddling tile (plus everything below) is pushed DOWN
+     * out of the way -- so a folder and its apps always stay together (owner 2026-08-25).
      *
      * The self-non-collision guarantee is preserved: phase 1 places by checked first-fit, the slide
      * moves a disjoint set of tiles uniformly downward, and the children land only in the vacated
@@ -155,8 +154,8 @@ object AresPacker {
 
             // A tall tile that starts on or above the folder's row but reaches the row just beneath
             // it would be sliced by inserting a band directly there. When that happens, the branch
-            // below opens the band past the bottom of that tile's row block instead (not at the page
-            // bottom) -- see the straddler handling further down.
+            // below pushes that tile (and everything below) DOWN and opens the band in place under
+            // the folder -- see the straddler handling further down.
             val straddler = spans.indices.any { idx ->
                 if (isChild(idx)) return@any false
                 val c = cells[idx] ?: return@any false
@@ -164,31 +163,33 @@ object AresPacker {
             }
 
             if (straddler) {
-                // A tall tile shares the folder's row, so a band sliced directly under the folder
-                // would cut it. Open the band just below the folder's ROW BLOCK instead -- past the
-                // bottom of every tile sitting on/over the folder's row (the straddling widget) -- and
-                // slide the content below that down, so the apps stay right under the folder area
-                // rather than dropping to the bottom of the page (owner 2026-08-25). Children then
-                // first-fit into the opened rows, flowing around anything still in them.
-                var bandStart = fy + 1
+                // A tall tile shares the folder's row. Owner decision 2026-08-25: PUSH THE WIDGET
+                // DOWN -- the folder opens IN PLACE with its children directly beneath it, and the
+                // straddling widget (plus everything below) moves down out of the way, so the folder
+                // and its apps always stay together. (The earlier take opened the band below the
+                // widget, separating them.)
+                //
+                // Reserve the band rows fy+1..fy+bandRows for the children. Every non-child tile
+                // whose bottom reaches into that band -- the straddler, and anything already below
+                // the folder -- is a "mover"; every tile whose bottom is at or above the folder's row
+                // is "kept" in place (the folder itself, and same-row 1x1s beside it). Rebuild
+                // occupancy from the kept tiles, mark the band, then first-fit the movers BELOW the
+                // band in reading order. First-fit keeps the self-non-collision guarantee.
+                val bandTop = fy + 1
+                val bandBottomExclusive = fy + 1 + bandRows
+
+                val movers = ArrayList<Int>()
                 for (idx in spans.indices) {
                     if (isChild(idx)) continue
                     val c = cells[idx] ?: continue
                     val h = spans[idx].h.coerceAtLeast(1)
-                    if (c.y <= fy && c.y + h > bandStart) bandStart = c.y + h
+                    if (c.y + h - 1 > fy) movers.add(idx) // bottom reaches the band or sits below it
                 }
-                // Slide every non-child tile at/below the band down by the band height.
-                for (idx in spans.indices) {
-                    if (isChild(idx)) continue
-                    val c = cells[idx] ?: continue
-                    if (c.y >= bandStart) cells[idx] = Cell(c.x, c.y + bandRows)
-                }
-                // Rebuild the occupancy grid from the post-slide non-child cells so the child
-                // first-fit below cannot collide with anything (incl. a tall tile that extends into
-                // the band from above).
+
+                // Occupancy = kept tiles only, then the reserved band.
                 for (row in occupied) row.fill(false)
                 for (idx in spans.indices) {
-                    if (isChild(idx)) continue
+                    if (isChild(idx) || idx in movers) continue
                     val c = cells[idx] ?: continue
                     val w = spans[idx].w.coerceIn(1, columns)
                     val h = spans[idx].h.coerceAtLeast(1)
@@ -197,18 +198,35 @@ object AresPacker {
                         for (dx in 0 until w) r[c.x + dx] = true
                     }
                 }
-                // First-fit each 1x1 child, scanning from the band's first row.
-                for (k in 0 until childCount) {
-                    var target: Cell? = null
-                    var y = bandStart
-                    while (target == null) {
-                        for (x in 0 until columns) {
-                            if (fits(x, y, 1, 1)) { target = Cell(x, y); break }
+                for (by in bandTop until bandBottomExclusive) {
+                    val r = rowAt(by)
+                    for (x in 0 until columns) r[x] = true
+                }
+
+                // First-fit each mover below the band, preserving reading order (top-to-bottom,
+                // then left-to-right), so relative arrangement is stable.
+                movers.sortWith(compareBy({ cells[it]!!.y }, { cells[it]!!.x }))
+                for (idx in movers) {
+                    val w = spans[idx].w.coerceIn(1, columns)
+                    val h = spans[idx].h.coerceAtLeast(1)
+                    var placed: Cell? = null
+                    var y = bandBottomExclusive
+                    while (placed == null) {
+                        for (x in 0..(columns - w)) {
+                            if (fits(x, y, w, h)) { placed = Cell(x, y); break }
                         }
-                        if (target == null) y++
+                        if (placed == null) y++
                     }
-                    rowAt(target.y)[target.x] = true
-                    cells[runFirst + 1 + k] = target
+                    for (dy in 0 until h) {
+                        val r = rowAt(placed.y + dy)
+                        for (dx in 0 until w) r[placed.x + dx] = true
+                    }
+                    cells[idx] = placed
+                }
+
+                // Children fill the reserved band directly under the folder, row-major from column 0.
+                for (k in 0 until childCount) {
+                    cells[runFirst + 1 + k] = Cell(k % columns, bandTop + k / columns)
                 }
             } else {
                 // Phase 2: open a band-height gap directly below the folder's row -- slide every tile
