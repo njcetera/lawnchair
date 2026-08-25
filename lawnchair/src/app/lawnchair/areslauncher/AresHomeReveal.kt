@@ -39,6 +39,9 @@ object AresHomeReveal {
     private const val BOUNCE_SPAN = 0.6f        // ...to BOUNCE_MIN+SPAN, seeded per item
     private const val BOW_X_MIN = 0.72f         // how much the control hugs centre-x (rise before fanning)
     private const val BOW_X_SPAN = 0.30f        // ...varied per item so each fans out a little differently
+    private const val POS_SETTLE_TENSION = 0.5f // gentle overshoot for POSITION only, so tiles land on
+    //                                             their cell rather than sailing past it (scale keeps
+    //                                             the springier per-item bounce)
 
     /** Deterministic 0..1 hash per item index + salt (the folder open's wpRnd, standalone here). */
     private fun rnd(i: Int, salt: Float): Float {
@@ -122,16 +125,22 @@ object AresHomeReveal {
                     // ONE continuous motion: a single quadratic Bézier from the off-screen cluster
                     // (P0) to the cell (P2 = 0,0) through a control point (P1) at centre-x, ~15% up
                     // -- so the icon rises then fans out to its cell in one stroke, no two-phase seam.
-                    // The zoom rides the same parameter; u overshoots past 1 (per-item tension) then
-                    // springs back, bouncing position AND scale into place.
-                    val u = overshoot(local, tension[i])
-                    val omu = 1f - u
+                    //
+                    // POSITION and SCALE ride SEPARATE settles (owner 2026-08-25, "refine the settle
+                    // into the final location"): position eases in with only a slight overshoot
+                    // (POS_SETTLE_TENSION) so the icon lands ON its cell instead of sailing past and
+                    // snapping back, while scale keeps the springier per-item bounce (tension[i]) that
+                    // gives the landing its pop. Coupling both to one bouncy parameter made the tile
+                    // visibly overshoot its own position.
+                    val p = overshoot(local, POS_SETTLE_TENSION)
+                    val pmu = 1f - p
                     val p0x = clusterX - cellCx[i]
                     val p0y = startClusterY - cellCy[i]
                     val ctrlX = p0x * bowX[i]        // hug centre-x early, fan out per item
                     val ctrlY = bendY[i] - cellCy[i] // bend ~15% up from the edge before the cell
-                    v.translationX = omu * omu * p0x + 2f * omu * u * ctrlX
-                    v.translationY = omu * omu * p0y + 2f * omu * u * ctrlY
+                    v.translationX = pmu * pmu * p0x + 2f * pmu * p * ctrlX
+                    v.translationY = pmu * pmu * p0y + 2f * pmu * p * ctrlY
+                    val u = overshoot(local, tension[i])
                     val s = START_SCALE + (1f - START_SCALE) * u
                     v.scaleX = s
                     v.scaleY = s
