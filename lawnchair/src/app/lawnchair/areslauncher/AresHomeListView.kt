@@ -1,5 +1,7 @@
 package app.lawnchair.areslauncher
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
@@ -421,63 +423,122 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     private fun onWpFolderExpanded(folderInfo: FolderInfo, expanded: Boolean) {
         if (!expanded) return
-        val childIds = folderInfo.getContents().map { it.id }
+        val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return
-        // The scale part of the M3 fade-through is skipped in edit mode, where the tile scale is
-        // owned by the edit-mode cue (EDIT_MODE_SCALE); there the apps just fade.
-        val scaleEnter = !isEditMode()
+        // Scale is skipped in edit mode, where the tile scale is owned by the edit-mode cue.
+        val scaleMotion = !isEditMode()
         post {
-            // Shared origin: the apps start stacked at the folder tile's bottom edge and slide DOWN
-            // to their cells, so they read as unfurling out of the folder (owner 2026-08-24). The
-            // whole reveal is DELAYED past the icon morph and the tiles-below reflow, so the apps
-            // drop into an already-opened gap rather than crossing the still-moving tiles.
-            val folderBottom = findViewHolderForItemId(folderInfo.id.toLong())?.itemView?.bottom
+            // The signature open (owner 2026-08-24): each icon FALLS out of the folder icon -- it
+            // appears small at the teardrop's tip, drops into the card, then spreads + enlarges to
+            // its cell. Staggered so they stream out one after another. Delayed past the icon morph
+            // and the tiles-below reflow, so they fall into an already-opened gap.
+            val tip = wpTeardropTip(folderInfo) ?: return@post
             childIds.forEachIndexed { i, id ->
-                val holder = findViewHolderForItemId(id.toLong()) ?: return@forEachIndexed
-                val v = holder.itemView
-                v.alpha = 0f
-                if (scaleEnter) {
-                    v.scaleX = WP_CHILD_ENTER_SCALE
-                    v.scaleY = WP_CHILD_ENTER_SCALE
-                }
-                if (folderBottom != null) {
-                    // Start at the folder's bottom (a hair above its final cell), never below it.
-                    v.translationY = (folderBottom - v.top).toFloat().coerceAtMost(0f)
-                }
-                val anim = v.animate()
-                    .alpha(1f)
-                    .translationY(0f)
-                    .setInterpolator(WP_ENTER_EASING)
-                    .setStartDelay(WP_CHILD_ENTER_DELAY_MS + i * WP_CHILD_FADE_STAGGER_MS)
-                    .setDuration(WP_CHILD_FADE_MS)
-                if (scaleEnter) anim.scaleX(1f).scaleY(1f)
-                anim.start()
+                val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@forEachIndexed
+                playWpChildFall(
+                    v, tip.first, tip.second,
+                    forward = true,
+                    delayMs = WP_CHILD_ENTER_DELAY_MS + i * WP_FALL_STAGGER_MS,
+                    durationMs = WP_FALL_MS,
+                    scaleMotion = scaleMotion,
+                )
             }
             nudgeExpandedIntoView(folderInfo, childIds)
         }
     }
 
     /**
-     * Entrance for a SINGLE child added to an already-open folder (dwell-add while expanded). Same M3
-     * fade-through the open uses, but posted for just this one tile once its holder exists.
+     * Entrance for a SINGLE child added to an already-open folder (dwell-add while expanded): the
+     * same fall-out-of-the-teardrop motion, posted for just this one tile.
      */
-    fun animateWpChildEnter(id: Int) {
+    fun animateWpChildEnter(folderInfo: FolderInfo, id: Int) {
         post {
             val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@post
-            v.alpha = 0f
-            if (!isEditMode()) {
-                v.scaleX = WP_CHILD_ENTER_SCALE
-                v.scaleY = WP_CHILD_ENTER_SCALE
-            }
-            val anim = v.animate()
-                .alpha(1f)
-                .setInterpolator(WP_ENTER_EASING)
-                .setStartDelay(0L)
-                .setDuration(WP_CHILD_FADE_MS)
-            if (!isEditMode()) anim.scaleX(1f).scaleY(1f)
-            anim.start()
+            val tip = wpTeardropTip(folderInfo) ?: return@post
+            playWpChildFall(
+                v, tip.first, tip.second,
+                forward = true,
+                delayMs = 0L,
+                durationMs = WP_FALL_MS,
+                scaleMotion = !isEditMode(),
+            )
         }
     }
+
+    /** The teardrop's tip in this list's coordinate space: bottom-centre of the folder tile. */
+    private fun wpTeardropTip(folderInfo: FolderInfo): Pair<Float, Float>? {
+        val fv = findViewHolderForItemId(folderInfo.id.toLong())?.itemView ?: return null
+        return (fv.left + fv.width / 2f) to fv.bottom.toFloat()
+    }
+
+    /**
+     * The signature WP folder motion: a child icon FALLS out of the folder icon. It appears small at
+     * the teardrop's [tipX]/[tipY], drops a short way into the card ([WP_FALL_DROP_PX]) under gravity,
+     * then spreads + enlarges to its cell on an emphasized-decelerate settle. [forward]=false walks
+     * the same path backwards for the close (icon rises from its cell, gathers under the teardrop,
+     * then rises through it into the folder icon and fades). Driven by one ValueAnimator per child in
+     * "offset from the laid-out cell" space (translation 0 == the cell) so it lands exactly on the
+     * real layout with no drift. ValueAnimator honours the system animator duration scale.
+     */
+    private fun playWpChildFall(
+        v: View,
+        tipX: Float,
+        tipY: Float,
+        forward: Boolean,
+        delayMs: Long,
+        durationMs: Long,
+        scaleMotion: Boolean,
+    ) {
+        v.pivotX = v.width / 2f
+        v.pivotY = v.height / 2f
+        val cx = v.left + v.width / 2f
+        val cy = v.top + v.height / 2f
+        val tipOffX = tipX - cx
+        val tipOffY = tipY - cy
+        val dropOffX = tipX - cx // drop straight down from the tip
+        val dropOffY = (tipY + WP_FALL_DROP_PX * resources.displayMetrics.density) - cy
+        v.animate().cancel()
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            startDelay = delayMs
+            addUpdateListener { anim ->
+                val t = if (forward) anim.animatedFraction else 1f - anim.animatedFraction
+                val x: Float; val y: Float; val s: Float; val al: Float
+                if (t <= WP_FALL_SEG) {
+                    val u = WP_FALL_FALL_INTERP.getInterpolation((t / WP_FALL_SEG).coerceIn(0f, 1f))
+                    x = lerpF(tipOffX, dropOffX, u)
+                    y = lerpF(tipOffY, dropOffY, u)
+                    s = lerpF(WP_FALL_TIP_SCALE, WP_FALL_DROP_SCALE, u)
+                    al = (u * 2f).coerceIn(0f, 1f) // fade in over the first half of the fall
+                } else {
+                    val u = WP_FALL_SPREAD_INTERP.getInterpolation(
+                        ((t - WP_FALL_SEG) / (1f - WP_FALL_SEG)).coerceIn(0f, 1f),
+                    )
+                    x = lerpF(dropOffX, 0f, u)
+                    y = lerpF(dropOffY, 0f, u)
+                    s = lerpF(WP_FALL_DROP_SCALE, 1f, u)
+                    al = 1f
+                }
+                v.translationX = x
+                v.translationY = y
+                if (scaleMotion) { v.scaleX = s; v.scaleY = s }
+                v.alpha = al
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    // Land clean at the cell (open) or invisible at the tip (close; the row is about
+                    // to be removed + recycled, which resets transforms anyway).
+                    v.translationX = 0f
+                    v.translationY = 0f
+                    if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                    v.alpha = if (forward) 1f else 0f
+                }
+            })
+            start()
+        }
+    }
+
+    private fun lerpF(a: Float, b: Float, u: Float): Float = a + (b - a) * u
 
     /**
      * WP accordion CLOSE (owner 2026-08-24) -- the exact reverse of [onWpFolderExpanded]. The opened
@@ -487,37 +548,34 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * settles after -- the mirror of the open, where the surface leads and the content follows.
      *
      * Returns true when it started an exit animation (live child tiles are on screen); the adapter
-     * then defers the structural collapse by [AresHomeAdapter.WP_COLLAPSE_EXIT_MS]. Returns false when
+     * then defers the structural collapse until it finishes. Returns 0 when
      * there is nothing to animate (folder scrolled off, empty) so the adapter collapses immediately.
      */
-    fun onWpFolderCollapsing(folderInfo: FolderInfo): Boolean {
-        val childIds = folderInfo.getContents().map { it.id }
-        if (childIds.isEmpty()) return false
-        val folderBottom = findViewHolderForItemId(folderInfo.id.toLong())?.itemView?.bottom
-        // Mirror the enter: the scale part is owned by the edit-mode cue in edit mode, so there the
-        // apps only fade + slide, never scale.
-        val scaleExit = !isEditMode()
+    fun onWpFolderCollapsing(folderInfo: FolderInfo): Int {
+        val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
+        if (childIds.isEmpty()) return 0
+        val scaleMotion = !isEditMode()
+        val tip = wpTeardropTip(folderInfo) ?: return 0
+        val n = childIds.size
         var any = false
-        for (id in childIds) {
-            val v = findViewHolderForItemId(id.toLong())?.itemView ?: continue
+        childIds.forEachIndexed { i, id ->
+            val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@forEachIndexed
             any = true
-            // Retract to the folder's bottom edge (a hair above the app's cell, never below it) --
-            // the same shared origin the open unfurled FROM.
-            val target = if (folderBottom != null) (folderBottom - v.top).toFloat().coerceAtMost(0f) else 0f
-            val anim = v.animate()
-                .alpha(0f)
-                .translationY(target)
-                .setInterpolator(WP_EXIT_EASING)
-                .setStartDelay(0L)
-                .setDuration(WP_CHILD_EXIT_MS)
-            if (scaleExit) anim.scaleX(WP_CHILD_ENTER_SCALE).scaleY(WP_CHILD_ENTER_SCALE)
-            anim.start()
+            // Reverse cascade: the FARTHEST child leaves first, so the run zips back UP into the tile.
+            playWpChildFall(
+                v, tip.first, tip.second,
+                forward = false,
+                delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
+                durationMs = WP_FALL_CLOSE_MS,
+                scaleMotion = scaleMotion,
+            )
         }
-        if (!any) return false
-        // Fade the card out over the same window; it is fully gone before the run is removed, so it
-        // never pops. Reset any leftover child transforms is handled by onViewRecycled on removal.
-        folderBounds.beginExit()
-        return true
+        if (!any) return 0
+        // Total time for the whole reverse cascade to finish; the adapter removes the rows only then.
+        val total = ((n - 1) * WP_FALL_CLOSE_STAGGER_MS + WP_FALL_CLOSE_MS).toInt()
+        // Fade the card out over that same window so it is gone before the run is removed (no pop).
+        folderBounds.beginExit(total.toFloat())
+        return total
     }
 
     /**
@@ -1616,6 +1674,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // on a stationary tap, so scrolling the grid with a folder open is unaffected.
                     val expandedFolderId = aresAdapter.expandedWpFolder()
                     if (tap && expandedFolderId != -1) {
+                        // Tapping the folder's TITLE on the card renames it (owner 2026-08-24), rather
+                        // than closing -- checked first, since the title band is "outside" any tile.
+                        if (folderBounds.titleBandContains(e.x, e.y)) {
+                            aresAdapter.promptRenameExpandedFolder()
+                            return true
+                        }
                         val pos = downChild?.let { getChildAdapterPosition(it) } ?: NO_POSITION
                         val info = if (pos != NO_POSITION) aresAdapter.itemAt(pos) else null
                         val onOpenFolderOrChild = info != null &&
@@ -2343,23 +2407,29 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** Matches the edit-mode enter/exit scale animation. */
         const val EDIT_SCALE_MS = 120L
 
-        /** WP accordion: per-app M3 fade-through enter as a folder opens (owner 2026-08-24). */
-        const val WP_CHILD_FADE_MS = 250L // M3 medium-1
-        const val WP_CHILD_FADE_STAGGER_MS = 30L
-        const val WP_CHILD_ENTER_SCALE = 0.85f // fade-through incoming scale
-        // Start the apps AFTER the icon morph (220ms) and the reflow (LAYOUT_ANIM_MS 200ms) have both
-        // fully settled, so they unfurl into an already-cleared gap and never cross a moving tile
+        // Start the child falls AFTER the icon morph (220ms) and the reflow (LAYOUT_ANIM_MS 200ms)
+        // have both settled, so they fall into an already-cleared gap and never cross a moving tile
         // (owner 2026-08-24).
         const val WP_CHILD_ENTER_DELAY_MS = 240L
-        /** M3 emphasized-decelerate, for content entering the screen. */
-        val WP_ENTER_EASING: android.view.animation.Interpolator =
-            android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
 
-        /** WP accordion CLOSE: per-app furl-back as a folder closes (owner 2026-08-24). */
-        const val WP_CHILD_EXIT_MS = 190L // shorter than the enter -- M3: exits are quicker
-        /** M3 emphasized-ACCELERATE, for content leaving the screen (mirror of WP_ENTER_EASING). */
-        val WP_EXIT_EASING: android.view.animation.Interpolator =
-            android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
+        // ---- "fall out of the teardrop" open/close motion (owner 2026-08-24) ----
+        // Each icon appears small at the teardrop tip, falls a short way into the card under gravity
+        // (segment 1), then spreads + enlarges to its cell on an emphasized-decelerate settle
+        // (segment 2). WP_FALL_SEG splits the two segments of one child's timeline.
+        const val WP_FALL_MS = 460L // one child, open
+        const val WP_FALL_STAGGER_MS = 46L // gap between successive children streaming out
+        const val WP_FALL_CLOSE_MS = 320L // one child, close (quicker -- M3 exits are faster)
+        const val WP_FALL_CLOSE_STAGGER_MS = 30L
+        const val WP_FALL_SEG = 0.42f // fraction of the timeline that is the fall (rest is the spread)
+        const val WP_FALL_DROP_PX = 30f // dp the icon falls below the tip before spreading
+        const val WP_FALL_TIP_SCALE = 0.32f // size at the tip (just emerged from the folder)
+        const val WP_FALL_DROP_SCALE = 0.52f // size at the drop point, before spreading to full
+        /** Gravity feel for the fall segment. */
+        val WP_FALL_FALL_INTERP: android.view.animation.Interpolator =
+            android.view.animation.AccelerateInterpolator(1.4f)
+        /** Emphasized-decelerate settle for the spread segment (content arriving). */
+        val WP_FALL_SPREAD_INTERP: android.view.animation.Interpolator =
+            android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L

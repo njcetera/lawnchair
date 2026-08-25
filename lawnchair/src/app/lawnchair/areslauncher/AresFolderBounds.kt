@@ -95,10 +95,14 @@ class AresFolderBounds(
     private var collapsingAt = 0L
     private var exitDurMs = EXIT_MS // EXIT_MS scaled by the system animator duration, set in beginExit
 
-    /** Begin the card's fade-out. Called by [AresHomeListView.onWpFolderCollapsing] on close. */
-    fun beginExit() {
-        // Track the system animator duration scale so the card fade stays in lock-step with the app
-        // furl (a ViewPropertyAnimator, which the system scales) at any developer-options scale.
+    /**
+     * Begin the card's fade-out over [durationMs] (the full reverse-cascade length the caller computes
+     * from the child count), so the card is gone right as the last icon rises into the folder. Called
+     * by [AresHomeListView.onWpFolderCollapsing] on close.
+     */
+    fun beginExit(durationMs: Float) {
+        // Track the system animator duration scale so the card fade stays in lock-step with the child
+        // falls (ValueAnimators, which the system scales) at any developer-options scale.
         val scale = try {
             android.provider.Settings.Global.getFloat(
                 list.context.contentResolver,
@@ -108,9 +112,28 @@ class AresFolderBounds(
         } catch (e: Exception) {
             1f
         }
-        exitDurMs = (EXIT_MS * scale).coerceAtLeast(1f)
+        exitDurMs = (durationMs * scale).coerceAtLeast(1f)
         collapsingAt = SystemClock.uptimeMillis()
         list.postInvalidateOnAnimation()
+    }
+
+    /**
+     * True when ([x],[y]) in the list's coordinate space falls on the folder TITLE band at the top of
+     * the card -- the region a tap should open the rename dialog on (owner 2026-08-24). Recomputes the
+     * band from the live run exactly as [onDraw] does, so it can never disagree with what is drawn.
+     */
+    fun titleBandContains(x: Float, y: Float): Boolean {
+        val run = list.aresAdapter.expandedRunRange() ?: return false
+        var minTop = Int.MAX_VALUE
+        for (pos in (run.first + 1)..run.last) {
+            val v = list.findViewHolderForAdapterPosition(pos)?.itemView ?: continue
+            if (v.top < minTop) minTop = v.top
+        }
+        if (minTop == Int.MAX_VALUE) return false
+        val left = list.paddingLeft.toFloat()
+        val right = (list.width - list.paddingRight).toFloat()
+        val bandTop = minTop - cardPad - titleBandPx
+        return x in left..right && y in bandTop..(bandTop + titleBandPx)
     }
 
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
@@ -167,7 +190,7 @@ class AresFolderBounds(
 
     private companion object {
         const val ENTER_MS = 260f // M3 medium
-        // Card fade-out on close. Fully drained before AresHomeAdapter.WP_COLLAPSE_EXIT_MS removes the
+        // Card fade-out on close. Fully drained before the reverse-fall cascade finishes and the adapter removes the
         // run, so the card is gone by then and never pops.
         const val EXIT_MS = 170f
         // The content is sequenced AFTER the icon morph and the tiles-below reflow (owner 2026-08-24):
