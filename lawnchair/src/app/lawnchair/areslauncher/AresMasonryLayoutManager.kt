@@ -160,6 +160,15 @@ class AresMasonryLayoutManager(
     var reflowExempt: View? = null
 
     /**
+     * One-shot: an adapter item id to leave PINNED (no reflow spring) through the next
+     * [animateNextLayout] pass. Used by the WP folder close -- the folder tile keeps its cell on
+     * collapse, but a row-removal's predictive-animation pass can hand the reflow a phantom previous
+     * position for it, springing the just-morphing teardrop up from a low spot (owner 2026-08-24).
+     * Cleared after the pass. -1 = none.
+     */
+    var repackExemptItemId: Long = -1L
+
+    /**
      * Where each attached child was **drawn** at the top of the current layout pass.
      *
      * Keyed by view, unlike [previousBounds], and that difference is the whole point. A repack
@@ -273,6 +282,7 @@ class AresMasonryLayoutManager(
         if (animateNextLayout) {
             animateFromPreviousBounds()
             animateNextLayout = false
+            repackExemptItemId = -1L
             previousBounds.clear()
         } else if (reflow) {
             reflowFromDrawnPositions()
@@ -432,6 +442,15 @@ class AresMasonryLayoutManager(
             // repack CAN overlap a drag — a second finger tapping a × badge fires animateNextLayout
             // mid-drag. (adversarial review, 2026-08-22)
             if (child === reflowExempt) continue
+            // Pinned tile (WP folder close): keep it at its resting cell, no reflow spring.
+            if (repackExemptItemId != -1L &&
+                (host as? RecyclerView)?.getChildViewHolder(child)?.itemId == repackExemptItemId
+            ) {
+                child.animate().cancel()
+                child.translationX = 0f
+                child.translationY = 0f
+                continue
+            }
             val position = getPosition(child)
             val old = previousBounds[position] ?: continue
 

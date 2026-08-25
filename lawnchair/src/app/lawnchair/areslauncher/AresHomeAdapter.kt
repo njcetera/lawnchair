@@ -1045,8 +1045,12 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (count > 0) {
             repeat(count) { items.removeAt(folderRow + 1) }
             notifyItemRangeRemoved(folderRow + 1, count)
-            // Accordion close: slide the tiles below back UP into the closing gap (see expand).
-            launcher.workspace?.aresHomeList?.animateNextRelayout()
+            // Accordion close: slide the tiles below back UP into the closing gap (see expand). The
+            // folder tile is EXEMPT: on a row removal RecyclerView's predictive pass can hand the
+            // reflow a phantom "previous" position for the folder (measured: a spurious +340px), which
+            // made the teardrop render low and slide up into place while it morphed (owner 2026-08-24).
+            // The folder never changes cell on collapse ("open in place"), so pin it.
+            launcher.workspace?.aresHomeList?.animateNextRelayout(id.toLong())
         }
         if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
     }

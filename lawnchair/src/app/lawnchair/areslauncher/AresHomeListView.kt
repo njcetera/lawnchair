@@ -411,7 +411,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * animate-don't-snap path [removeFromHome] and the widget resize already use; the caller
      * invokes it right after its adapter mutation, before the frame lays out.
      */
-    fun animateNextRelayout() {
+    fun animateNextRelayout(exemptItemId: Long = -1L) {
+        masonry.repackExemptItemId = exemptItemId
         masonry.animateNextLayout()
         masonry.invalidatePacking()
     }
@@ -744,6 +745,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         scaleMotion: Boolean,
         tiltDeg: Float,
         startScale: Float,
+        hasSlot: Boolean,
         seed: Int,
     ) {
         val btv = (v as? ViewGroup)?.getChildAt(0) as? BubbleTextView
@@ -797,7 +799,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     x = lerpF(dropOffX, slotOffX, u)
                     y = lerpF(dropOffY, slotOffY, u)
                     s = lerpF(midScale, startScale, u)
-                    al = 1f - u
+                    // NO fade for slot-backed icons (owner 2026-08-24: "same as the open but in
+                    // reverse -- not the fade"): the open never faded them, so the close doesn't
+                    // either -- it rides to the slot at full alpha and the preview snaps in for it.
+                    // A slotless overflow child (5th+, no preview) still fades out, mirroring its
+                    // fade-IN on the open.
+                    al = if (hasSlot) 1f else 1f - u
                     rot = lerpF(tiltDeg, 0f, u)
                 }
                 if (hasCard) {
@@ -821,13 +828,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    // End invisible at the folder; the row is about to be removed + recycled (which
-                    // resets transforms anyway).
-                    v.translationX = 0f
-                    v.translationY = 0f
-                    if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
-                    v.rotation = 0f
-                    v.alpha = 0f
+                    if (hasSlot) {
+                        // HOLD at the preview slot (mini, full alpha) so it reads as the preview until
+                        // finishCollapse snaps the real preview back + removes the row -- the seamless
+                        // reverse of the open's snap hand-off, with no fade.
+                        v.translationX = slotOffX
+                        v.translationY = slotOffY
+                        if (scaleMotion) { v.scaleX = startScale; v.scaleY = startScale }
+                        v.rotation = 0f
+                        v.alpha = 1f
+                    } else {
+                        // Slotless overflow child: it faded out; leave it invisible (row about to go).
+                        v.translationX = 0f
+                        v.translationY = 0f
+                        if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                        v.rotation = 0f
+                        v.alpha = 0f
+                    }
                 }
             })
             start()
@@ -857,7 +874,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // Each child furls back to its OWN preview slot (mirror of the open), so it lands
             // pixel-exact where the restored preview icon will reappear. Reverse cascade: the FARTHEST
             // child leaves first, so the run zips back UP into the tile.
-            wpChildStart(folderInfo, i, tmpStart)
+            val hasSlot = wpChildStart(folderInfo, i, tmpStart)
             playWpChildClose(
                 v, tmpStart[0], tmpStart[1], tmpStart[2],
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
@@ -865,6 +882,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 scaleMotion = scaleMotion,
                 tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
+                hasSlot = hasSlot,
                 seed = id,
             )
         }
