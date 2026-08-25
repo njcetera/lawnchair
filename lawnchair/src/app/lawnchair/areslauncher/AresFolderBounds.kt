@@ -54,7 +54,10 @@ class AresFolderBounds(
     }
 
     private val cardRadius = 24f * density
-    private val cardPad = 8f * density // card grows this far past the app tiles
+    private val cardPad = 8f * density // card grows this far past the app tiles (top + sides)
+    // The BOTTOM extends further than the sides so the last app-row's LABEL isn't crowded against the
+    // card edge (owner 2026-08-24: "app text a little too close to the bottom of the folder").
+    private val cardBottomPad = 20f * density
     private val titleVPad = 7f * density // above and below the title text within its band
     private val titleHPad = 16f * density // keep the title clear of the card's rounded corners
     // Small gap between the folder tile and the card: the teardrop pointer is drawn low in its tile
@@ -73,7 +76,7 @@ class AresFolderBounds(
     val expandedTopPadPx: Int = (topGap + cardPad + titleBandPx).toInt()
 
     /** Vertical space to reserve BELOW the opened apps: the card's bottom padding and a gap. */
-    val expandedBottomPadPx: Int = (cardPad + bottomGap).toInt()
+    val expandedBottomPadPx: Int = (cardBottomPad + bottomGap).toInt()
 
     private val rect = RectF()
 
@@ -145,7 +148,7 @@ class AresFolderBounds(
         val left = list.paddingLeft.toFloat()
         val right = (list.width - list.paddingRight).toFloat()
         val top = minTop - cardPad - titleBandPx
-        val bottom = maxBottom + cardPad
+        val bottom = maxBottom + cardBottomPad
         if (right <= left || bottom <= top) return false
         out.set(left, top, right, bottom)
         return true
@@ -196,7 +199,7 @@ class AresFolderBounds(
         val right = (parent.width - parent.paddingRight).toFloat()
         val appsTop = appViews.minOf { it.top }.toFloat()
         val top = appsTop - cardPad - titleBandPx
-        val bottom = appViews.maxOf { it.bottom } + cardPad
+        val bottom = appViews.maxOf { it.bottom } + cardBottomPad
         if (right <= left || bottom <= top) return
 
         // BLOOM FROM THE DROP (owner 2026-08-24, chosen over the ripple in an A/B): the card grows OUT
