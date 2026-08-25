@@ -10,8 +10,9 @@ import com.android.launcher3.Launcher
 /**
  * SPIKE (owner 2026-08-25, "spike only, don't wire in"): a Material-You, playful HOME REVEAL.
  *
- * When the home appears after leaving an app, the tiles SLIDE UP from the bottom edge of the screen
- * (small, in a staggered wave), then EXPAND into full size with a bounce once they arrive. No fade.
+ * When the home appears after leaving an app, the tiles rise up from the bottom edge of the screen
+ * (small, straight up their own column) WHILE zooming in, landing full-size with a bounce -- a
+ * staggered wave. The rise (entrance from the bottom) and the zoom happen together. No fade.
  *
  * Only fires on a real home APPEARANCE from another app -- not while already on the launcher (the
  * `wasStopped` gate in LawnchairLauncher). Any open folder is closed first, so nothing animates on
@@ -26,16 +27,14 @@ object AresHomeReveal {
     var enabled = false
 
     // Feel. All one-line tunable.
-    private const val START_SCALE = 0.30f       // size while sliding up, before the expand
-    private const val PER_ITEM_MS = 540f        // one item's slide + expand
+    private const val START_SCALE = 0.30f       // size at the bottom edge, before it zooms in
+    private const val PER_ITEM_MS = 560f        // one item's rise + zoom
     private const val STAGGER_MS = 22f          // wave spacing between successive items
     private const val MAX_TOTAL_MS = 1250L      // cap so a full screen never drags on
-    private const val SLIDE_PHASE = 0.60f       // fraction of an item's life spent sliding up
-    private const val EXPAND_START = 0.45f      // expand begins here (slight overlap with the slide)
-    private const val BOUNCE_TENSION = 2.3f     // playful overshoot on the expand
+    private const val BOUNCE_TENSION = 2.3f     // playful overshoot as it lands
 
-    private val slideInterp = DecelerateInterpolator(1.6f)
-    private val zoomInterp = OvershootInterpolator(BOUNCE_TENSION)
+    private val riseInterp = DecelerateInterpolator(1.6f)          // the entrance -- fly up and settle
+    private val zoomInterp = OvershootInterpolator(BOUNCE_TENSION) // the zoom-in, concurrent with the rise
 
     private var running: ValueAnimator? = null
 
@@ -92,12 +91,10 @@ object AresHomeReveal {
                 val t = it.animatedValue as Float
                 children.forEachIndexed { i, v ->
                     val local = ((t - i * stagger) / PER_ITEM_MS).coerceIn(0f, 1f)
-                    // Slide up from the bottom edge first (small), settling by SLIDE_PHASE.
-                    val rise = slideInterp.getInterpolation((local / SLIDE_PHASE).coerceIn(0f, 1f))
-                    v.translationY = startDy[i] * (1f - rise)
-                    // THEN expand with a bounce, once it has (mostly) arrived.
-                    val ez = ((local - EXPAND_START) / (1f - EXPAND_START)).coerceIn(0f, 1f)
-                    val s = START_SCALE + (1f - START_SCALE) * zoomInterp.getInterpolation(ez)
+                    // Rise up from the bottom edge AND zoom in at the same time -- the entrance and the
+                    // zoom are concurrent, landing with a bounce.
+                    v.translationY = startDy[i] * (1f - riseInterp.getInterpolation(local))
+                    val s = START_SCALE + (1f - START_SCALE) * zoomInterp.getInterpolation(local)
                     v.scaleX = s
                     v.scaleY = s
                 }
