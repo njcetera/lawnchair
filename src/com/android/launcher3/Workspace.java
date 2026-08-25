@@ -151,6 +151,7 @@ import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.areslauncher.AresFolderDrop;
 import app.lawnchair.areslauncher.AresHomeDrop;
 import app.lawnchair.areslauncher.AresHomeDropPreview;
+import app.lawnchair.areslauncher.AresFolderHeal;
 import app.lawnchair.areslauncher.AresHomeListView;
 import app.lawnchair.hotseat.HotseatPagedView;
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -1237,6 +1238,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     @Override
     public void addInScreen(View child, int container, int screenId, int x, int y,
             int spanX, int spanY) {
+        // AresLauncher: heal a folder that carries the same app twice (a stale duplicate database
+        // row left by the pre-fix eject/add-back path) at the one funnel every bound item passes
+        // through, whatever its container -- so this covers a HOTSEAT folder, which never routes
+        // through the Ares home adapter. A first attempt that healed only in the adapter silently
+        // missed the owner's actual case (a hotseat folder). See AresFolderHeal.
+        if (child.getTag() instanceof FolderInfo folderInfo
+                && AresFolderHeal.dedupe(mLauncher, folderInfo)
+                && child instanceof FolderIcon folderIcon) {
+            folderIcon.onItemsChanged(false);
+        }
         if (container == CONTAINER_DESKTOP) {
             ItemInfo info = (ItemInfo) child.getTag();
             if (info == null) {
