@@ -650,12 +650,29 @@ class LawnchairLauncher : QuickstepLauncher() {
                         // Drop stuck All Apps RenderEffect on icons after returning home.
                         depthController.clearStuckBlurOnResumeIfHome()
                         // SPIKE (owner 2026-08-25): WP-style home reveal. No-op unless
-                        // AresHomeReveal.enabled -- fires once per home appearance when on.
-                        app.lawnchair.areslauncher.AresHomeReveal.maybePlayOnHomeAppear(this@LawnchairLauncher)
+                        // AresHomeReveal.enabled. Only on a real home APPEARANCE from another app
+                        // (the activity was stopped and came back) -- not while already on the
+                        // launcher (owner: don't animate if already home).
+                        if (aresWasStopped) {
+                            aresWasStopped = false
+                            app.lawnchair.areslauncher.AresHomeReveal.maybePlayOnHomeAppear(this@LawnchairLauncher)
+                        }
                     }
                 }
             },
         )
+    }
+
+    /**
+     * True between an [onStop] and the next [onResume] -- i.e. the launcher was fully backgrounded
+     * (an app covered it) and is now coming back. Used to fire the home reveal only on a real return
+     * from an app, not on an in-place resume while already on the launcher. See onResume above.
+     */
+    private var aresWasStopped = false
+
+    override fun onStop() {
+        super.onStop()
+        aresWasStopped = true
     }
 
     override fun onStateSetEnd(state: LauncherState) {

@@ -983,6 +983,20 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
+     * Force any inline-expanded WP folder shut RIGHT NOW, with no close animation. Used by the home
+     * reveal (owner 2026-08-25: no folder should stay open across a reveal) -- the reveal animates
+     * the whole grid itself, so the folder just needs to be structurally collapsed first.
+     * Returns true if a folder was open.
+     */
+    fun collapseWpFolderImmediate(): Boolean {
+        flushPendingCollapse()
+        val id = expandedWpFolderId
+        if (id == -1) return false
+        finishCollapse(id)
+        return true
+    }
+
+    /**
      * Close an inline-expanded WP folder as the reverse of the open (owner 2026-08-24): first the
      * live content exits -- the apps furl back up into the tile and the card fades out
      * ([AresHomeListView.onWpFolderCollapsing]) -- and only THEN, deferred until the reverse-fall cascade finishes,
