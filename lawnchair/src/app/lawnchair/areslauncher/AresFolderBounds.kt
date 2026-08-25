@@ -1,12 +1,15 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Canvas
 import android.graphics.RectF
+import android.os.SystemClock
 import android.text.TextPaint
 import android.text.TextUtils
 import android.view.View
+import android.view.animation.PathInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import app.lawnchair.util.resolveFolderPreviewColor
 import com.android.launcher3.R
@@ -74,14 +77,35 @@ class AresFolderBounds(
 
     private val rect = RectF()
 
+    // Material-3 "fade through" for the card as the folder opens: the surface fades in with the
+    // emphasized-decelerate curve, and starts just AFTER the tiles below begin sliding away
+    // ([ENTER_DELAY_MS]) so it is still near-transparent while a tile slides across its region --
+    // which is what stopped the card and its apps looking like they collide with the reflow (owner
+    // 2026-08-24, "elements overlapping during the transition"). Timed off the wall clock: the run
+    // first seen resets the clock; run gone resets it so a later open replays.
+    private val enterEasing = PathInterpolator(0.05f, 0.7f, 0.1f, 1f) // M3 emphasized decelerate
+    private val baseCardAlpha = Color.alpha(card.color)
+    private var runAppearedAt = 0L
+
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        val run = list.aresAdapter.expandedRunRange() ?: return
+        val run = list.aresAdapter.expandedRunRange()
+        if (run == null) {
+            runAppearedAt = 0L
+            return
+        }
 
         val appViews = ArrayList<View>()
         for (pos in (run.first + 1)..run.last) {
             parent.findViewHolderForAdapterPosition(pos)?.itemView?.let { appViews.add(it) }
         }
         if (appViews.isEmpty()) return
+
+        val now = SystemClock.uptimeMillis()
+        if (runAppearedAt == 0L) runAppearedAt = now
+        val raw = ((now - runAppearedAt - ENTER_DELAY_MS).toFloat() / ENTER_MS).coerceIn(0f, 1f)
+        val enter = enterEasing.getInterpolation(raw)
+        card.alpha = Math.round(enter * baseCardAlpha)
+        titlePaint.alpha = Math.round(enter * 255f)
 
         // Full grid-content WIDTH regardless of app count (owner 2026-08-24). Vertically the card
         // runs from a title band above the first app row down past the last, grown by cardPad.
@@ -104,5 +128,13 @@ class AresFolderBounds(
             val baseline = top + titleVPad - titlePaint.ascent()
             c.drawText(shown, 0, shown.length, (left + right) / 2f, baseline, titlePaint)
         }
+
+        // Keep the entrance advancing even after the child fades stop invalidating the list.
+        if (raw < 1f) parent.postInvalidateOnAnimation()
+    }
+
+    private companion object {
+        const val ENTER_MS = 300f // M3 medium-2
+        const val ENTER_DELAY_MS = 50L // let the reflow lead; content follows
     }
 }

@@ -411,16 +411,29 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (!expanded) return
         val childIds = folderInfo.getContents().map { it.id }
         if (childIds.isEmpty()) return
+        // The scale part of the M3 fade-through is skipped in edit mode, where the tile scale is
+        // owned by the edit-mode cue (EDIT_MODE_SCALE); there the apps just fade.
+        val scaleEnter = !isEditMode()
         post {
             childIds.forEachIndexed { i, id ->
                 val holder = findViewHolderForItemId(id.toLong()) ?: return@forEachIndexed
                 val v = holder.itemView
+                // M3 "fade through" enter for the opened apps: fade in with a small scale-up from
+                // their own centre, on the emphasized-decelerate curve, staggered. The stagger plus
+                // the scale reads as the apps materialising into the card AFTER the tiles below have
+                // begun sliding clear -- so they no longer ghost under the moving tiles.
                 v.alpha = 0f
-                v.animate()
+                if (scaleEnter) {
+                    v.scaleX = WP_CHILD_ENTER_SCALE
+                    v.scaleY = WP_CHILD_ENTER_SCALE
+                }
+                val anim = v.animate()
                     .alpha(1f)
-                    .setStartDelay(i * WP_CHILD_FADE_STAGGER_MS)
+                    .setInterpolator(WP_ENTER_EASING)
+                    .setStartDelay(WP_CHILD_ENTER_DELAY_MS + i * WP_CHILD_FADE_STAGGER_MS)
                     .setDuration(WP_CHILD_FADE_MS)
-                    .start()
+                if (scaleEnter) anim.scaleX(1f).scaleY(1f)
+                anim.start()
             }
             nudgeExpandedIntoView(folderInfo, childIds)
         }
@@ -2249,9 +2262,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** Matches the edit-mode enter/exit scale animation. */
         const val EDIT_SCALE_MS = 120L
 
-        /** WP accordion: per-app fade-in as a folder opens, and the stagger between them. */
-        const val WP_CHILD_FADE_MS = 160L
-        const val WP_CHILD_FADE_STAGGER_MS = 22L
+        /** WP accordion: per-app M3 fade-through enter as a folder opens (owner 2026-08-24). */
+        const val WP_CHILD_FADE_MS = 250L // M3 medium-1
+        const val WP_CHILD_FADE_STAGGER_MS = 30L
+        const val WP_CHILD_ENTER_SCALE = 0.85f // fade-through incoming scale
+        const val WP_CHILD_ENTER_DELAY_MS = 50L // follow the container/reflow, not lead it
+        /** M3 emphasized-decelerate, for content entering the screen. */
+        val WP_ENTER_EASING: android.view.animation.Interpolator =
+            android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L
