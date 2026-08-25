@@ -2,7 +2,6 @@ package app.lawnchair.areslauncher
 
 import android.animation.ValueAnimator
 import android.view.View
-import android.view.animation.DecelerateInterpolator
 import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.Launcher
 
@@ -32,18 +31,14 @@ object AresHomeReveal {
     private const val MAX_TOTAL_MS = 1300L      // cap so a full screen never drags on
     private const val CLUSTER_X_FRAC = 0.5f     // items bunch to this x (screen centre)
     private const val START_Y_FRAC = 1.12f      // the cluster starts BELOW the bottom edge (off-screen)
-    private const val RISEN_Y_FRAC = 0.80f      // flies IN and rises to here (~20% up from the edge)
-    private const val RISE_PHASE = 0.42f        // fraction of an item's life spent rising (grouped)
-    // Per-item variation (like the folder open's wpRnd) so the spread reads organic, not in lockstep.
+    private const val BEND_Y_FRAC = 0.85f       // the ONE path bends ~15% up from the edge before fanning
+    private const val BEND_Y_JITTER = 0.10f     // ±5% of screen height on the bend, per item
+    // Per-item variation (like the folder open's wpRnd) so the motion reads organic, not in lockstep.
     private const val PACE_JITTER = 0.16f       // ±16% on each item's duration
     private const val BOUNCE_MIN = 1.8f         // per-item settle overshoot, low end
     private const val BOUNCE_SPAN = 1.4f        // ...to BOUNCE_MIN+SPAN, seeded per item
-    private const val BOW_X_MIN = 0.35f         // Bézier control fraction along x (curve, per item)
-    private const val BOW_X_SPAN = 0.45f
-    private const val BOW_Y_MIN = 0.12f         // ...and along y, so the path arcs rather than straight
-    private const val BOW_Y_SPAN = 0.42f
-
-    private val riseInterp = DecelerateInterpolator(1.5f)            // the grouped rise up
+    private const val BOW_X_MIN = 0.55f         // how much the control hugs centre-x (rise before fanning)
+    private const val BOW_X_SPAN = 0.35f        // ...varied per item so each fans out a little differently
 
     /** Deterministic 0..1 hash per item index + salt (the folder open's wpRnd, standalone here). */
     private fun rnd(i: Int, salt: Float): Float {
@@ -80,30 +75,27 @@ object AresHomeReveal {
 
         val clusterX = list.width * CLUSTER_X_FRAC
         val startClusterY = list.height * START_Y_FRAC
-        val risenClusterY = list.height * RISEN_Y_FRAC
 
         // Wave ordering: top-to-bottom, then left-to-right, by on-screen position.
         val children = (0 until n).mapNotNull { list.getChildAt(it) }
             .sortedWith(compareBy({ it.top }, { it.left }))
 
-        // Every item is BUNCHED at one cluster point (screen-centre, low) at the start -- grouped,
-        // small. It then rises vertically as a group, then zooms OUT (spreads to its own cell +
-        // scales up with a bounce). Cell centres captured so the offsets can be computed each frame.
+        // Every item starts BUNCHED at one off-screen point (screen-centre, below the bottom edge),
+        // small, then flies to its own cell along ONE quadratic Bézier -- rising ~15% up then fanning
+        // out -- while it zooms in. Cell centres + per-item variation seeds captured up front.
         val cellCx = FloatArray(children.size)
         val cellCy = FloatArray(children.size)
-        // Per-item variation seeds (deterministic) -- pace, settle overshoot, and Bézier bow -- so the
-        // spread reads organic and fluid like the folder-open fall, not a rigid formation.
         val pace = FloatArray(children.size)
         val tension = FloatArray(children.size)
         val bowX = FloatArray(children.size)
-        val bowY = FloatArray(children.size)
+        val bendY = FloatArray(children.size) // control-point height (~15% up from the edge), jittered
         children.forEachIndexed { i, v ->
             cellCx[i] = v.left + v.width / 2f
             cellCy[i] = v.top + v.height / 2f
             pace[i] = 1f + (rnd(i, 12.9898f) * 2f - 1f) * PACE_JITTER
             tension[i] = BOUNCE_MIN + rnd(i, 78.233f) * BOUNCE_SPAN
             bowX[i] = BOW_X_MIN + rnd(i, 3.17f) * BOW_X_SPAN
-            bowY[i] = BOW_Y_MIN + rnd(i, 41.7f) * BOW_Y_SPAN
+            bendY[i] = list.height * (BEND_Y_FRAC + (rnd(i, 41.7f) - 0.5f) * BEND_Y_JITTER)
             v.pivotX = v.width / 2f
             v.pivotY = v.height / 2f
             v.scaleX = START_SCALE
@@ -127,31 +119,22 @@ object AresHomeReveal {
                 val t = it.animatedValue as Float
                 children.forEachIndexed { i, v ->
                     val local = ((t - i * stagger) / (PER_ITEM_MS * pace[i])).coerceIn(0f, 1f)
-                    if (local <= RISE_PHASE) {
-                        // Phase 1: the whole cluster rises vertically, still bunched at centre, small.
-                        val u = riseInterp.getInterpolation(local / RISE_PHASE)
-                        val clusterY = startClusterY + (risenClusterY - startClusterY) * u
-                        v.translationX = clusterX - cellCx[i]
-                        v.translationY = clusterY - cellCy[i]
-                        v.scaleX = START_SCALE
-                        v.scaleY = START_SCALE
-                    } else {
-                        // Phase 2: zoom OUT along a CURVED path with a per-item settle spring. A
-                        // quadratic Bézier carries each tile from the risen cluster (P0) to its cell
-                        // (P2 = 0,0) through a per-item control point (P1) so it arcs rather than sliding
-                        // straight; u overshoots past 1 (per-item tension) then springs back = bounce.
-                        val u = overshoot(((local - RISE_PHASE) / (1f - RISE_PHASE)).coerceIn(0f, 1f), tension[i])
-                        val p0x = clusterX - cellCx[i]
-                        val p0y = risenClusterY - cellCy[i]
-                        val ctrlX = p0x * bowX[i]
-                        val ctrlY = p0y * bowY[i]
-                        val omu = 1f - u
-                        v.translationX = omu * omu * p0x + 2f * omu * u * ctrlX
-                        v.translationY = omu * omu * p0y + 2f * omu * u * ctrlY
-                        val s = START_SCALE + (1f - START_SCALE) * u
-                        v.scaleX = s
-                        v.scaleY = s
-                    }
+                    // ONE continuous motion: a single quadratic Bézier from the off-screen cluster
+                    // (P0) to the cell (P2 = 0,0) through a control point (P1) at centre-x, ~15% up
+                    // -- so the icon rises then fans out to its cell in one stroke, no two-phase seam.
+                    // The zoom rides the same parameter; u overshoots past 1 (per-item tension) then
+                    // springs back, bouncing position AND scale into place.
+                    val u = overshoot(local, tension[i])
+                    val omu = 1f - u
+                    val p0x = clusterX - cellCx[i]
+                    val p0y = startClusterY - cellCy[i]
+                    val ctrlX = p0x * bowX[i]        // hug centre-x early, fan out per item
+                    val ctrlY = bendY[i] - cellCy[i] // bend ~15% up from the edge before the cell
+                    v.translationX = omu * omu * p0x + 2f * omu * u * ctrlX
+                    v.translationY = omu * omu * p0y + 2f * omu * u * ctrlY
+                    val s = START_SCALE + (1f - START_SCALE) * u
+                    v.scaleX = s
+                    v.scaleY = s
                 }
             }
             addListener(
