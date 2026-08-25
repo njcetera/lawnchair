@@ -2225,6 +2225,13 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
                 + " rank=" + rank + " folderItemsBefore="
                 + (mInfo != null ? mInfo.getContents().size() : -1));
 
+        // Id-dedup guard (owner "eject + add back duplicates / renders blank", 2026-08-25).
+        // ItemInfo has reference equality, so a stale entry with this id can survive a prior remove
+        // that missed on instance divergence (see AresHomeAdapter.extractChildToDesktop). Filing the
+        // item again would then leave getContents() holding the same id TWICE while the DB holds one
+        // row -- the duplicate tile, and often a blank one (the stale instance never got an icon).
+        // Drop any same-id entry before inserting so membership is exactly one per id.
+        mInfo.getContents().removeIf(existing -> existing.id == item.id);
         rank = Utilities.boundToRange(rank, 0, mInfo.getContents().size());
         mInfo.getContents().add(rank, item);
 

@@ -358,8 +358,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // Remove from the source folder's in-memory contents BEFORE the move, so getContents() is
         // accurate for the BL-6 empty check and the collapse scan. moveItemInDatabase does not touch
         // folder membership. child.container still names the source folder here.
+        //
+        // Remove BY ID, not by object identity. ItemInfo has no equals()/hashCode() (reference
+        // equality), and a reload or drag can leave the adapter row and getContents() holding
+        // DIFFERENT instances with the same id (the state-seam split-brain). `remove(child)` would
+        // then miss, leaving a ghost membership that a later add-back doubles into getContents()
+        // (see Folder.addFolderContent's id-dedup) -- the owner's "eject + add back duplicates /
+        // renders blank" report (2026-08-25).
         val sourceFolder = items.firstOrNull { it.id == child.container } as? FolderInfo
-        sourceFolder?.getContents()?.remove(child)
+        sourceFolder?.getContents()?.removeAll { it.id == child.id }
         launcher.modelWriter.moveItemInDatabase(
             child,
             Favorites.CONTAINER_DESKTOP,
