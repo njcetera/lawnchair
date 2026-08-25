@@ -842,10 +842,6 @@ object AresFolderDrop {
             // If this folder is inline-OPEN, splice the new member into its run so it renders now,
             // not only after a reload (owner bug 2026-08-24). No-op when the folder is collapsed.
             list.aresAdapter.addChildToExpandedRun(folderInfo, item)
-            // Belt-and-suspenders against "added app icons sometimes don't render correctly" (owner
-            // 2026-08-25): re-run the preview rebuild + high-res verify one frame after the model
-            // settles, closing a bind/notify race on the real dwell path.
-            list.aresAdapter.refreshFolderTilePreview(folderInfo.id)
             // As in createFolder: this lands after the drag, so spring the tiles closing the gap.
             list.animateNextRelayout()
             AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
