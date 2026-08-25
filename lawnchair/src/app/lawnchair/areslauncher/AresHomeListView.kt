@@ -733,8 +733,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     v.scaleX = endScale; v.scaleY = endScale
                     v.rotation = 0f
                     v.alpha = if (forward || hasSlot) 1f else 0f
-                    // Rerender the label once the icon reaches its place (open only).
-                    if (forward) btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
+                    // Rerender the label once the icon reaches its place (open only) -- but NOT in
+                    // edit mode, where labels are deliberately hidden (AresEditLabel). The folder
+                    // children are plain grid BubbleTextViews, so shouldTextBeVisible() is true for
+                    // them; without this guard the landing fade-in forced their names back on over
+                    // the edit-mode hide (owner 2026-08-25).
+                    if (forward && !isEditMode()) {
+                        btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
+                    }
                     // Fade the ×/ⓘ/tint back now that the icon has landed (open, edit mode).
                     if (forward && isEditMode()) fadeInEditChrome(v)
                 }
