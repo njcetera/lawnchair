@@ -530,6 +530,34 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private val tmpCardRect = RectF()
 
     /**
+     * Set the alpha of a tile's EDIT-MODE CHROME -- the cell-outline background (the green tint) and
+     * the ×, ⓘ and resize-handle badge views. During a WP folder open/close in edit mode the chrome
+     * is hidden so ONLY the icons fly, then faded back once each icon lands (owner 2026-08-25).
+     * A no-op off edit mode (no background, no badges).
+     */
+    private fun setEditChromeAlpha(container: View, a: Float) {
+        container.background?.alpha = (a * 255f).toInt().coerceIn(0, 255)
+        (container as? ViewGroup)?.let { g ->
+            for (i in 0 until g.childCount) {
+                val c = g.getChildAt(i)
+                when (c.tag) {
+                    AresRemoveBadge.BADGE_TAG, AresInfoBadge.BADGE_TAG, AresWidgetResize.CHEVRON_TAG ->
+                        c.alpha = a
+                }
+            }
+        }
+    }
+
+    /** Fade a tile's edit chrome back in after its open-fall lands. */
+    private fun fadeInEditChrome(container: View) {
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = EDIT_CHROME_FADE_MS
+            addUpdateListener { setEditChromeAlpha(container, it.animatedFraction) }
+            start()
+        }
+    }
+
+    /**
      * The signature WP folder motion: a child icon FALLS out of the folder icon. It appears small at
      * its PREVIEW slot on the folder's face ([originX]/[originY]), drops through the teardrop toward
      * the card (down to [tipY] + [WP_FALL_DROP_PX]) under gravity, then spreads + enlarges to its cell
@@ -631,6 +659,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             v.scaleX = startScale * endScale; v.scaleY = startScale * endScale
             v.rotation = tiltDeg
             v.alpha = if (hasSlot) 1f else 0f
+            // In edit mode, hide the ×/ⓘ/tint so only the icon flies; it fades back on landing.
+            if (isEditMode()) setEditChromeAlpha(v, 0f)
         }
 
         ValueAnimator.ofFloat(0f, 1f).apply {
@@ -705,6 +735,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     v.alpha = if (forward || hasSlot) 1f else 0f
                     // Rerender the label once the icon reaches its place (open only).
                     if (forward) btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
+                    // Fade the ×/ⓘ/tint back now that the icon has landed (open, edit mode).
+                    if (forward && isEditMode()) fadeInEditChrome(v)
                 }
             })
             start()
@@ -773,6 +805,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val cardR = tmpCardRect.right
         val cardB = tmpCardRect.bottom
         v.animate().cancel()
+        // In edit mode, hide the ×/ⓘ/tint so only the icon rises back into the folder (the row is
+        // removed at the end of the close, so there is nothing to fade back).
+        if (isEditMode()) setEditChromeAlpha(v, 0f)
         // Fade the label out as the icon lifts (it is leaving its place; row re-inflated fresh on bind).
         btv?.createTextAlphaAnimator(false)?.setDuration(WP_TEXT_FADE_MS)?.start()
 
@@ -2722,6 +2757,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
         /** Matches the edit-mode enter/exit scale animation. */
         const val EDIT_SCALE_MS = 120L
+        const val EDIT_CHROME_FADE_MS = 150L // fade the ×/ⓘ/tint back after a folder icon lands (edit)
 
         // Start the child falls AFTER the icon morph (220ms) and the reflow (LAYOUT_ANIM_MS 200ms)
         // have both settled, so they fall into an already-cleared gap and never cross a moving tile
