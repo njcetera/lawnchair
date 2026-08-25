@@ -430,7 +430,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return
         // Scale is skipped in edit mode, where the tile scale is owned by the edit-mode cue.
-        val scaleMotion = !isEditMode()
+        val endScale = if (isEditMode()) EDIT_MODE_SCALE else 1f
         post {
             // The signature open (owner 2026-08-24): each icon starts pixel-aligned ON its own preview
             // mini-icon (same position + size), then FALLS out of the folder -- drops through the
@@ -444,7 +444,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     forward = true,
                     delayMs = WP_CHILD_ENTER_DELAY_MS + i * WP_FALL_STAGGER_MS,
                     durationMs = WP_FALL_MS,
-                    scaleMotion = scaleMotion,
+                    endScale = endScale,
                     tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                     startScale = tmpStart[3],
                     hasSlot = hasSlot,
@@ -475,7 +475,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 forward = true,
                 delayMs = 0L,
                 durationMs = WP_FALL_MS,
-                scaleMotion = !isEditMode(),
+                endScale = if (isEditMode()) EDIT_MODE_SCALE else 1f,
                 tiltDeg = WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
                 hasSlot = hasSlot,
@@ -546,7 +546,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         forward: Boolean,
         delayMs: Long,
         durationMs: Long,
-        scaleMotion: Boolean,
+        endScale: Float,
         tiltDeg: Float,
         startScale: Float,
         hasSlot: Boolean,
@@ -628,7 +628,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (forward) {
             v.translationX = startOffX
             v.translationY = startOffY
-            if (scaleMotion) { v.scaleX = startScale; v.scaleY = startScale }
+            v.scaleX = startScale * endScale; v.scaleY = startScale * endScale
             v.rotation = tiltDeg
             v.alpha = if (hasSlot) 1f else 0f
         }
@@ -676,7 +676,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // The top is left free -- the icon legitimately starts up on the folder face
                     // (teardrop). A cell centre is always inside the card, so the landing (x=y=0) is
                     // never clamped.
-                    val rad = iconPx * (if (scaleMotion) s else 1f) * 0.5f
+                    val rad = iconPx * s * endScale * 0.5f
                     var cX = cx + x
                     val loX = cardL + rad
                     val hiX = cardR - rad
@@ -689,7 +689,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 }
                 v.translationX = x
                 v.translationY = y
-                if (scaleMotion) { v.scaleX = s; v.scaleY = s }
+                v.scaleX = s * endScale; v.scaleY = s * endScale
                 v.rotation = rot
                 v.alpha = al
             }
@@ -700,7 +700,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     // the row there is no blink; a slotless one fades to invisible as before.
                     v.translationX = 0f
                     v.translationY = 0f
-                    if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                    v.scaleX = endScale; v.scaleY = endScale
                     v.rotation = 0f
                     v.alpha = if (forward || hasSlot) 1f else 0f
                     // Rerender the label once the icon reaches its place (open only).
@@ -742,7 +742,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         tipY: Float,
         delayMs: Long,
         durationMs: Long,
-        scaleMotion: Boolean,
+        endScale: Float,
         tiltDeg: Float,
         startScale: Float,
         hasSlot: Boolean,
@@ -809,7 +809,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 }
                 if (hasCard) {
                     // Keep the icon inside the folder background (sides + floor; top free, it rises out).
-                    val rad = iconPx * (if (scaleMotion) s else 1f) * 0.5f
+                    val rad = iconPx * s * endScale * 0.5f
                     var cX = cx + x
                     val loX = cardL + rad
                     val hiX = cardR - rad
@@ -822,7 +822,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 }
                 v.translationX = x
                 v.translationY = y
-                if (scaleMotion) { v.scaleX = s; v.scaleY = s }
+                v.scaleX = s * endScale; v.scaleY = s * endScale
                 v.rotation = rot
                 v.alpha = al
             }
@@ -834,14 +834,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                         // reverse of the open's snap hand-off, with no fade.
                         v.translationX = slotOffX
                         v.translationY = slotOffY
-                        if (scaleMotion) { v.scaleX = startScale; v.scaleY = startScale }
+                        v.scaleX = startScale * endScale; v.scaleY = startScale * endScale
                         v.rotation = 0f
                         v.alpha = 1f
                     } else {
                         // Slotless overflow child: it faded out; leave it invisible (row about to go).
                         v.translationX = 0f
                         v.translationY = 0f
-                        if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                        v.scaleX = endScale; v.scaleY = endScale
                         v.rotation = 0f
                         v.alpha = 0f
                     }
@@ -865,7 +865,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     fun onWpFolderCollapsing(folderInfo: FolderInfo): Int {
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return 0
-        val scaleMotion = !isEditMode()
+        val endScale = if (isEditMode()) EDIT_MODE_SCALE else 1f
         val n = childIds.size
         var any = false
         childIds.forEachIndexed { i, id ->
@@ -879,7 +879,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 v, tmpStart[0], tmpStart[1], tmpStart[2],
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
                 durationMs = WP_FALL_CLOSE_MS,
-                scaleMotion = scaleMotion,
+                endScale = endScale,
                 tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
                 hasSlot = hasSlot,
