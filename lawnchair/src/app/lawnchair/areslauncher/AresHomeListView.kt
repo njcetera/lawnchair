@@ -641,10 +641,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 if (t <= WP_FALL_SEG) {
                     val frac = (t / WP_FALL_SEG).coerceIn(0f, 1f)
                     val u = WP_FALL_FALL_INTERP.getInterpolation(frac)
-                    // Vertical drop bounces at the bottom (open only); scale/alpha keep the plain fall.
-                    val uy = if (forward) WP_FALL_BOUNCE_INTERP.getInterpolation(frac) else u
+                    // Smooth accelerating fall straight to the drop point -- NO bounce at the bottom
+                    // (owner 2026-08-24: a bounce here read as awkward, esp. for folders with many
+                    // items); it flows directly into the seg-2 curve, which keeps its springy settle.
                     x = lerpF(startOffX, dropOffX, u)
-                    y = lerpF(startOffY, dropOffY, uy)
+                    y = lerpF(startOffY, dropOffY, u)
                     s = lerpF(startScale, midScale, u)
                     // Slot-backed tiles stay fully opaque (they ARE the preview); slotless ones fade in.
                     al = if (hasSlot) 1f else (u * 2f).coerceIn(0f, 1f)
@@ -2618,15 +2619,6 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** Gravity feel for the fall segment (drives scale + alpha; y uses the bounce below). */
         val WP_FALL_FALL_INTERP: android.view.animation.Interpolator =
             android.view.animation.AccelerateInterpolator(1.5f)
-        /**
-         * Bounce at the bottom of the drop (owner 2026-08-24, "bounce at the bottom before it fans
-         * out"): the VERTICAL fall lands on the drop point and rebounds a couple of decaying times
-         * before segment 2 fans the icon out to its cell. Open only -- on close the icon is rising back
-         * INTO the folder, where a bounce would read wrong. Reaches exactly 1 at input 1, so seg1 still
-         * ends dead-on the drop point and hands off to seg2 with no jump.
-         */
-        val WP_FALL_BOUNCE_INTERP: android.view.animation.Interpolator =
-            android.view.animation.BounceInterpolator()
         // ---- per-child variation (owner 2026-08-24, "less unified ... natural, fluid, bouncy") ----
         // Each child's drop depth, arc bow, pace and settle spring are jittered off its index (wpRnd),
         // so the fan looks organic. The settle OvershootInterpolator is built per child from the tension
