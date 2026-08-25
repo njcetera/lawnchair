@@ -87,10 +87,37 @@ class AresFolderBounds(
     private val baseCardAlpha = Color.alpha(card.color)
     private var runAppearedAt = 0L
 
+    // Material-3 close: as the folder collapses the card fades AWAY with the emphasized-ACCELERATE
+    // curve (exiting surface), and is fully gone before its run is removed so it never pops. Driven
+    // by [beginExit] off the wall clock; multiplies the entrance factor so a close mid-open fades
+    // from wherever the card had reached rather than snapping to full first.
+    private val exitEasing = PathInterpolator(0.3f, 0f, 0.8f, 0.15f) // M3 emphasized accelerate
+    private var collapsingAt = 0L
+    private var exitDurMs = EXIT_MS // EXIT_MS scaled by the system animator duration, set in beginExit
+
+    /** Begin the card's fade-out. Called by [AresHomeListView.onWpFolderCollapsing] on close. */
+    fun beginExit() {
+        // Track the system animator duration scale so the card fade stays in lock-step with the app
+        // furl (a ViewPropertyAnimator, which the system scales) at any developer-options scale.
+        val scale = try {
+            android.provider.Settings.Global.getFloat(
+                list.context.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            )
+        } catch (e: Exception) {
+            1f
+        }
+        exitDurMs = (EXIT_MS * scale).coerceAtLeast(1f)
+        collapsingAt = SystemClock.uptimeMillis()
+        list.postInvalidateOnAnimation()
+    }
+
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
         val run = list.aresAdapter.expandedRunRange()
         if (run == null) {
             runAppearedAt = 0L
+            collapsingAt = 0L
             return
         }
 
@@ -104,8 +131,12 @@ class AresFolderBounds(
         if (runAppearedAt == 0L) runAppearedAt = now
         val raw = ((now - runAppearedAt - ENTER_DELAY_MS).toFloat() / ENTER_MS).coerceIn(0f, 1f)
         val enter = enterEasing.getInterpolation(raw)
-        card.alpha = Math.round(enter * baseCardAlpha)
-        titlePaint.alpha = Math.round(enter * 255f)
+        // Close: drain the card back out from wherever the entrance had reached (no snap-to-full).
+        val exitRaw = if (collapsingAt == 0L) 0f else
+            ((now - collapsingAt).toFloat() / exitDurMs).coerceIn(0f, 1f)
+        val alphaF = enter * (1f - exitEasing.getInterpolation(exitRaw))
+        card.alpha = Math.round(alphaF * baseCardAlpha)
+        titlePaint.alpha = Math.round(alphaF * 255f)
 
         // Full grid-content WIDTH regardless of app count (owner 2026-08-24). Vertically the card
         // runs from a title band above the first app row down past the last, grown by cardPad.
@@ -129,12 +160,16 @@ class AresFolderBounds(
             c.drawText(shown, 0, shown.length, (left + right) / 2f, baseline, titlePaint)
         }
 
-        // Keep the entrance advancing even after the child fades stop invalidating the list.
-        if (raw < 1f) parent.postInvalidateOnAnimation()
+        // Keep the entrance -- and the close fade -- advancing even after the child animators stop
+        // invalidating the list.
+        if (raw < 1f || (collapsingAt != 0L && exitRaw < 1f)) parent.postInvalidateOnAnimation()
     }
 
     private companion object {
         const val ENTER_MS = 260f // M3 medium
+        // Card fade-out on close. Fully drained before AresHomeAdapter.WP_COLLAPSE_EXIT_MS removes the
+        // run, so the card is gone by then and never pops.
+        const val EXIT_MS = 170f
         // The content is sequenced AFTER the icon morph and the tiles-below reflow (owner 2026-08-24):
         // the gap opens empty, THEN the card + apps unfurl into it. So there is never a card sitting
         // under a sliding tile. Matches WP_CHILD_ENTER_DELAY_MS.

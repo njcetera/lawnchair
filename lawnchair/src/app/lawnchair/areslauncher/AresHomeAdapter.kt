@@ -705,6 +705,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
         info.restoreStatus != LauncherAppWidgetInfo.RESTORE_COMPLETED
 
     fun clear() {
+        // A rebind can land during a deferred close; drop the posted structural removal so it can't
+        // fire against the fresh list. (finishCollapse also guards on the id, but leave nothing posted.)
+        pendingCollapse?.let { launcher.workspace?.aresHomeList?.removeCallbacks(it) }
+        pendingCollapse = null
         val size = items.size
         // A full rebind rebuilds every row from the model; any transient WP expansion is gone with
         // it, so the expanded-id must not survive into the fresh list (else collapseWpFolder would
@@ -861,6 +865,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * `container=<folderId>`, so persistOrder skips them and ITH treats them as non-draggable.
      */
     private fun expandWpFolder(folderInfo: FolderInfo) {
+        // Switching folders (toggle collapses the old, then expands the new): complete any in-flight
+        // animated close synchronously first, so the deferred removal can't run AFTER this insert and
+        // corrupt the row list.
+        flushPendingCollapse()
         val folderRow = items.indexOfFirst { it.id == folderInfo.id }
         if (folderRow < 0) return
         val children = folderInfo.getContents().sortedBy { it.rank }
@@ -917,17 +925,80 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /** Remove the spliced child rows of the expanded WP folder, if any. Idempotent. */
+    /**
+     * A collapse whose content-exit animation is in flight, its structural removal posted to run at
+     * [WP_COLLAPSE_EXIT_MS]. Held so any other expand/collapse can force-complete it synchronously
+     * first ([flushPendingCollapse]) -- so the deferred close can never interleave with a new mutation
+     * and corrupt the row list (the surface's #1 historical failure mode).
+     */
+    private var pendingCollapse: Runnable? = null
+
+    /** Force-complete an in-flight animated collapse NOW, before any other row mutation. */
+    private fun flushPendingCollapse() {
+        val p = pendingCollapse ?: return
+        pendingCollapse = null
+        launcher.workspace?.aresHomeList?.removeCallbacks(p)
+        p.run()
+    }
+
+    /**
+     * Close an inline-expanded WP folder as the reverse of the open (owner 2026-08-24): first the
+     * live content exits -- the apps furl back up into the tile and the card fades out
+     * ([AresHomeListView.onWpFolderCollapsing]) -- and only THEN, deferred by [WP_COLLAPSE_EXIT_MS],
+     * do the rows get removed, the tiles reflow up, and the teardrop morph back to a circle
+     * ([finishCollapse]). If there is nothing on screen to animate, it collapses immediately.
+     */
     fun collapseWpFolder() {
+        // Never let two closes overlap: finish any in-flight one before starting/measuring a new one.
+        flushPendingCollapse()
         val id = expandedWpFolderId
         if (id == -1) return
+        val folderInfo = items.firstOrNull { it.id == id } as? FolderInfo
+        val list = launcher.workspace?.aresHomeList
+        if (list != null && folderInfo != null && list.onWpFolderCollapsing(folderInfo)) {
+            val finish = Runnable {
+                pendingCollapse = null
+                finishCollapse(id)
+            }
+            pendingCollapse = finish
+            // The per-app furl is a ViewPropertyAnimator, so it stretches with the system animator
+            // duration scale; scale the removal delay to match, or a >1x scale would remove the rows
+            // mid-furl and snap the apps away. Scale 0 (animations off) -> collapse now.
+            val scale = try {
+                android.provider.Settings.Global.getFloat(
+                    launcher.contentResolver,
+                    android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                    1f,
+                )
+            } catch (e: Exception) {
+                1f
+            }
+            if (scale <= 0f) {
+                flushPendingCollapse()
+            } else {
+                list.postDelayed(finish, (WP_COLLAPSE_EXIT_MS * scale).toLong())
+            }
+        } else {
+            finishCollapse(id)
+        }
+    }
+
+    /**
+     * Structural half of the close: morph the tile back to a circle, remove the folder's child run,
+     * and reflow the tiles below up into the gap. Recomputes the run from the live list (never a
+     * cached count) so it is correct even if membership changed while the exit animation played.
+     */
+    private fun finishCollapse(id: Int) {
+        if (expandedWpFolderId != id) return // already collapsed or superseded
         // Restore the mini-icon preview inside the folder tile now that its members leave the grid.
         setWpFolderPreviewHidden(id, false)
         val folderRow = items.indexOfFirst { it.id == id }
         val folderInfo = items.getOrNull(folderRow) as? FolderInfo
         expandedWpFolderId = -1
-        if (folderRow < 0) return
-        // Remove the contiguous run of this folder's children sitting after the tile. Recomputed
-        // from the live list (not a cached count) so it stays correct if membership changed.
+        if (folderRow < 0) {
+            if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
+            return
+        }
         var count = 0
         while (folderRow + 1 + count < items.size &&
             items[folderRow + 1 + count].container == id
@@ -1313,6 +1384,15 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     override fun onViewRecycled(holder: ViewHolder) {
         holder.container.removeAllViews()
+        // A WP close (or a close cut short by a folder switch) can leave a child tile mid-furl --
+        // faded, shrunk, slid up. Cancel any running property animator and reset the transform so the
+        // recycled holder rebinds from a clean baseline. (The open ends at these same values, so this
+        // is a no-op there.)
+        holder.container.animate().cancel()
+        holder.container.alpha = 1f
+        holder.container.scaleX = 1f
+        holder.container.scaleY = 1f
+        holder.container.translationY = 0f
     }
 
     class ViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
@@ -1320,6 +1400,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private companion object {
         const val TYPE_ICON = 0
         const val TYPE_WIDGET = 1
+
+        // WP folder close: how long the content-exit animation runs before the rows are structurally
+        // removed. Must outlast the per-app furl (AresHomeListView.WP_CHILD_EXIT_MS = 190) and the card
+        // fade (AresFolderBounds.EXIT_MS = 170) so neither is still visible when its view is removed.
+        const val WP_COLLAPSE_EXIT_MS = 200L
 
         /** Stable id for the §C4 drop slot. Nothing else can hold it: real ids are positive. */
         const val DROP_SLOT_ID = Int.MIN_VALUE

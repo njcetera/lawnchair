@@ -70,6 +70,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     private val editDots = AresEditGrid.Dots(context, masonry)
 
+    /**
+     * Material-You card behind an expanded WP folder's apps (assigned in [init]). Held so the close
+     * choreography can tell it to fade the card OUT before the run is removed ([onWpFolderCollapsing]).
+     */
+    private lateinit var folderBounds: AresFolderBounds
+
     init {
         layoutManager = masonry
         adapter = aresAdapter
@@ -98,7 +104,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Draws nothing unless a folder is expanded, so it is free to leave installed. It also owns
         // the vertical space an open folder needs (title band + gaps); hand those to the layout
         // manager so the reserved space and the card geometry are derived from the same numbers.
-        val folderBounds = AresFolderBounds(context, this)
+        folderBounds = AresFolderBounds(context, this)
         addItemDecoration(folderBounds)
         masonry.expandPadTopPx = folderBounds.expandedTopPadPx
         masonry.expandPadBottomPx = folderBounds.expandedBottomPadPx
@@ -449,6 +455,47 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             }
             nudgeExpandedIntoView(folderInfo, childIds)
         }
+    }
+
+    /**
+     * WP accordion CLOSE (owner 2026-08-24) -- the exact reverse of [onWpFolderExpanded]. The opened
+     * apps furl back UP into the folder tile (slide toward its bottom edge + fade + shrink) and the
+     * card fades OUT, and only THEN (deferred by the adapter) do the rows get removed, the tiles
+     * reflow up, and the teardrop morph back to a circle. So the content leaves first and the surface
+     * settles after -- the mirror of the open, where the surface leads and the content follows.
+     *
+     * Returns true when it started an exit animation (live child tiles are on screen); the adapter
+     * then defers the structural collapse by [AresHomeAdapter.WP_COLLAPSE_EXIT_MS]. Returns false when
+     * there is nothing to animate (folder scrolled off, empty) so the adapter collapses immediately.
+     */
+    fun onWpFolderCollapsing(folderInfo: FolderInfo): Boolean {
+        val childIds = folderInfo.getContents().map { it.id }
+        if (childIds.isEmpty()) return false
+        val folderBottom = findViewHolderForItemId(folderInfo.id.toLong())?.itemView?.bottom
+        // Mirror the enter: the scale part is owned by the edit-mode cue in edit mode, so there the
+        // apps only fade + slide, never scale.
+        val scaleExit = !isEditMode()
+        var any = false
+        for (id in childIds) {
+            val v = findViewHolderForItemId(id.toLong())?.itemView ?: continue
+            any = true
+            // Retract to the folder's bottom edge (a hair above the app's cell, never below it) --
+            // the same shared origin the open unfurled FROM.
+            val target = if (folderBottom != null) (folderBottom - v.top).toFloat().coerceAtMost(0f) else 0f
+            val anim = v.animate()
+                .alpha(0f)
+                .translationY(target)
+                .setInterpolator(WP_EXIT_EASING)
+                .setStartDelay(0L)
+                .setDuration(WP_CHILD_EXIT_MS)
+            if (scaleExit) anim.scaleX(WP_CHILD_ENTER_SCALE).scaleY(WP_CHILD_ENTER_SCALE)
+            anim.start()
+        }
+        if (!any) return false
+        // Fade the card out over the same window; it is fully gone before the run is removed, so it
+        // never pops. Reset any leftover child transforms is handled by onViewRecycled on removal.
+        folderBounds.beginExit()
+        return true
     }
 
     /**
@@ -2285,6 +2332,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** M3 emphasized-decelerate, for content entering the screen. */
         val WP_ENTER_EASING: android.view.animation.Interpolator =
             android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+
+        /** WP accordion CLOSE: per-app furl-back as a folder closes (owner 2026-08-24). */
+        const val WP_CHILD_EXIT_MS = 190L // shorter than the enter -- M3: exits are quicker
+        /** M3 emphasized-ACCELERATE, for content leaving the screen (mirror of WP_ENTER_EASING). */
+        val WP_EXIT_EASING: android.view.animation.Interpolator =
+            android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L
