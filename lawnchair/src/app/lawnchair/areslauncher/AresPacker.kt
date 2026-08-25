@@ -161,10 +161,51 @@ object AresPacker {
             }
 
             if (straddler) {
-                var startRow = 0
-                for (y in occupied.indices) if (occupied[y].any { it }) startRow = y + 1
+                // A tall tile shares the folder's row, so a band sliced directly under the folder
+                // would cut it. Open the band just below the folder's ROW BLOCK instead -- past the
+                // bottom of every tile sitting on/over the folder's row (the straddling widget) -- and
+                // slide the content below that down, so the apps stay right under the folder area
+                // rather than dropping to the bottom of the page (owner 2026-08-25). Children then
+                // first-fit into the opened rows, flowing around anything still in them.
+                var bandStart = fy + 1
+                for (idx in spans.indices) {
+                    if (isChild(idx)) continue
+                    val c = cells[idx] ?: continue
+                    val h = spans[idx].h.coerceAtLeast(1)
+                    if (c.y <= fy && c.y + h > bandStart) bandStart = c.y + h
+                }
+                // Slide every non-child tile at/below the band down by the band height.
+                for (idx in spans.indices) {
+                    if (isChild(idx)) continue
+                    val c = cells[idx] ?: continue
+                    if (c.y >= bandStart) cells[idx] = Cell(c.x, c.y + bandRows)
+                }
+                // Rebuild the occupancy grid from the post-slide non-child cells so the child
+                // first-fit below cannot collide with anything (incl. a tall tile that extends into
+                // the band from above).
+                for (row in occupied) row.fill(false)
+                for (idx in spans.indices) {
+                    if (isChild(idx)) continue
+                    val c = cells[idx] ?: continue
+                    val w = spans[idx].w.coerceIn(1, columns)
+                    val h = spans[idx].h.coerceAtLeast(1)
+                    for (dy in 0 until h) {
+                        val r = rowAt(c.y + dy)
+                        for (dx in 0 until w) r[c.x + dx] = true
+                    }
+                }
+                // First-fit each 1x1 child, scanning from the band's first row.
                 for (k in 0 until childCount) {
-                    cells[runFirst + 1 + k] = Cell(k % columns, startRow + k / columns)
+                    var target: Cell? = null
+                    var y = bandStart
+                    while (target == null) {
+                        for (x in 0 until columns) {
+                            if (fits(x, y, 1, 1)) { target = Cell(x, y); break }
+                        }
+                        if (target == null) y++
+                    }
+                    rowAt(target.y)[target.x] = true
+                    cells[runFirst + 1 + k] = target
                 }
             } else {
                 // Phase 2: open a band-height gap directly below the folder's row -- slide every tile
