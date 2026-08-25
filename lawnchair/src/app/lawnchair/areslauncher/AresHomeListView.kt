@@ -1043,14 +1043,20 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     if (hasSlot) {
-                        // HOLD at the preview slot (mini, full alpha) so it reads as the preview until
-                        // finishCollapse snaps the real preview back + removes the row -- the seamless
-                        // reverse of the open's snap hand-off, with no fade.
+                        // Hide the instant it lands. It was HELD here tiny at full alpha to "read as
+                        // the preview" until finishCollapse restored the real one -- but the cascade's
+                        // staggered finishes mean an early-landing child waits out the rest of the run
+                        // (up to (n-1)*stagger) holding tiny, and by then the folder card has already
+                        // faded ~all the way out (beginExit runs over the whole `total`), so the held
+                        // mini-icon reads as a stray tiny icon floating with no card behind it -- the
+                        // close-side of the owner's "tiny icon appears" flash (2026-08-25), the mirror
+                        // of the open pre-set. Going invisible removes it; the collapsed folder tile's
+                        // own preview takes the slot back at finishCollapse a few frames later.
                         v.translationX = slotOffX
                         v.translationY = slotOffY
                         v.scaleX = startScale * endScale; v.scaleY = startScale * endScale
                         v.rotation = 0f
-                        v.alpha = 1f
+                        v.alpha = 0f
                     } else {
                         // Slotless overflow child: it faded out; leave it invisible (row about to go).
                         v.translationX = 0f
