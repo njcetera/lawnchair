@@ -35,10 +35,10 @@ object AresHomeReveal {
     private const val BEND_Y_JITTER = 0.10f     // ±5% of screen height on the bend, per item
     // Per-item variation (like the folder open's wpRnd) so the motion reads organic, not in lockstep.
     private const val PACE_JITTER = 0.16f       // ±16% on each item's duration
-    private const val BOUNCE_MIN = 1.8f         // per-item settle overshoot, low end
-    private const val BOUNCE_SPAN = 1.4f        // ...to BOUNCE_MIN+SPAN, seeded per item
-    private const val BOW_X_MIN = 0.55f         // how much the control hugs centre-x (rise before fanning)
-    private const val BOW_X_SPAN = 0.35f        // ...varied per item so each fans out a little differently
+    private const val BOUNCE_MIN = 0.8f         // per-item settle overshoot, low end
+    private const val BOUNCE_SPAN = 0.6f        // ...to BOUNCE_MIN+SPAN, seeded per item
+    private const val BOW_X_MIN = 0.72f         // how much the control hugs centre-x (rise before fanning)
+    private const val BOW_X_SPAN = 0.30f        // ...varied per item so each fans out a little differently
 
     /** Deterministic 0..1 hash per item index + salt (the folder open's wpRnd, standalone here). */
     private fun rnd(i: Int, salt: Float): Float {
