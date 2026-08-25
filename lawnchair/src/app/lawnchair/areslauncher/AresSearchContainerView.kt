@@ -2,9 +2,11 @@ package app.lawnchair.areslauncher
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.TouchDelegate
 import android.view.View
 import android.view.WindowInsets
 import android.widget.FrameLayout
@@ -208,10 +210,14 @@ class AresSearchContainerView @JvmOverloads constructor(
             return
         }
         val root = rootView ?: return
-        getLocationInWindow(tmpLoc)
+        // Anchor to the PILL's bottom, not the container's: the container is now taller than the pill
+        // (its extra height is the bottom-margin room that makes the corner tappable), so using the
+        // container bottom would sit the bar that much too high above the keyboard. getLocationInWindow
+        // on the pill includes the container's translationY, which we remove to get the constant rest.
+        pill.getLocationInWindow(tmpLoc)
         // Laid-out bottom in window coords, with the current translation removed (getLocationInWindow
         // includes it) — constant across frames.
-        val restBottom = (tmpLoc[1] + height) - translationY
+        val restBottom = (tmpLoc[1] + pill.height) - translationY
         val keyboardTop = root.height - imeBottom
         // Only ever ride UP to sit imeGap above the keyboard; never dip below the resting spot. Early
         // in the keyboard's slide the keyboard top is still below the resting bar, so min() keeps the
@@ -238,6 +244,11 @@ class AresSearchContainerView @JvmOverloads constructor(
         pill.setOnClickListener { if (!expanded) expand() }
         // Collapsed, a click on the icon opens the affordance.
         icon.setOnClickListener { if (!expanded) expand() }
+        // Enlarge the collapsed fob's tap target beyond its 56dp circle (owner 2026-08-25) without
+        // growing the visible circle. Recomputed on every pill layout, since the bar rides up/down
+        // with the IME and re-lays out; the delegate is cleared while expanded (see the helper) so
+        // the full-width input and its ✕ button keep their own hit rects.
+        pill.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> refreshCollapsedTouchTarget() }
         // Expanded, the icon is the dismiss button. Collapse on ACTION_DOWN and consume the gesture,
         // so the tap is not eaten by the IME resolving its own dismissal first — that lag was the
         // old two-tap-to-close bug. When collapsed the listener passes the event through, so the
@@ -266,6 +277,32 @@ class AresSearchContainerView @JvmOverloads constructor(
     }
 
     /**
+     * Enlarges the collapsed fob's tap target by [R.dimen.ares_search_touch_expand] on every side,
+     * via a [TouchDelegate] on the container mapping the inflated rect back to the pill — so the
+     * 56dp circle is easy to hit without being drawn any larger (owner 2026-08-25). Cleared while
+     * expanded, so the full-width input and its trailing ✕ keep their own hit rects. The rect is in
+     * container coordinates and rides with the container's IME translation, so it stays aligned.
+     */
+    private fun refreshCollapsedTouchTarget() {
+        if (expanded) {
+            touchDelegate = null
+            return
+        }
+        val hit = Rect()
+        pill.getHitRect(hit)
+        val extra = resources.getDimensionPixelSize(R.dimen.ares_search_touch_expand)
+        // Grow the hit rect up and to the left by the slop, and all the way OUT to the container's
+        // corner (its right and bottom edges) — that reclaims the end/bottom padding room, so the
+        // whole bottom-right corner and edge open search. Clamped to the container so it can't
+        // exceed what this view can actually receive.
+        hit.left = (hit.left - extra).coerceAtLeast(0)
+        hit.top = (hit.top - extra).coerceAtLeast(0)
+        hit.right = width
+        hit.bottom = height
+        touchDelegate = TouchDelegate(hit, pill)
+    }
+
+    /**
      * Positions the affordance in the bottom-right corner. Called once the container has been added
      * to the `DragLayer` (see [AresSearchUiDelegate.onInitializeSearchBar]) — before that its layout
      * params belong to the apps view and setting them here would be overwritten.
@@ -273,12 +310,18 @@ class AresSearchContainerView @JvmOverloads constructor(
     fun applyRestingPosition() {
         val lp = layoutParams as? FrameLayout.LayoutParams ?: return
         lp.width = FrameLayout.LayoutParams.MATCH_PARENT
-        lp.height = collapsedSize
+        // Taller than the pill and flush to the bottom-right corner, with the pill's end/bottom
+        // margins moved into PADDING (owner 2026-08-25): the container's bounds then reach into the
+        // corner and edge, so the enlarged tap target ([refreshCollapsedTouchTarget]) can cover them,
+        // while the pill still draws exactly where it did (end|bottom against the padded content box).
+        lp.height = collapsedSize + marginBottom
         lp.gravity = android.view.Gravity.BOTTOM
         lp.marginStart = marginHorizontal
-        lp.marginEnd = marginHorizontal
-        lp.bottomMargin = marginBottom
+        lp.marginEnd = 0
+        lp.bottomMargin = 0
         layoutParams = lp
+        // paddingStart 0 keeps the expanded pill's left edge at the start margin (see expandedWidth).
+        setPaddingRelative(0, 0, marginHorizontal, marginBottom)
     }
 
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
@@ -628,6 +671,8 @@ class AresSearchContainerView @JvmOverloads constructor(
         maybeRequestSearchPermissions()
         // Flips `expanded` immediately, so a re-entrant call during the animation is a no-op.
         input.isVisible = true
+        // Drop the enlarged collapsed hit rect the instant we open, so it can't shadow the input.
+        refreshCollapsedTouchTarget()
         // Fade the input in over the width morph rather than hard-appearing it (see animateWidthTo).
         input.alpha = 0f
         // Trailing glyph becomes an explicit close (✕) so "close search" reads as a distinct button
@@ -802,6 +847,8 @@ class AresSearchContainerView @JvmOverloads constructor(
             input.isVisible = false
             input.alpha = 1f
             collapsing = false
+            // Restore the enlarged collapsed hit rect now that the fob is back.
+            refreshCollapsedTouchTarget()
             // Owner: the recolour back to the bright fob colour runs only AFTER the downsize
             // completes, and as a Material circular reveal from the fob's centre outward (owner asked
             // for "an expansion from the centre out ... some fun animation") rather than a flat fade.
@@ -864,7 +911,10 @@ class AresSearchContainerView @JvmOverloads constructor(
     }
 
     /** The pill fills the container, which is already inset by the resting margins. */
-    private fun expandedWidth(): Int = width.coerceAtLeast(collapsedSize)
+    // Content-box width (container width less the start/end padding), so the expanded pill fills to
+    // the same start/end margins it always did now that the end margin lives in paddingEnd.
+    private fun expandedWidth(): Int =
+        (width - paddingStart - paddingEnd).coerceAtLeast(collapsedSize)
 
     private fun animateWidthTo(
         target: Int,

@@ -25,11 +25,17 @@
     android:layout_height="@dimen/ares_search_collapsed_size"
     android:visibility="gone">
 
+    <!--
+         Fixed height (not match_parent) and bottom-anchored: the container is taller than the pill
+         so its bounds reach into the corner/edge margins for a larger tap target (owner 2026-08-25),
+         while paddingEnd/paddingBottom on the container keep the pill drawn in the same spot. The
+         empty area above the pill stays transparent and passes touches through to the list.
+    -->
     <FrameLayout
         android:id="@+id/ares_search_pill"
         android:layout_width="@dimen/ares_search_collapsed_size"
-        android:layout_height="match_parent"
-        android:layout_gravity="end|center_vertical"
+        android:layout_height="@dimen/ares_search_collapsed_size"
+        android:layout_gravity="end|bottom"
         android:background="@drawable/ares_search_background"
         android:clickable="true"
         android:focusable="true">
