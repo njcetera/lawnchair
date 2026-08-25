@@ -911,6 +911,33 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * run to match the append rank addFolderContent gives it, then the tiles below reflow down and the
      * new tile animates in.
      */
+    /**
+     * Force the bound folder tile [folderId] to rebuild its mini-icon preview + re-verify high-res
+     * icons, and its open-run children to re-verify high-res. Defensive: [Folder.addFolderContent]
+     * already calls `mFolderIcon.onItemsChanged`, and each child/preview verifies high-res on bind --
+     * but the owner reports app icons in a folder "sometimes don't render correctly" after a dwell-add
+     * (2026-08-25), which fits a bind/notify race on the real gesture path (not reproducible via the
+     * in-memory test channel). Re-running these one frame after the model settles is idempotent and
+     * closes that race. No-op when the tile is off screen.
+     */
+    fun refreshFolderTilePreview(folderId: Int) {
+        val list = launcher.workspace?.aresHomeList ?: return
+        list.post {
+            val holder = list.findViewHolderForItemId(folderId.toLong()) ?: return@post
+            ((holder.itemView as? android.view.ViewGroup)?.getChildAt(0) as? FolderIcon)
+                ?.onItemsChanged(false)
+            // Open-run children: re-verify each child tile's icon to high res.
+            for (i in 0 until list.childCount) {
+                val v = list.getChildAt(i) ?: continue
+                val btv = ((v as? android.view.ViewGroup)?.getChildAt(0)) as? BubbleTextView ?: continue
+                val holderPos = list.getChildAdapterPosition(v)
+                if (holderPos in items.indices && items[holderPos].container == folderId) {
+                    btv.verifyHighRes()
+                }
+            }
+        }
+    }
+
     fun addChildToExpandedRun(folderInfo: FolderInfo, item: ItemInfo) {
         if (expandedWpFolderId != folderInfo.id) return
         val folderRow = items.indexOfFirst { it.id == folderInfo.id }
