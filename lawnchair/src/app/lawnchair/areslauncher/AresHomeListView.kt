@@ -1278,6 +1278,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * the resting scale afterwards and would otherwise wipe the pop's starting size.
      * [CREATED_PENDING_MS] drops the arming if no bind arrives at all.
      */
+    /**
+     * Eject (owner 2026-08-25): an app leaving a folder pops in at its new grid cell while the
+     * folder run and the tiles below slide closed. The slide is [animateNextRelayout] (armed by the
+     * caller, exempting this item); this supplies the arrival pop. Reuses the folder-created pop --
+     * same overshoot scale-in, same arm-until-bound path for the common case where the new desktop
+     * row has not laid out yet in the frame the extract mutates the adapter.
+     */
+    fun playFolderChildEjected(info: ItemInfo) = playFolderCreated(info)
+
     fun playFolderCreated(info: ItemInfo) {
         if (!ValueAnimator.areAnimatorsEnabled()) return
         val position = aresAdapter.indexOf(info)

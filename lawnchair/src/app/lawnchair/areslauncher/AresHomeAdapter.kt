@@ -374,10 +374,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
             cell[0],
             cell[1],
         )
+        // Eject animation (owner 2026-08-25). The reflow that closes the vacated slot in the folder
+        // run + the grid below must SLIDE, not snap -- armed before the adapter mutation lays out.
+        // The ejected tile is exempt from that slide because it gets its own arrival pop at its new
+        // cell (below), so it appears to leave the folder rather than teleport in.
+        val list = launcher.workspace?.aresHomeList
+        list?.animateNextRelayout(child.id.toLong())
         // Drop the spliced child row and re-add it as an ordinary desktop tile (container is now
         // DESKTOP, so it sorts by rank and is ITH-draggable again). Mirrors AresFolderExitHandoff.
         removeItems { it.id == child.id }
         addItem(child)
+        list?.playFolderChildEjected(child)
         // Resync the source folder tile: if this extract emptied it, its edit-mode X-delete badge
         // must now appear (adversarial review 2026-08-23, finding 3). rebind is cheap and reasserts
         // the badge state from the live count.
