@@ -446,6 +446,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                     startScale = tmpStart[3],
                     hasSlot = hasSlot,
+                    seed = id,
                 )
             }
             // Every tile is now seated exactly over its preview icon: snap the previews off in the SAME
@@ -476,6 +477,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 tiltDeg = WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
                 hasSlot = hasSlot,
+                seed = id,
             )
             // Match the open: snap this member's preview off once its tile is seated over it.
             wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
@@ -545,6 +547,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         tiltDeg: Float,
         startScale: Float,
         hasSlot: Boolean,
+        seed: Int,
     ) {
         // Pivot on the tile's ICON centre, not its view centre: the origin is a preview-icon centre, so
         // aligning the icon (not the label-inclusive view box) is what makes the tile sit pixel-exact on
@@ -561,10 +564,39 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val startOffX = originX - cx
         val startOffY = originY - cy
         val dropOffX = originX - cx // drop straight down from the preview origin
-        val dropOffY = (tipY + WP_FALL_DROP_PX * resources.displayMetrics.density) - cy
+
+        // Per-child variation (owner 2026-08-24: "less unified between all apps ... more natural,
+        // fluid, bouncy"). Each icon gets its OWN drop depth, arc curvature, pace and settle bounce,
+        // seeded DETERMINISTICALLY from its index so the fan looks organic instead of a rigid
+        // formation -- and stable frame-to-frame (no per-frame jitter). None of it moves the landing:
+        // the Bezier's end point is always the exact cell (0,0).
+        val rDrop = wpRnd(seed, 12.9898f)
+        val rBow = wpRnd(seed, 78.233f)
+        val rLift = wpRnd(seed, 55.31f)
+        val rDur = wpRnd(seed, 39.425f)
+        val rOver = wpRnd(seed, 27.611f)
+        val dropPx = WP_FALL_DROP_PX * (1f + (rDrop * 2f - 1f) * WP_FALL_DROP_JITTER)
+        val dropOffY = (tipY + dropPx * resources.displayMetrics.density) - cy
+        // Fan-arc Bezier control, varied per child: cxCtrl decides how long the icon stays under the
+        // folder before cutting toward its column; cyCtrl bows the arc deeper for some. Baseline is
+        // (dropOffX, small) = "rise then arc"; the jitter bends each icon's path a little differently.
+        val cxCtrl = dropOffX * (1f - rBow * WP_FALL_BOW)
+        val cyCtrl = dropOffY * (WP_FALL_BOW_LIFT_MIN + rLift * WP_FALL_BOW_LIFT_SPAN)
+        // Settle with WEIGHT, varied per child: a higher-tension overshoot lands harder and springs
+        // more -- so the icons don't all plop identically.
+        val spread = android.view.animation.OvershootInterpolator(
+            WP_FALL_OVERSHOOT_MIN + rOver * WP_FALL_OVERSHOOT_SPAN,
+        )
         // Mid-fall (drop-point) size: a fraction of the way from this child's own start scale toward
         // full, so the growth is monotonic no matter how large the preview slot already is.
         val midScale = startScale + (1f - startScale) * WP_FALL_DROP_FRAC
+        // A slightly different pace per child (open only -- close timing feeds the deferred removal, so
+        // it must stay the value the adapter scheduled against).
+        val durMs = if (forward) {
+            (durationMs * (1f + (rDur * 2f - 1f) * WP_FALL_DUR_JITTER)).toLong()
+        } else {
+            durationMs
+        }
         v.animate().cancel()
 
         // Hide the icon's LABEL while it is in motion, and fade it back in only once it lands (owner
@@ -592,7 +624,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
 
         ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = durationMs
+            duration = durMs
             startDelay = delayMs
             addUpdateListener { anim ->
                 val t = if (forward) anim.animatedFraction else 1f - anim.animatedFraction
@@ -609,21 +641,20 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     al = if (hasSlot) 1f else (u * 2f).coerceIn(0f, 1f)
                     rot = tiltDeg // hold the tilt while it tumbles out
                 } else {
-                    // Bouncy settle: OvershootInterpolator pushes u past 1 then back, so position,
-                    // scale AND the tilt overshoot their target and spring into place.
-                    val u = WP_FALL_SPREAD_INTERP.getInterpolation(
+                    // Bouncy, weighty settle: the per-child OvershootInterpolator pushes u past 1 then
+                    // back, so position, scale AND the tilt overshoot their target and spring into place.
+                    val u = spread.getInterpolation(
                         ((t - WP_FALL_SEG) / (1f - WP_FALL_SEG)).coerceIn(0f, 1f),
                     )
                     // CURVED fan-out (owner 2026-08-24, "dropped and curved into its final spot"): a
                     // quadratic Bezier from the drop point (dropOffX, dropOffY) to the cell (0, 0) with
-                    // the control at (dropOffX, 0). The icon rises up out of the drop, then arcs
-                    // sideways into its cell -- one fluid curve instead of a straight diagonal that
-                    // kinked off the vertical drop. Closed forms: x = dropOffX*(1-u^2), y = dropOffY*(1-u)^2.
-                    // At u=1 both are 0 (lands dead-on the cell); u>1 (the overshoot) carries mostly
-                    // sideways past the column then springs back.
+                    // a per-child control (cxCtrl, cyCtrl). The icon rises up out of the drop then arcs
+                    // sideways into its cell -- one fluid curve, each app's a little different. P2 is
+                    // always the exact cell, so u=1 lands dead-on; u>1 (the overshoot) carries it past
+                    // the cell along the arc then springs back = weight.
                     val omu = 1f - u
-                    x = dropOffX * (1f - u * u)
-                    y = dropOffY * omu * omu
+                    x = omu * omu * dropOffX + 2f * omu * u * cxCtrl
+                    y = omu * omu * dropOffY + 2f * omu * u * cyCtrl
                     s = lerpF(midScale, 1f, u)
                     al = 1f
                     rot = lerpF(tiltDeg, 0f, u) // overshoots through 0 -> a little wobble, then level
@@ -653,6 +684,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     private fun lerpF(a: Float, b: Float, u: Float): Float = a + (b - a) * u
+
+    /**
+     * Deterministic pseudo-random in [0,1) from a child [seed] and a [salt] (the classic sin-hash).
+     * Stable across frames -- the same child always draws the same value, so the per-child animation
+     * variation is fixed for a given open, not jittering every frame.
+     */
+    private fun wpRnd(seed: Int, salt: Float): Float {
+        val v = kotlin.math.sin((seed + 1).toFloat() * salt) * 43758.545f
+        return v - kotlin.math.floor(v)
+    }
 
     /**
      * WP accordion CLOSE (owner 2026-08-24) -- the exact reverse of [onWpFolderExpanded]. The opened
@@ -687,6 +728,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                 startScale = tmpStart[3],
                 hasSlot = hasSlot,
+                seed = id,
             )
         }
         if (!any) return 0
@@ -2559,14 +2601,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
          */
         val WP_FALL_BOUNCE_INTERP: android.view.animation.Interpolator =
             android.view.animation.BounceInterpolator()
-        /**
-         * Bouncy settle for the spread segment (owner 2026-08-24, "bouncier, more personality"): the
-         * icon OVERSHOOTS its cell + full size, then springs back -- so position, scale and the tilt
-         * all pop past their target and settle. OvershootInterpolator returns exactly 1 at input 1, so
-         * it still lands dead-on the real layout.
-         */
-        val WP_FALL_SPREAD_INTERP: android.view.animation.Interpolator =
-            android.view.animation.OvershootInterpolator(2.2f)
+        // ---- per-child variation (owner 2026-08-24, "less unified ... natural, fluid, bouncy") ----
+        // Each child's drop depth, arc bow, pace and settle spring are jittered off its index (wpRnd),
+        // so the fan looks organic. The settle OvershootInterpolator is built per child from the tension
+        // range below (replaces the old single shared WP_FALL_SPREAD_INTERP).
+        const val WP_FALL_DROP_JITTER = 0.28f // +/- fraction on each child's drop depth
+        const val WP_FALL_DUR_JITTER = 0.13f // +/- fraction on each child's OPEN duration (pace)
+        const val WP_FALL_BOW = 0.45f // how far the arc control can pull inward (0 = straight rise)
+        const val WP_FALL_BOW_LIFT_MIN = 0.06f // min downward bow of the arc control (x drop height)
+        const val WP_FALL_BOW_LIFT_SPAN = 0.28f // added range of the downward bow
+        const val WP_FALL_OVERSHOOT_MIN = 1.7f // settle spring tension, soft end (more weight)
+        const val WP_FALL_OVERSHOOT_SPAN = 1.4f // added range -> up to ~3.1 (harder, bouncier plop)
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L
