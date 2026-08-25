@@ -443,6 +443,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     delayMs = WP_CHILD_ENTER_DELAY_MS + i * WP_FALL_STAGGER_MS,
                     durationMs = WP_FALL_MS,
                     scaleMotion = scaleMotion,
+                    tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
                 )
             }
             nudgeExpandedIntoView(folderInfo, childIds)
@@ -463,6 +464,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 delayMs = 0L,
                 durationMs = WP_FALL_MS,
                 scaleMotion = !isEditMode(),
+                tiltDeg = WP_FALL_TILT_DEG,
             )
         }
     }
@@ -490,6 +492,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         delayMs: Long,
         durationMs: Long,
         scaleMotion: Boolean,
+        tiltDeg: Float,
     ) {
         v.pivotX = v.width / 2f
         v.pivotY = v.height / 2f
@@ -519,6 +522,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             v.translationX = tipOffX
             v.translationY = tipOffY
             if (scaleMotion) { v.scaleX = WP_FALL_TIP_SCALE; v.scaleY = WP_FALL_TIP_SCALE }
+            v.rotation = tiltDeg
             v.alpha = 0f
         }
 
@@ -527,14 +531,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             startDelay = delayMs
             addUpdateListener { anim ->
                 val t = if (forward) anim.animatedFraction else 1f - anim.animatedFraction
-                val x: Float; val y: Float; val s: Float; val al: Float
+                val x: Float; val y: Float; val s: Float; val al: Float; val rot: Float
                 if (t <= WP_FALL_SEG) {
                     val u = WP_FALL_FALL_INTERP.getInterpolation((t / WP_FALL_SEG).coerceIn(0f, 1f))
                     x = lerpF(tipOffX, dropOffX, u)
                     y = lerpF(tipOffY, dropOffY, u)
                     s = lerpF(WP_FALL_TIP_SCALE, WP_FALL_DROP_SCALE, u)
                     al = (u * 2f).coerceIn(0f, 1f) // fade in over the first half of the fall
+                    rot = tiltDeg // hold the tilt while it tumbles out
                 } else {
+                    // Bouncy settle: OvershootInterpolator pushes u past 1 then back, so position,
+                    // scale AND the tilt overshoot their target and spring into place.
                     val u = WP_FALL_SPREAD_INTERP.getInterpolation(
                         ((t - WP_FALL_SEG) / (1f - WP_FALL_SEG)).coerceIn(0f, 1f),
                     )
@@ -542,10 +549,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     y = lerpF(dropOffY, 0f, u)
                     s = lerpF(WP_FALL_DROP_SCALE, 1f, u)
                     al = 1f
+                    rot = lerpF(tiltDeg, 0f, u) // overshoots through 0 -> a little wobble, then level
                 }
                 v.translationX = x
                 v.translationY = y
                 if (scaleMotion) { v.scaleX = s; v.scaleY = s }
+                v.rotation = rot
                 v.alpha = al
             }
             addListener(object : AnimatorListenerAdapter() {
@@ -555,6 +564,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     v.translationX = 0f
                     v.translationY = 0f
                     if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
+                    v.rotation = 0f
                     v.alpha = if (forward) 1f else 0f
                     // Rerender the label once the icon reaches its place (open only).
                     if (forward) btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
@@ -594,6 +604,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
                 durationMs = WP_FALL_CLOSE_MS,
                 scaleMotion = scaleMotion,
+                tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
             )
         }
         if (!any) return 0
@@ -2442,21 +2453,27 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Each icon appears small at the teardrop tip, falls a short way into the card under gravity
         // (segment 1), then spreads + enlarges to its cell on an emphasized-decelerate settle
         // (segment 2). WP_FALL_SEG splits the two segments of one child's timeline.
-        const val WP_FALL_MS = 460L // one child, open
-        const val WP_FALL_STAGGER_MS = 46L // gap between successive children streaming out
+        const val WP_FALL_MS = 500L // one child, open (a touch longer so the bounce has room)
+        const val WP_FALL_STAGGER_MS = 54L // gap between successive children streaming out
         const val WP_FALL_CLOSE_MS = 320L // one child, close (quicker -- M3 exits are faster)
         const val WP_FALL_CLOSE_STAGGER_MS = 30L
-        const val WP_FALL_SEG = 0.42f // fraction of the timeline that is the fall (rest is the spread)
-        const val WP_FALL_DROP_PX = 30f // dp the icon falls below the tip before spreading
-        const val WP_FALL_TIP_SCALE = 0.32f // size at the tip (just emerged from the folder)
-        const val WP_FALL_DROP_SCALE = 0.52f // size at the drop point, before spreading to full
+        const val WP_FALL_SEG = 0.38f // fraction of the timeline that is the fall (rest is the spread)
+        const val WP_FALL_DROP_PX = 40f // dp the icon falls below the tip before spreading
+        const val WP_FALL_TIP_SCALE = 0.3f // size at the tip (just emerged from the folder)
+        const val WP_FALL_DROP_SCALE = 0.5f // size at the drop point, before spreading to full
+        const val WP_FALL_TILT_DEG = 12f // how far a falling icon tips over; alternates sign per index
         const val WP_TEXT_FADE_MS = 130L // label derender/rerender as an icon lifts off / lands
         /** Gravity feel for the fall segment. */
         val WP_FALL_FALL_INTERP: android.view.animation.Interpolator =
-            android.view.animation.AccelerateInterpolator(1.4f)
-        /** Emphasized-decelerate settle for the spread segment (content arriving). */
+            android.view.animation.AccelerateInterpolator(1.5f)
+        /**
+         * Bouncy settle for the spread segment (owner 2026-08-24, "bouncier, more personality"): the
+         * icon OVERSHOOTS its cell + full size, then springs back -- so position, scale and the tilt
+         * all pop past their target and settle. OvershootInterpolator returns exactly 1 at input 1, so
+         * it still lands dead-on the real layout.
+         */
         val WP_FALL_SPREAD_INTERP: android.view.animation.Interpolator =
-            android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+            android.view.animation.OvershootInterpolator(2.2f)
 
         /** Matches the edit-mode scale animation, so the whole mode arrives as one gesture. */
         const val DOTS_FADE_MS = 120L

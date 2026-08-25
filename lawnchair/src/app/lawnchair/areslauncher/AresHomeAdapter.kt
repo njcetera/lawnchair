@@ -1429,7 +1429,9 @@ class AresHomeAdapter(private val launcher: Launcher) :
         holder.container.alpha = 1f
         holder.container.scaleX = 1f
         holder.container.scaleY = 1f
+        holder.container.translationX = 0f
         holder.container.translationY = 0f
+        holder.container.rotation = 0f
     }
 
     class ViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
