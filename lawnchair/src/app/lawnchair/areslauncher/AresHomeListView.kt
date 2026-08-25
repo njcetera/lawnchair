@@ -2532,7 +2532,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         const val WP_FALL_CLOSE_MS = 320L // one child, close (quicker -- M3 exits are faster)
         const val WP_FALL_CLOSE_STAGGER_MS = 30L
         const val WP_FALL_SEG = 0.44f // fraction of the timeline that is the fall (rest is the spread)
-        const val WP_FALL_DROP_PX = 88f // dp the icon falls below the tip before spreading (owner: drop deeper first)
+        const val WP_FALL_DROP_PX = 60f // dp the icon falls below the tip before spreading (owner: drop deeper first)
         const val WP_FALL_TIP_SCALE = 0.3f // fallback start size (child past the 4 preview slots)
         // The mid-fall (drop-point) size is now a FRACTION of the way from the child's own start scale
         // toward full, so a tile that starts at its exact preview-slot size grows monotonically to 1.
