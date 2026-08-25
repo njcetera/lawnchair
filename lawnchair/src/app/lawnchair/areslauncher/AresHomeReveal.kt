@@ -35,17 +35,15 @@ object AresHomeReveal {
     @JvmField
     var enabled = false
 
-    // Per-item feel. All one-line tunable.
-    private const val START_SCALE = 0.24f        // "tiny" -- how small each item starts
-    private const val SLIDE_UP_DP = 46f          // "slide up a bit" -- start this far below its cell
-    private const val PER_ITEM_MS = 460f         // one item's own tiny -> slide -> zoom
-    private const val STAGGER_MS = 26f           // wave spacing between successive items
-    private const val MAX_TOTAL_MS = 1150L       // cap so a full screen never drags on
-    private const val SLIDE_PHASE = 0.5f         // item slides up over the first half of its life
-    private const val ZOOM_START = 0.15f         // zoom (with bounce) begins a beat after the slide
-    private const val BOUNCE_TENSION = 2.6f      // playful overshoot on the zoom-in
+    // Feel. All one-line tunable.
+    private const val START_SCALE = 0.28f        // how small each item starts, bunched at the origin
+    private const val CLUSTER_Y_FRAC = 0.86f     // origin height: fraction down the list (near bottom)
+    private const val PER_ITEM_MS = 500f         // one item's fly-up + zoom
+    private const val STAGGER_MS = 24f           // wave spacing between successive items
+    private const val MAX_TOTAL_MS = 1200L       // cap so a full screen never drags on
+    private const val BOUNCE_TENSION = 2.4f      // playful overshoot as an item lands
 
-    private val slideInterp = DecelerateInterpolator(1.4f)
+    private val moveInterp = DecelerateInterpolator(1.5f)   // the "scroll" -- fly up and settle
     private val zoomInterp = OvershootInterpolator(BOUNCE_TENSION)
 
     private var running: ValueAnimator? = null
@@ -59,25 +57,33 @@ object AresHomeReveal {
 
         running?.cancel()
 
-        val slidePx = SLIDE_UP_DP * list.resources.displayMetrics.density
+        // The origin every item starts bunched at: centre, near the bottom of the list.
+        val originX = list.width / 2f
+        val originY = list.height * CLUSTER_Y_FRAC
 
         // Wave ordering: top-to-bottom, then left-to-right, by on-screen position.
         val children = (0 until n).mapNotNull { list.getChildAt(it) }
             .sortedWith(compareBy({ it.top }, { it.left }))
 
-        // Seat every child at its start frame in the SAME pass, before the first draw, so nothing is
-        // briefly seen full-size at its cell.
-        for (v in children) {
+        // Each item's start is the vector from its own cell centre to the shared origin -- so at
+        // progress 0 they are all piled small at the origin, and at 1 each has flown to its cell.
+        val startDx = FloatArray(children.size)
+        val startDy = FloatArray(children.size)
+        children.forEachIndexed { i, v ->
+            val cx = v.left + v.width / 2f
+            val cy = v.top + v.height / 2f
+            startDx[i] = originX - cx
+            startDy[i] = originY - cy
             v.pivotX = v.width / 2f
             v.pivotY = v.height / 2f
             v.scaleX = START_SCALE
             v.scaleY = START_SCALE
-            v.translationY = slidePx
+            v.translationX = startDx[i]
+            v.translationY = startDy[i]
         }
 
         val staggerSpan = STAGGER_MS * (children.size - 1).coerceAtLeast(0)
         val total = (PER_ITEM_MS + staggerSpan).toLong().coerceAtMost(MAX_TOTAL_MS)
-        // If the cap bit, compress the stagger so the last item still gets its full per-item life.
         val stagger = if (PER_ITEM_MS + staggerSpan <= MAX_TOTAL_MS) {
             STAGGER_MS
         } else {
@@ -90,11 +96,12 @@ object AresHomeReveal {
                 val t = it.animatedValue as Float
                 children.forEachIndexed { i, v ->
                     val local = ((t - i * stagger) / PER_ITEM_MS).coerceIn(0f, 1f)
-                    // Slide up over the first half, then hold at rest.
-                    val rise = slideInterp.getInterpolation((local / SLIDE_PHASE).coerceIn(0f, 1f))
-                    v.translationY = slidePx * (1f - rise)
-                    // Zoom in with a bounce, starting a beat after the slide begins.
-                    val z = zoomInterp.getInterpolation(((local - ZOOM_START) / (1f - ZOOM_START)).coerceIn(0f, 1f))
+                    // Fly up from the bottom origin to the cell (the "scroll" motion).
+                    val move = moveInterp.getInterpolation(local)
+                    v.translationX = startDx[i] * (1f - move)
+                    v.translationY = startDy[i] * (1f - move)
+                    // Zoom in with a bounce as it arrives.
+                    val z = zoomInterp.getInterpolation(local)
                     val s = START_SCALE + (1f - START_SCALE) * z
                     v.scaleX = s
                     v.scaleY = s
@@ -114,6 +121,7 @@ object AresHomeReveal {
         for (v in children) {
             v.scaleX = 1f
             v.scaleY = 1f
+            v.translationX = 0f
             v.translationY = 0f
         }
         running = null
