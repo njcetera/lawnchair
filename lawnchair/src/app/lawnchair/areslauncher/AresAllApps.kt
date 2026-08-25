@@ -58,7 +58,14 @@ object AresAllApps {
         } else {
             R.dimen.ares_app_list_top_padding_sheet
         }
-        return launcher.resources.getDimensionPixelSize(dimen) + ergoTopPaddingPx(launcher)
+        // The ergonomic top band (one-handed reach on the folded handheld) is dropped on the
+        // UNFOLDED pane (isWorkspacePanel): there the pane is a fixed page of the workspace and the
+        // owner wants the single-column list to reach the pane's top edge, not sit a band below it
+        // (owner 2026-08-25, "reach the top and bottom edge like when it's closed"). The folded
+        // app-list sheet keeps the band. Bottom is dropped in the same posture -- see
+        // ActivityAllAppsContainerView.applyAdapterSideAndBottomPaddings.
+        val ergo = if (isWorkspacePanel) 0 else ergoTopPaddingPx(launcher)
+        return launcher.resources.getDimensionPixelSize(dimen) + ergo
     }
 
     /**

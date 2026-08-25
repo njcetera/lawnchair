@@ -1448,6 +1448,14 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         if (!AresAllApps.isAresAppListPane(mActivityContext)) {
             return 0;
         }
+        // The UNFOLDED pane is a workspace page already positioned BELOW the status bar, so there is
+        // no top inset to relocate/flow behind -- relocating one only pushes the list down a band
+        // from the pane's top edge (owner 2026-08-25, "reach the top and bottom edge"). Only the
+        // FOLDED full-window app-list sheet flows behind the status bar. The pane's own setPadding is
+        // a no-op, so returning 0 here leaves the recycler with no top padding at all.
+        if (isAresWorkspacePanel()) {
+            return 0;
+        }
         DeviceProfile grid = mActivityContext.getDeviceProfile();
         if (grid.isVerticalBarLayout() && !FeatureFlags.enableResponsiveWorkspace()) {
             return 0;
@@ -1550,12 +1558,15 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     private void applyAdapterSideAndBottomPaddings(DeviceProfile grid) {
         int stockBottomPadding = Math.max(mInsets.bottom, mNavBarScrimHeight);
         // Ergonomic scroll room at the bottom of the launcher's app list (owner): rows can scroll
-        // clear of the nav gesture area and the corner search pill. Gated on isAresAppListPane -- the
-        // SAME "is this the launcher's own app list" test the top ergo uses (via appListTopPaddingPx)
-        // -- not isAresWorkspacePanel(), which is narrower and left the bottom unpadded while the top
-        // was fine. So the Taskbar sheet and secondary-display host still keep stock padding. Kept as a
-        // single assignment so it stays effectively final for the lambda below.
-        final int bottomPadding = AresAllApps.isAresAppListPane(mActivityContext)
+        // clear of the nav gesture area and the corner search pill. Applied to the FOLDED app-list
+        // sheet (isAresAppListPane && !isAresWorkspacePanel), but dropped on the UNFOLDED pane, where
+        // the owner wants the single-column list to reach the pane's bottom edge rather than sit a
+        // band above it (owner 2026-08-25, "reach the top and bottom edge like when it's closed").
+        // The top band is dropped in the same posture -- see AresAllApps.appListTopPaddingPx. The
+        // Taskbar sheet and secondary-display host (not isAresAppListPane) keep stock padding. Kept as
+        // a single assignment so it stays effectively final for the lambda below.
+        final int bottomPadding =
+                (AresAllApps.isAresAppListPane(mActivityContext) && !isAresWorkspacePanel())
                 ? stockBottomPadding + AresAllApps.ergoBottomPaddingPx(getContext())
                 : stockBottomPadding;
         mAH.forEach(adapterHolder -> {
