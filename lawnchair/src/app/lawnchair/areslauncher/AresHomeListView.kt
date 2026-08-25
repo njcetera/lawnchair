@@ -2,6 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
@@ -18,6 +19,7 @@ import android.view.ViewTreeObserver
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.android.launcher3.AbstractFloatingView
+import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherState
 import com.android.launcher3.R
@@ -498,6 +500,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val dropOffX = tipX - cx // drop straight down from the tip
         val dropOffY = (tipY + WP_FALL_DROP_PX * resources.displayMetrics.density) - cy
         v.animate().cancel()
+
+        // Hide the icon's LABEL while it is in motion, and fade it back in only once it lands (owner
+        // 2026-08-24): a swarm of labels mid-flight reads as clutter. The tile is a container whose
+        // first child is the BubbleTextView that owns the text.
+        val btv = (v as? ViewGroup)?.getChildAt(0) as? BubbleTextView
+        if (forward) {
+            btv?.setTextVisibility(false) // derender the label the instant it lifts off
+        } else {
+            // Close: fade the label out as the icon lifts (it is about to leave its place). No
+            // restore needed -- the row is removed and re-inflated fresh on the next bind.
+            btv?.createTextAlphaAnimator(false)?.setDuration(WP_TEXT_FADE_MS)?.start()
+        }
+
+        // Pre-set the tile to its start frame so it is not briefly visible at its cell during the
+        // stagger delay (open only; on close it legitimately starts at the cell).
+        if (forward) {
+            v.translationX = tipOffX
+            v.translationY = tipOffY
+            if (scaleMotion) { v.scaleX = WP_FALL_TIP_SCALE; v.scaleY = WP_FALL_TIP_SCALE }
+            v.alpha = 0f
+        }
+
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = durationMs
             startDelay = delayMs
@@ -532,6 +556,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     v.translationY = 0f
                     if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
                     v.alpha = if (forward) 1f else 0f
+                    // Rerender the label once the icon reaches its place (open only).
+                    if (forward) btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
                 }
             })
             start()
@@ -2424,6 +2450,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         const val WP_FALL_DROP_PX = 30f // dp the icon falls below the tip before spreading
         const val WP_FALL_TIP_SCALE = 0.32f // size at the tip (just emerged from the folder)
         const val WP_FALL_DROP_SCALE = 0.52f // size at the drop point, before spreading to full
+        const val WP_TEXT_FADE_MS = 130L // label derender/rerender as an icon lifts off / lands
         /** Gravity feel for the fall segment. */
         val WP_FALL_FALL_INTERP: android.view.animation.Interpolator =
             android.view.animation.AccelerateInterpolator(1.4f)
