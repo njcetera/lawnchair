@@ -189,7 +189,11 @@ class AresFolderBounds(
         // Close: drain the card back out from wherever the entrance had reached (no snap-to-full).
         val exitRaw = if (collapsingAt == 0L) 0f else
             ((now - collapsingAt).toFloat() / exitDurMs).coerceIn(0f, 1f)
-        val alphaF = enter * (1f - exitEasing.getInterpolation(exitRaw))
+        // The CLOSE does NOT fade the card (owner 2026-08-25: "close should be the same as the open
+        // but in reverse -- not the fade"). It retracts by BLOOM SCALE into the teardrop tip instead
+        // (see `bloom` below, still driven by exitRaw), staying at full opacity until it is small and
+        // the run is removed. Open keeps its gentle fade-in via `enter`.
+        val alphaF = enter
         card.alpha = Math.round(alphaF * baseCardAlpha)
         titlePaint.alpha = Math.round(alphaF * 255f)
 
