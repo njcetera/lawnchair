@@ -124,6 +124,33 @@ class AresFolderBounds(
      * the card -- the region a tap should open the rename dialog on (owner 2026-08-24). Recomputes the
      * band from the live run exactly as [onDraw] does, so it can never disagree with what is drawn.
      */
+    /**
+     * The FULL (unbloomed) card rectangle in the list's coordinate space -- the same left/top/right/
+     * bottom [onDraw] uses -- written into [out]. Returns false when nothing is expanded or the run has
+     * no on-screen apps. Used by the child-fall animation to keep the flying icons inside the folder
+     * background (owner 2026-08-24: "should NOT go beyond the folder background").
+     */
+    fun cardContentRect(out: RectF): Boolean {
+        val run = list.aresAdapter.expandedRunRange() ?: return false
+        var minTop = Float.MAX_VALUE
+        var maxBottom = -Float.MAX_VALUE
+        var any = false
+        for (pos in (run.first + 1)..run.last) {
+            val v = list.findViewHolderForAdapterPosition(pos)?.itemView ?: continue
+            any = true
+            if (v.top.toFloat() < minTop) minTop = v.top.toFloat()
+            if (v.bottom.toFloat() > maxBottom) maxBottom = v.bottom.toFloat()
+        }
+        if (!any) return false
+        val left = list.paddingLeft.toFloat()
+        val right = (list.width - list.paddingRight).toFloat()
+        val top = minTop - cardPad - titleBandPx
+        val bottom = maxBottom + cardPad
+        if (right <= left || bottom <= top) return false
+        out.set(left, top, right, bottom)
+        return true
+    }
+
     fun titleBandContains(x: Float, y: Float): Boolean {
         val run = list.aresAdapter.expandedRunRange() ?: return false
         var minTop = Int.MAX_VALUE

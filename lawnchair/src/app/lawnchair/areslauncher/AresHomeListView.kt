@@ -6,6 +6,7 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.os.SystemClock
 import android.util.Log
 import android.view.HapticFeedbackConstants
@@ -525,6 +526,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     private val tmpStart = FloatArray(4)
+    private val tmpCardRect = RectF()
 
     /**
      * The signature WP folder motion: a child icon FALLS out of the folder icon. It appears small at
@@ -597,6 +599,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         } else {
             durationMs
         }
+        // Folder-background bounds: the flying icon is kept INSIDE the card (owner 2026-08-24, "should
+        // NOT go beyond the folder background"). Captured once here into immutable locals so all the
+        // children's concurrent animators clamp against a stable rect.
+        val hasCard = folderBounds.cardContentRect(tmpCardRect)
+        val cardL = tmpCardRect.left
+        val cardR = tmpCardRect.right
+        val cardB = tmpCardRect.bottom
         v.animate().cancel()
 
         // Hide the icon's LABEL while it is in motion, and fade it back in only once it lands (owner
@@ -628,7 +637,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             startDelay = delayMs
             addUpdateListener { anim ->
                 val t = if (forward) anim.animatedFraction else 1f - anim.animatedFraction
-                val x: Float; val y: Float; val s: Float; val al: Float; val rot: Float
+                var x: Float; var y: Float; val s: Float; val al: Float; val rot: Float
                 if (t <= WP_FALL_SEG) {
                     val frac = (t / WP_FALL_SEG).coerceIn(0f, 1f)
                     val u = WP_FALL_FALL_INTERP.getInterpolation(frac)
@@ -658,6 +667,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     s = lerpF(midScale, 1f, u)
                     al = 1f
                     rot = lerpF(tiltDeg, 0f, u) // overshoots through 0 -> a little wobble, then level
+                }
+                if (hasCard) {
+                    // Keep the flying icon INSIDE the folder background: clamp its CENTRE to the card's
+                    // sides and floor so the arc, overshoot and deep drop can't spill past the edges.
+                    // The top is left free -- the icon legitimately starts up on the folder face
+                    // (teardrop). A cell centre is always inside the card, so the landing (x=y=0) is
+                    // never clamped.
+                    val rad = iconPx * (if (scaleMotion) s else 1f) * 0.5f
+                    var cX = cx + x
+                    val loX = cardL + rad
+                    val hiX = cardR - rad
+                    if (hiX > loX) cX = cX.coerceIn(loX, hiX)
+                    var cY = cy + y
+                    val hiY = cardB - rad
+                    if (cY > hiY) cY = hiY
+                    x = cX - cx
+                    y = cY - cy
                 }
                 v.translationX = x
                 v.translationY = y
@@ -2605,7 +2631,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Each child's drop depth, arc bow, pace and settle spring are jittered off its index (wpRnd),
         // so the fan looks organic. The settle OvershootInterpolator is built per child from the tension
         // range below (replaces the old single shared WP_FALL_SPREAD_INTERP).
-        const val WP_FALL_DROP_JITTER = 0.28f // +/- fraction on each child's drop depth
+        const val WP_FALL_DROP_JITTER = 0.55f // +/- fraction on each child's drop depth (owner: less uniform)
         const val WP_FALL_DUR_JITTER = 0.13f // +/- fraction on each child's OPEN duration (pace)
         const val WP_FALL_BOW = 0.45f // how far the arc control can pull inward (0 = straight rise)
         const val WP_FALL_BOW_LIFT_MIN = 0.06f // min downward bow of the arc control (x drop height)
