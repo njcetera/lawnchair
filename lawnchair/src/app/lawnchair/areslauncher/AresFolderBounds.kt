@@ -90,24 +90,29 @@ class AresFolderBounds(
     private val baseCardAlpha = Color.alpha(card.color)
     private var runAppearedAt = 0L
 
-    // Material-3 close: as the folder collapses the card fades AWAY with the emphasized-ACCELERATE
-    // curve (exiting surface), and is fully gone before its run is removed so it never pops. Driven
-    // by [beginExit] off the wall clock; multiplies the entrance factor so a close mid-open fades
-    // from wherever the card had reached rather than snapping to full first.
+    // Material-3 close: as the folder collapses the card RETRACTS BY SCALE into the teardrop tip
+    // (the `bloom` term, owner 2026-08-25 "same as the open but in reverse -- not the fade"), on the
+    // emphasized-ACCELERATE curve (exiting surface), reaching its smallest exactly as its run is
+    // removed so it never pops. Drives ONLY the bloom scale now, not alpha. Started by [beginExit]
+    // off the wall clock.
     private val exitEasing = PathInterpolator(0.3f, 0f, 0.8f, 0.15f) // M3 emphasized accelerate
     // Springy scale-pop for the card entrance (owner 2026-08-24), matching the icon flow's bounce.
     private val popEasing = android.view.animation.OvershootInterpolator(2.0f)
     private var collapsingAt = 0L
-    private var exitDurMs = EXIT_MS // EXIT_MS scaled by the system animator duration, set in beginExit
+    // The close's timeline length. Overwritten by [beginExit] on every close (to the full
+    // reverse-cascade length * animator scale) BEFORE any close frame draws, so [EXIT_MS] here is
+    // only a harmless pre-close default and is never the value that actually drives a retract.
+    private var exitDurMs = EXIT_MS
 
     /**
-     * Begin the card's fade-out over [durationMs] (the full reverse-cascade length the caller computes
-     * from the child count), so the card is gone right as the last icon rises into the folder. Called
-     * by [AresHomeListView.onWpFolderCollapsing] on close.
+     * Begin the card's close retract over [durationMs] (the full reverse-cascade length the caller
+     * computes from the child count), so the card reaches its smallest scale right as the last icon
+     * rises into the folder. The card holds full opacity throughout -- the retract is by scale, not a
+     * fade (owner 2026-08-25). Called by [AresHomeListView.onWpFolderCollapsing] on close.
      */
     fun beginExit(durationMs: Float) {
-        // Track the system animator duration scale so the card fade stays in lock-step with the child
-        // falls (ValueAnimators, which the system scales) at any developer-options scale.
+        // Track the system animator duration scale so the card retract stays in lock-step with the
+        // child falls (ValueAnimators, which the system scales) at any developer-options scale.
         val scale = try {
             android.provider.Settings.Global.getFloat(
                 list.context.contentResolver,
@@ -244,8 +249,10 @@ class AresFolderBounds(
         const val ENTER_MS = 260f // M3 medium
         const val BLOOM_START = 0.06f // card scale at the tip before it blooms out to full (overshoot)
 
-        // Card fade-out on close. Fully drained before the reverse-fall cascade finishes and the adapter removes the
-        // run, so the card is gone by then and never pops.
+        // Pre-close default for exitDurMs only. [beginExit] overwrites exitDurMs with the actual
+        // reverse-cascade length on every close before any frame draws, so this value never drives a
+        // real retract; it just keeps the field non-zero at rest. (The close retracts by scale, not a
+        // fade -- see the class body.)
         const val EXIT_MS = 170f
         // The content is sequenced AFTER the icon morph and the tiles-below reflow (owner 2026-08-24):
         // the gap opens empty, THEN the card + apps unfurl into it. So there is never a card sitting

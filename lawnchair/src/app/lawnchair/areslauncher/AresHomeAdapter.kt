@@ -902,16 +902,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     /**
-     * Splice a just-added member into an already-OPEN folder's run so it appears immediately, rather
-     * than only after the next reload (owner bug 2026-08-24: "adding apps to the folder will not
-     * render them if the folder is already open"). No-op unless [folderInfo] is the expanded folder.
-     * The item's container is already the folder id (addFolderContent set it) so it binds as a child
-     * -- fresh-inflated by onBindViewHolder, which is why its icon renders correctly (bug: added apps'
-     * icons sometimes missing was the run never rebinding the row at all). Inserted at the END of the
-     * run to match the append rank addFolderContent gives it, then the tiles below reflow down and the
-     * new tile animates in.
-     */
-    /**
      * Force the bound folder tile [folderId] to rebuild its mini-icon preview + re-verify high-res
      * icons, and its open-run children to re-verify high-res. Defensive: [Folder.addFolderContent]
      * already calls `mFolderIcon.onItemsChanged`, and each child/preview verifies high-res on bind --
@@ -938,6 +928,16 @@ class AresHomeAdapter(private val launcher: Launcher) :
         }
     }
 
+    /**
+     * Splice a just-added member into an already-OPEN folder's run so it appears immediately, rather
+     * than only after the next reload (owner bug 2026-08-24: "adding apps to the folder will not
+     * render them if the folder is already open"). No-op unless [folderInfo] is the expanded folder.
+     * The item's container is already the folder id (addFolderContent set it) so it binds as a child
+     * -- fresh-inflated by onBindViewHolder, which is why its icon renders correctly (bug: added apps'
+     * icons sometimes missing was the run never rebinding the row at all). Inserted at the END of the
+     * run to match the append rank addFolderContent gives it, then the tiles below reflow down and the
+     * new tile animates in.
+     */
     fun addChildToExpandedRun(folderInfo: FolderInfo, item: ItemInfo) {
         if (expandedWpFolderId != folderInfo.id) return
         val folderRow = items.indexOfFirst { it.id == folderInfo.id }

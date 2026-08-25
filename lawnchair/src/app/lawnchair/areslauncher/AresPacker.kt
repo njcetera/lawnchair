@@ -61,8 +61,10 @@ object AresPacker {
      * that widget and pushes the widget DOWN, instead of dropping beneath it (owner report
      * 2026-08-24). A run with any non-1x1 member, or an out-of-range range, is ignored and those
      * items pack individually (safe fallback). A no-run call is byte-for-byte the old behaviour.
-     * The rare case of a tall tile straddling the folder's own row falls back to placing the
-     * children on their own rows below all existing content.
+     * When a tall tile straddles the folder's own row (a band sliced directly under the folder would
+     * cut it), the children open into a band just below the folder's ROW BLOCK -- past the bottom of
+     * every tile sitting on/over that row -- and content below slides down, so they stay right under
+     * the folder area rather than dropping to the page bottom (owner 2026-08-25).
      *
      * The self-non-collision guarantee is preserved: phase 1 places by checked first-fit, the slide
      * moves a disjoint set of tiles uniformly downward, and the children land only in the vacated
@@ -152,8 +154,9 @@ object AresPacker {
             val bandRows = (childCount + columns - 1) / columns
 
             // A tall tile that starts on or above the folder's row but reaches the row just beneath
-            // it would be sliced by inserting a band there. That arrangement is unusual; fall back to
-            // placing the children on their own rows below ALL existing content when it occurs.
+            // it would be sliced by inserting a band directly there. When that happens, the branch
+            // below opens the band past the bottom of that tile's row block instead (not at the page
+            // bottom) -- see the straddler handling further down.
             val straddler = spans.indices.any { idx ->
                 if (isChild(idx)) return@any false
                 val c = cells[idx] ?: return@any false
