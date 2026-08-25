@@ -1243,10 +1243,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // through, whatever its container -- so this covers a HOTSEAT folder, which never routes
         // through the Ares home adapter. A first attempt that healed only in the adapter silently
         // missed the owner's actual case (a hotseat folder). See AresFolderHeal.
-        if (child.getTag() instanceof FolderInfo folderInfo
-                && AresFolderHeal.dedupe(mLauncher, folderInfo)
-                && child instanceof FolderIcon folderIcon) {
-            folderIcon.onItemsChanged(false);
+        if (child.getTag() instanceof FolderInfo folderInfo) {
+            boolean deduped = AresFolderHeal.dedupe(mLauncher, folderInfo);
+            // Heal folder children whose stored icon went stale to a placeholder (owner 2026-08-25).
+            // Async on the model worker thread -- the icon cache asserts that thread -- and repaints
+            // the folder itself when done, so nothing is needed here.
+            AresFolderHeal.refreshChildIcons(mLauncher, folderInfo);
+            if (deduped && child instanceof FolderIcon folderIcon) {
+                folderIcon.onItemsChanged(false);
+            }
         }
         if (container == CONTAINER_DESKTOP) {
             ItemInfo info = (ItemInfo) child.getTag();
