@@ -863,6 +863,17 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 adapterHolder.mRecyclerView.scrollToTop();
             }
         });
+        // AresLauncher: the unfolded app-list pane has no inset-dispatching parent (its parent is a
+        // ShortcutAndWidgetContainer, not an InsettableFrameLayout), so setInsets() -- and with it
+        // applyAdapterSideAndBottomPaddings(), the ONLY place the recycler's bottom padding is set --
+        // never runs on the pane. The top padding lands because the loop above sets it here; the
+        // bottom did not, leaving mPadding.bottom at 0 so the last rows rested flush under the nav
+        // pill with no room to scroll clear. setupHeader() runs reliably on setup with a valid
+        // profile, so apply the bottom extension here too. Scoped to the pane; the folded sheet,
+        // Taskbar and secondary-display host still get theirs via setInsets().
+        if (isAresWorkspacePanel()) {
+            applyAdapterSideAndBottomPaddings(mActivityContext.getDeviceProfile());
+        }
         mAdditionalHeaderRows.forEach(row -> mHeader.onPluginConnected(row, mActivityContext));
 
         removeCustomRules(mHeader);
