@@ -576,6 +576,19 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (childIds.isEmpty()) return
         // Scale is skipped in edit mode, where the tile scale is owned by the edit-mode cue.
         val endScale = if (isEditMode()) EDIT_MODE_SCALE else 1f
+        // Pre-hide the spliced children until the fall arms them one frame later. Without this the
+        // children attach at their FINAL cells (onChildAttachedToWindow writes their resting scale)
+        // and paint there for a frame before the posted fall moves them back onto their preview
+        // slots -- the "tiny icons at the final positions" flash the owner saw on an edit-mode open
+        // (2026-08-25). Only with animations on; the harness path snaps and has no flash to hide.
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            wpFallPendingFolderId = folderInfo.id
+            for (i in 0 until childCount) {
+                val c = getChildAt(i) ?: continue
+                val pos = getChildAdapterPosition(c)
+                if (pos != NO_POSITION && aresAdapter.itemAt(pos)?.container == folderInfo.id) c.alpha = 0f
+            }
+        }
         post {
             // The signature open (owner 2026-08-24): each icon starts pixel-aligned ON its own preview
             // mini-icon (same position + size), then FALLS out of the folder -- drops through the
@@ -601,8 +614,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // transition"). Done here, not in expandWpFolder, so there is never an empty teardrop.
             wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
             nudgeExpandedIntoView(folderInfo, childIds)
+            // Falls are armed for every attached child; stop pre-hiding late-attaching rows.
+            wpFallPendingFolderId = -1
         }
     }
+
+    /**
+     * The folder whose spliced children are pre-hidden until their fall arms (see onWpFolderExpanded
+     * and onChildAttachedToWindow), or -1. Kills the "tiny icons at the final cells" open flash.
+     */
+    private var wpFallPendingFolderId = -1
 
     /**
      * Entrance for a SINGLE child added to an already-open folder (dwell-add while expanded): the
@@ -1657,6 +1678,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val scale = tileScale(child)
         child.scaleX = scale
         child.scaleY = scale
+        // A folder child attaching mid-open would paint at its final cell for the frame before the
+        // posted fall repositions it onto its preview slot. Keep it hidden until the fall arms it.
+        if (wpFallPendingFolderId != -1) {
+            val pos = getChildAdapterPosition(child)
+            if (pos != NO_POSITION && aresAdapter.itemAt(pos)?.container == wpFallPendingFolderId) {
+                child.alpha = 0f
+            }
+        }
         setItemClickable(child, !editMode)
         syncWiggle(child)
         // Affordances too, and not only for rows that were just bound: widget holders are
