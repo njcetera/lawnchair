@@ -686,8 +686,11 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
             return;
         }
         mAresMorphAnim = android.animation.ValueAnimator.ofFloat(mAresMorphProgress, target);
-        mAresMorphAnim.setDuration(220);
-        mAresMorphAnim.setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f));
+        mAresMorphAnim.setDuration(300);
+        // Springy morph: the teardrop's size overshoots on open and squashes a hair on close, matching
+        // the icon flow's personality (owner 2026-08-24). drawAresMorph clamps the corner/preview math
+        // so the out-of-[0,1] progress is safe.
+        mAresMorphAnim.setInterpolator(new android.view.animation.OvershootInterpolator(1.8f));
         mAresMorphAnim.addUpdateListener(a -> {
             mAresMorphProgress = (float) a.getAnimatedValue();
             invalidate();
@@ -732,6 +735,12 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         // put and its radius increases, so it gets larger and its point reaches down near the apps
         // card below the tile (owner request 2026-08-24 -- the earlier "drop" read as awkward). In
         // edit mode it stays at its natural size and centre so the per-tile frost box can't clip it.
+        // The morph now runs on an OvershootInterpolator (owner 2026-08-24, "same personality" as the
+        // icon flow), so p can spring PAST 1 on open and dip BELOW 0 on close. p drives the size only,
+        // where the overshoot reads as a bounce; pClamp (0..1) drives the corner sharpen and the
+        // preview fade, which have no meaning outside [0,1] (a negative addRoundRect corner or an
+        // alpha>255 would be a crash/artifact -- this is the draw path).
+        float pClamp = Math.max(0f, Math.min(1f, p));
         float radius = baseRadius;
         float cy = naturalCy;
         if (!isAresEditMode()) {
@@ -741,12 +750,15 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
             //   topAnchor + r + r*sqrt2 = getHeight() - tipInset.
             float grown = (getHeight() - tipInset - topAnchor) / (1f + 1.41421f);
             grown = Math.max(baseRadius, Math.min(grown, getWidth() * 0.5f - tipInset));
-            radius = baseRadius + (grown - baseRadius) * p;
+            radius = baseRadius + (grown - baseRadius) * p; // p may overshoot -> size bounce
+            // Never exceed the tile (open overshoot), never squash more than a hair (close overshoot).
+            radius = Math.min(radius, getWidth() * 0.5f - tipInset);
+            radius = Math.max(radius, baseRadius * 0.92f);
             cy = topAnchor + radius;
         }
 
         // The shape: a circle whose south corner sharpens from round (p=0) toward a point (p=1).
-        float sharp = radius - (radius - radius / 5f) * p;
+        float sharp = radius - (radius - radius / 5f) * pClamp;
         float left = cx - radius;
         float top = cy - radius;
         mAresPointerPath.reset();
@@ -761,8 +773,8 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         canvas.drawPath(mAresPointerPath, mAresPointerPaint);
 
         // Member previews on TOP of the shape, at their natural position, fading out as it morphs.
-        if (p < 1f && !mCurrentPreviewItems.isEmpty()) {
-            int alpha = Math.round((1f - p) * 255f);
+        if (pClamp < 1f && !mCurrentPreviewItems.isEmpty()) {
+            int alpha = Math.round((1f - pClamp) * 255f);
             if (alpha > 0) {
                 int save = canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), alpha);
                 mPreviewItemManager.draw(canvas);

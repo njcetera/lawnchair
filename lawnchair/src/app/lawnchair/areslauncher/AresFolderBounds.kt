@@ -92,6 +92,8 @@ class AresFolderBounds(
     // by [beginExit] off the wall clock; multiplies the entrance factor so a close mid-open fades
     // from wherever the card had reached rather than snapping to full first.
     private val exitEasing = PathInterpolator(0.3f, 0f, 0.8f, 0.15f) // M3 emphasized accelerate
+    // Springy scale-pop for the card entrance (owner 2026-08-24), matching the icon flow's bounce.
+    private val popEasing = android.view.animation.OvershootInterpolator(2.0f)
     private var collapsingAt = 0L
     private var exitDurMs = EXIT_MS // EXIT_MS scaled by the system animator duration, set in beginExit
 
@@ -170,17 +172,30 @@ class AresFolderBounds(
         val bottom = appViews.maxOf { it.bottom } + cardPad
         if (right <= left || bottom <= top) return
 
-        rect.set(left, top, right, bottom)
+        // Springy pop, same personality as the icon flow (owner 2026-08-24): the card scales up from
+        // POP_START past full and settles (OvershootInterpolator on the linear entrance), and shrinks
+        // back on close. Scaled about its own centre, so it grows/shrinks in place behind the apps.
+        val scaleIn = POP_START + (1f - POP_START) * popEasing.getInterpolation(raw)
+        val cardScale = scaleIn + (POP_START - scaleIn) * exitEasing.getInterpolation(exitRaw)
+        val ccx = (left + right) / 2f
+        val ccy = (top + bottom) / 2f
+        val hw = (right - left) / 2f * cardScale
+        val hh = (bottom - top) / 2f * cardScale
+        val sLeft = ccx - hw
+        val sRight = ccx + hw
+        val sTop = ccy - hh
+
+        rect.set(sLeft, sTop, ccx + hw, ccy + hh)
         c.drawRoundRect(rect, cardRadius, cardRadius, card)
 
-        // The folder title, centred in the band at the top of the card, standing in for the label
-        // that the folder icon hides while expanded.
+        // The folder title, centred in the band at the top of the (scaled) card, standing in for the
+        // label that the folder icon hides while expanded.
         val title = list.aresAdapter.expandedWpFolderTitle()?.toString()
         if (!title.isNullOrEmpty()) {
-            val avail = (right - left - 2 * titleHPad).coerceAtLeast(0f)
+            val avail = (sRight - sLeft - 2 * titleHPad).coerceAtLeast(0f)
             val shown = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END)
-            val baseline = top + titleVPad - titlePaint.ascent()
-            c.drawText(shown, 0, shown.length, (left + right) / 2f, baseline, titlePaint)
+            val baseline = sTop + titleVPad - titlePaint.ascent()
+            c.drawText(shown, 0, shown.length, ccx, baseline, titlePaint)
         }
 
         // Keep the entrance -- and the close fade -- advancing even after the child animators stop
@@ -190,6 +205,8 @@ class AresFolderBounds(
 
     private companion object {
         const val ENTER_MS = 260f // M3 medium
+        const val POP_START = 0.9f // card scales up from this to 1 (overshooting) as it appears
+
         // Card fade-out on close. Fully drained before the reverse-fall cascade finishes and the adapter removes the
         // run, so the card is gone by then and never pops.
         const val EXIT_MS = 170f
