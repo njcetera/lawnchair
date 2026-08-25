@@ -172,30 +172,33 @@ class AresFolderBounds(
         val bottom = appViews.maxOf { it.bottom } + cardPad
         if (right <= left || bottom <= top) return
 
-        // Springy pop, same personality as the icon flow (owner 2026-08-24): the card scales up from
-        // POP_START past full and settles (OvershootInterpolator on the linear entrance), and shrinks
-        // back on close. Scaled about its own centre, so it grows/shrinks in place behind the apps.
-        val scaleIn = POP_START + (1f - POP_START) * popEasing.getInterpolation(raw)
-        val cardScale = scaleIn + (POP_START - scaleIn) * exitEasing.getInterpolation(exitRaw)
-        val ccx = (left + right) / 2f
-        val ccy = (top + bottom) / 2f
-        val hw = (right - left) / 2f * cardScale
-        val hh = (bottom - top) / 2f * cardScale
-        val sLeft = ccx - hw
-        val sRight = ccx + hw
-        val sTop = ccy - hh
+        // BLOOM FROM THE DROP (owner 2026-08-24, chosen over the ripple in an A/B): the card grows OUT
+        // OF the teardrop's tip on open and collapses back INTO it on close, so it reads as the drop
+        // opening into its apps rather than a panel fading in. The pivot is the tip (bottom-centre of
+        // the folder tile), not the card centre; the scale springs from BLOOM_START to 1
+        // (OvershootInterpolator) and reverses on exit.
+        val folderView = parent.findViewHolderForAdapterPosition(run.first)?.itemView
+        val tipX = folderView?.let { it.left + it.width / 2f } ?: ((left + right) / 2f)
+        val tipY = folderView?.bottom?.toFloat() ?: top
+        val bloomIn = BLOOM_START + (1f - BLOOM_START) * popEasing.getInterpolation(raw)
+        val bloom = bloomIn + (BLOOM_START - bloomIn) * exitEasing.getInterpolation(exitRaw)
+        val sLeft = tipX + (left - tipX) * bloom
+        val sTop = tipY + (top - tipY) * bloom
+        val sRight = tipX + (right - tipX) * bloom
+        val sBottom = tipY + (bottom - tipY) * bloom
 
-        rect.set(sLeft, sTop, ccx + hw, ccy + hh)
-        c.drawRoundRect(rect, cardRadius, cardRadius, card)
+        rect.set(sLeft, sTop, sRight, sBottom)
+        val r = cardRadius * bloom
+        c.drawRoundRect(rect, r, r, card)
 
-        // The folder title, centred in the band at the top of the (scaled) card, standing in for the
+        // The folder title, centred in the band at the top of the (bloomed) card, standing in for the
         // label that the folder icon hides while expanded.
         val title = list.aresAdapter.expandedWpFolderTitle()?.toString()
         if (!title.isNullOrEmpty()) {
             val avail = (sRight - sLeft - 2 * titleHPad).coerceAtLeast(0f)
             val shown = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END)
             val baseline = sTop + titleVPad - titlePaint.ascent()
-            c.drawText(shown, 0, shown.length, ccx, baseline, titlePaint)
+            c.drawText(shown, 0, shown.length, (sLeft + sRight) / 2f, baseline, titlePaint)
         }
 
         // Keep the entrance -- and the close fade -- advancing even after the child animators stop
@@ -205,7 +208,7 @@ class AresFolderBounds(
 
     private companion object {
         const val ENTER_MS = 260f // M3 medium
-        const val POP_START = 0.9f // card scales up from this to 1 (overshooting) as it appears
+        const val BLOOM_START = 0.06f // card scale at the tip before it blooms out to full (overshoot)
 
         // Card fade-out on close. Fully drained before the reverse-fall cascade finishes and the adapter removes the
         // run, so the card is gone by then and never pops.
