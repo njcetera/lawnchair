@@ -430,22 +430,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Scale is skipped in edit mode, where the tile scale is owned by the edit-mode cue.
         val scaleMotion = !isEditMode()
         post {
-            // The signature open (owner 2026-08-24): each icon FALLS out of the folder icon -- it
-            // appears small at the teardrop's tip, drops into the card, then spreads + enlarges to
-            // its cell. Staggered so they stream out one after another. Delayed past the icon morph
-            // and the tiles-below reflow, so they fall into an already-opened gap.
-            val o = wpFallOrigin(folderInfo) ?: return@post
+            // The signature open (owner 2026-08-24): each icon starts pixel-aligned ON its own preview
+            // mini-icon (same position + size), then FALLS out of the folder -- drops through the
+            // teardrop into the card, then spreads + enlarges to its cell. Staggered so they stream out
+            // one after another. Delayed past the icon morph and the tiles-below reflow.
             childIds.forEachIndexed { i, id ->
                 val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@forEachIndexed
+                val hasSlot = wpChildStart(folderInfo, i, tmpStart)
                 playWpChildFall(
-                    v, o[0], o[1], o[2],
+                    v, tmpStart[0], tmpStart[1], tmpStart[2],
                     forward = true,
                     delayMs = WP_CHILD_ENTER_DELAY_MS + i * WP_FALL_STAGGER_MS,
                     durationMs = WP_FALL_MS,
                     scaleMotion = scaleMotion,
                     tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
+                    startScale = tmpStart[3],
+                    hasSlot = hasSlot,
                 )
             }
+            // Every tile is now seated exactly over its preview icon: snap the previews off in the SAME
+            // frame -- a seamless preview->tile swap (owner 2026-08-24, "there's still like a
+            // transition"). Done here, not in expandWpFolder, so there is never an empty teardrop.
+            wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
             nudgeExpandedIntoView(folderInfo, childIds)
         }
     }
@@ -457,37 +463,66 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     fun animateWpChildEnter(folderInfo: FolderInfo, id: Int) {
         post {
             val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@post
-            val o = wpFallOrigin(folderInfo) ?: return@post
+            // A dwell-added child is the newest member, so it maps to the LAST preview slot (its index
+            // among contents); resolve that slot exactly, falling back to the cluster centre.
+            val index = folderInfo.getContents().sortedBy { it.rank }.indexOfFirst { it.id == id }
+            val hasSlot = wpChildStart(folderInfo, index.coerceAtLeast(0), tmpStart)
             playWpChildFall(
-                v, o[0], o[1], o[2],
+                v, tmpStart[0], tmpStart[1], tmpStart[2],
                 forward = true,
                 delayMs = 0L,
                 durationMs = WP_FALL_MS,
                 scaleMotion = !isEditMode(),
                 tiltDeg = WP_FALL_TILT_DEG,
+                startScale = tmpStart[3],
+                hasSlot = hasSlot,
             )
+            // Match the open: snap this member's preview off once its tile is seated over it.
+            wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
         }
     }
 
     private val tmpPreview = FloatArray(3)
 
+    /** The FolderIcon of folder [id] if its tile is bound on screen. */
+    private fun wpFolderIcon(id: Int): FolderIcon? =
+        ((findViewHolderForItemId(id.toLong())?.itemView as? ViewGroup)?.getChildAt(0) as? FolderIcon)
+
     /**
-     * The fall's geometry in this list's coordinate space: {originX, originY, tipY}. The ORIGIN is the
-     * centre of the folder's PREVIEW cluster -- on the folder's face, where its mini member icons are
-     * drawn -- so an app tile starts exactly where its preview sits and reads as the preview converting
-     * into it (owner 2026-08-24), rather than materialising at the teardrop tip below the folder. tipY
-     * is still the teardrop tip (folder tile bottom), the reference for the mid-fall drop point.
+     * Resolve child [index]'s fall START in this list's coordinate space, filling
+     * [out] = {originX, originY, tipY, startScale}. When the child maps to one of the folder's real
+     * preview slots (the first four), the origin is that slot's EXACT centre and startScale is its
+     * exact drawn size / the full icon size -- so the app tile begins pixel-aligned on its own preview
+     * mini-icon and the swap reads as the preview simply becoming the tile (owner 2026-08-24, "there's
+     * still like a transition"). Beyond four children there is no preview slot: fall back to the
+     * cluster centre at [WP_FALL_TIP_SCALE]. Returns true iff a real preview slot was used.
      */
-    private fun wpFallOrigin(folderInfo: FolderInfo): FloatArray? {
-        val fv = findViewHolderForItemId(folderInfo.id.toLong())?.itemView ?: return null
-        val tipY = fv.bottom.toFloat()
+    private fun wpChildStart(folderInfo: FolderInfo, index: Int, out: FloatArray): Boolean {
+        val fv = findViewHolderForItemId(folderInfo.id.toLong())?.itemView
+        if (fv == null) { out[0] = 0f; out[1] = 0f; out[2] = 0f; out[3] = WP_FALL_TIP_SCALE; return false }
+        out[2] = fv.bottom.toFloat() // tipY (teardrop tip = folder tile bottom)
         val icon = (fv as? ViewGroup)?.getChildAt(0) as? FolderIcon
+        if (icon != null && icon.getAresPreviewSlot(index, tmpPreview)) {
+            out[0] = fv.left + icon.left + tmpPreview[0]
+            out[1] = fv.top + icon.top + tmpPreview[1]
+            val iconPx = launcher.deviceProfile.iconSizePx.toFloat()
+            out[3] = if (iconPx > 0f) tmpPreview[2] / iconPx else WP_FALL_TIP_SCALE
+            return true
+        }
+        // Fallback: cluster centre (or tile centre if the icon isn't bound), small tip scale.
         if (icon != null) {
             icon.getAresPreviewCenter(tmpPreview)
-            return floatArrayOf(fv.left + icon.left + tmpPreview[0], fv.top + icon.top + tmpPreview[1], tipY)
+            out[0] = fv.left + icon.left + tmpPreview[0]
+            out[1] = fv.top + icon.top + tmpPreview[1]
+        } else {
+            out[0] = fv.left + fv.width / 2f
+            out[1] = out[2]
         }
-        return floatArrayOf(fv.left + fv.width / 2f, tipY, tipY) // fallback: the tip (old behaviour)
+        out[3] = WP_FALL_TIP_SCALE
+        return false
     }
+
+    private val tmpStart = FloatArray(4)
 
     /**
      * The signature WP folder motion: a child icon FALLS out of the folder icon. It appears small at
@@ -508,21 +543,33 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         durationMs: Long,
         scaleMotion: Boolean,
         tiltDeg: Float,
+        startScale: Float,
+        hasSlot: Boolean,
     ) {
-        v.pivotX = v.width / 2f
-        v.pivotY = v.height / 2f
-        val cx = v.left + v.width / 2f
-        val cy = v.top + v.height / 2f
+        // Pivot on the tile's ICON centre, not its view centre: the origin is a preview-icon centre, so
+        // aligning the icon (not the label-inclusive view box) is what makes the tile sit pixel-exact on
+        // its preview slot. At rest (scale 1, translation 0) the pivot is irrelevant, so the cell landing
+        // is unaffected.
+        val btv = (v as? ViewGroup)?.getChildAt(0) as? BubbleTextView
+        val iconPx = launcher.deviceProfile.iconSizePx.toFloat()
+        val pivotXv = btv?.let { it.left + it.width / 2f } ?: (v.width / 2f)
+        val pivotYv = btv?.let { it.top + it.paddingTop + iconPx / 2f } ?: (v.height / 2f)
+        v.pivotX = pivotXv
+        v.pivotY = pivotYv
+        val cx = v.left + pivotXv
+        val cy = v.top + pivotYv
         val startOffX = originX - cx
         val startOffY = originY - cy
         val dropOffX = originX - cx // drop straight down from the preview origin
         val dropOffY = (tipY + WP_FALL_DROP_PX * resources.displayMetrics.density) - cy
+        // Mid-fall (drop-point) size: a fraction of the way from this child's own start scale toward
+        // full, so the growth is monotonic no matter how large the preview slot already is.
+        val midScale = startScale + (1f - startScale) * WP_FALL_DROP_FRAC
         v.animate().cancel()
 
         // Hide the icon's LABEL while it is in motion, and fade it back in only once it lands (owner
         // 2026-08-24): a swarm of labels mid-flight reads as clutter. The tile is a container whose
         // first child is the BubbleTextView that owns the text.
-        val btv = (v as? ViewGroup)?.getChildAt(0) as? BubbleTextView
         if (forward) {
             btv?.setTextVisibility(false) // derender the label the instant it lifts off
         } else {
@@ -532,13 +579,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
 
         // Pre-set the tile to its start frame so it is not briefly visible at its cell during the
-        // stagger delay (open only; on close it legitimately starts at the cell).
+        // stagger delay (open only; on close it legitimately starts at the cell). A slot-backed tile
+        // starts at FULL alpha, sitting exactly over its (about-to-be-hidden) preview icon, so the
+        // preview->tile hand-off is a seamless swap rather than a cross-fade; a slotless overflow child
+        // (5th+ app, no preview) still fades in from the cluster centre.
         if (forward) {
             v.translationX = startOffX
             v.translationY = startOffY
-            if (scaleMotion) { v.scaleX = WP_FALL_TIP_SCALE; v.scaleY = WP_FALL_TIP_SCALE }
+            if (scaleMotion) { v.scaleX = startScale; v.scaleY = startScale }
             v.rotation = tiltDeg
-            v.alpha = 0f
+            v.alpha = if (hasSlot) 1f else 0f
         }
 
         ValueAnimator.ofFloat(0f, 1f).apply {
@@ -551,8 +601,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     val u = WP_FALL_FALL_INTERP.getInterpolation((t / WP_FALL_SEG).coerceIn(0f, 1f))
                     x = lerpF(startOffX, dropOffX, u)
                     y = lerpF(startOffY, dropOffY, u)
-                    s = lerpF(WP_FALL_TIP_SCALE, WP_FALL_DROP_SCALE, u)
-                    al = (u * 2f).coerceIn(0f, 1f) // fade in over the first half of the fall
+                    s = lerpF(startScale, midScale, u)
+                    // Slot-backed tiles stay fully opaque (they ARE the preview); slotless ones fade in.
+                    al = if (hasSlot) 1f else (u * 2f).coerceIn(0f, 1f)
                     rot = tiltDeg // hold the tilt while it tumbles out
                 } else {
                     // Bouncy settle: OvershootInterpolator pushes u past 1 then back, so position,
@@ -562,7 +613,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     )
                     x = lerpF(dropOffX, 0f, u)
                     y = lerpF(dropOffY, 0f, u)
-                    s = lerpF(WP_FALL_DROP_SCALE, 1f, u)
+                    s = lerpF(midScale, 1f, u)
                     al = 1f
                     rot = lerpF(tiltDeg, 0f, u) // overshoots through 0 -> a little wobble, then level
                 }
@@ -574,13 +625,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    // Land clean at the cell (open) or invisible at the tip (close; the row is about
-                    // to be removed + recycled, which resets transforms anyway).
+                    // Land clean at the cell (open). On close a slot-backed tile finishes FULLY OPAQUE
+                    // exactly over its preview slot, so when the adapter restores the preview + removes
+                    // the row there is no blink; a slotless one fades to invisible as before.
                     v.translationX = 0f
                     v.translationY = 0f
                     if (scaleMotion) { v.scaleX = 1f; v.scaleY = 1f }
                     v.rotation = 0f
-                    v.alpha = if (forward) 1f else 0f
+                    v.alpha = if (forward || hasSlot) 1f else 0f
                     // Rerender the label once the icon reaches its place (open only).
                     if (forward) btv?.createTextAlphaAnimator(true)?.setDuration(WP_TEXT_FADE_MS)?.start()
                 }
@@ -606,20 +658,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return 0
         val scaleMotion = !isEditMode()
-        val o = wpFallOrigin(folderInfo) ?: return 0
         val n = childIds.size
         var any = false
         childIds.forEachIndexed { i, id ->
             val v = findViewHolderForItemId(id.toLong())?.itemView ?: return@forEachIndexed
             any = true
-            // Reverse cascade: the FARTHEST child leaves first, so the run zips back UP into the tile.
+            // Each child furls back to its OWN preview slot (mirror of the open), so it lands
+            // pixel-exact where the restored preview icon will reappear. Reverse cascade: the FARTHEST
+            // child leaves first, so the run zips back UP into the tile.
+            val hasSlot = wpChildStart(folderInfo, i, tmpStart)
             playWpChildFall(
-                v, o[0], o[1], o[2],
+                v, tmpStart[0], tmpStart[1], tmpStart[2],
                 forward = false,
                 delayMs = (n - 1 - i) * WP_FALL_CLOSE_STAGGER_MS,
                 durationMs = WP_FALL_CLOSE_MS,
                 scaleMotion = scaleMotion,
                 tiltDeg = if (i % 2 == 0) WP_FALL_TILT_DEG else -WP_FALL_TILT_DEG,
+                startScale = tmpStart[3],
+                hasSlot = hasSlot,
             )
         }
         if (!any) return 0
@@ -2474,8 +2530,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         const val WP_FALL_CLOSE_STAGGER_MS = 30L
         const val WP_FALL_SEG = 0.38f // fraction of the timeline that is the fall (rest is the spread)
         const val WP_FALL_DROP_PX = 40f // dp the icon falls below the tip before spreading
-        const val WP_FALL_TIP_SCALE = 0.3f // size at the tip (just emerged from the folder)
-        const val WP_FALL_DROP_SCALE = 0.5f // size at the drop point, before spreading to full
+        const val WP_FALL_TIP_SCALE = 0.3f // fallback start size (child past the 4 preview slots)
+        // The mid-fall (drop-point) size is now a FRACTION of the way from the child's own start scale
+        // toward full, so a tile that starts at its exact preview-slot size grows monotonically to 1.
+        const val WP_FALL_DROP_FRAC = 0.45f
         const val WP_FALL_TILT_DEG = 12f // how far a falling icon tips over; alternates sign per index
         const val WP_TEXT_FADE_MS = 130L // label derender/rerender as an icon lifts off / lands
         /** Gravity feel for the fall segment. */

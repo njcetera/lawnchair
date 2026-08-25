@@ -626,6 +626,15 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         out[2] = mBackground.previewSize;
     }
 
+    /**
+     * Ares: exact centre + drawn size of preview item [index] in this icon's local coords, or false if
+     * there is no such preview slot. The WP open starts app tile [index] precisely here so the preview
+     * reads as morphing into the icon. out = {centreX, centreY, size}.
+     */
+    public boolean getAresPreviewSlot(int index, float[] out) {
+        return mPreviewItemManager != null && mPreviewItemManager.getAresPreviewSlot(index, out);
+    }
+
     public PreviewItemManager getPreviewItemManager() {
         return mPreviewItemManager;
     }
@@ -687,6 +696,16 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         // the top of the apps card instead (owner 2026-08-24). Restored on collapse.
         if (mFolderName != null) {
             mFolderName.setTextVisibility(!hide);
+        }
+        // Preview-item visibility is a SNAP, not a fade tied to the morph (owner 2026-08-24: the old
+        // fade read as a "transition" separate from the tiles). The tiles emerge exactly on top of the
+        // previews, so the swap must be instantaneous and TIMED by the tile placement:
+        //  - bind/snap (!animate): match the expanded state immediately.
+        //  - animated COLLAPSE (animate && !hide): the reverse-fall has finished, so restore now.
+        //  - animated EXPAND (animate && hide): DON'T touch items here -- AresHomeListView hides them
+        //    in the same synchronous pass that seats the tiles on their slots (setAresPreviewItemsHidden).
+        if (mPreviewItemManager != null && (!animate || !hide)) {
+            mPreviewItemManager.setAllPreviewItemsHidden(hide);
         }
         float target = hide ? 1f : 0f;
         if (mAresMorphAnim != null) {
@@ -785,14 +804,26 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         mAresPointerPaint.setColor(mBackground.getBgColor());
         canvas.drawPath(mAresPointerPath, mAresPointerPaint);
 
-        // Member previews on TOP of the shape, at their natural position, fading out as it morphs.
-        if (pClamp < 1f && !mCurrentPreviewItems.isEmpty()) {
-            int alpha = Math.round((1f - pClamp) * 255f);
-            if (alpha > 0) {
-                int save = canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), alpha);
-                mPreviewItemManager.draw(canvas);
-                canvas.restoreToCount(save);
-            }
+        // Member previews on TOP of the shape, at their natural position, at FULL opacity. Their
+        // visibility is a hard on/off owned by setAllPreviewItemsHidden (each hidden item skips itself
+        // in draw), so the WP open can swap preview->tile in a single frame with no cross-fade (owner
+        // 2026-08-24). No morph-linked alpha fade here any more.
+        if (!mCurrentPreviewItems.isEmpty()) {
+            mPreviewItemManager.draw(canvas);
+        }
+    }
+
+    /**
+     * Ares WP open: snap every preview item hidden/visible right now (no morph). Called by
+     * {@link com.android.launcher3.folder.PreviewItemManager} clients -- AresHomeListView drives it in
+     * the same synchronous pass that seats the app tiles on their preview slots, so the preview reads
+     * as becoming the tile with no flicker. Distinct from {@link #setAresHidePreviewItems} (which also
+     * runs the circle&lt;-&gt;teardrop shape morph).
+     */
+    public void setAresPreviewItemsHidden(boolean hidden) {
+        if (mPreviewItemManager != null) {
+            mPreviewItemManager.setAllPreviewItemsHidden(hidden);
+            invalidate();
         }
     }
 

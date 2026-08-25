@@ -318,6 +318,31 @@ public class PreviewItemManager {
     }
 
     /**
+     * Ares: the centre + drawn size of preview item [index] in the FolderIcon's local coords, matching
+     * exactly where {@link #drawPreviewItem} paints it (base offset + per-item transX/transY, size =
+     * intrinsic icon size * the item's scale). Lets the WP inline-open start each app tile precisely on
+     * its own preview icon so the preview reads as morphing into the app icon. out = {cx, cy, size}.
+     */
+    boolean getAresPreviewSlot(int index, float[] out) {
+        int i = index + Math.max(mFirstPageParams.size() - MAX_NUM_ITEMS_IN_PREVIEW, 0);
+        if (i < 0 || i >= mFirstPageParams.size()) return false;
+        PreviewItemDrawingParams p = mFirstPageParams.get(i);
+        if (p == null) return false;
+        float size = mIntrinsicIconSize * p.scale;
+        out[0] = mIcon.mBackground.basePreviewOffsetX + p.transX + size / 2f;
+        out[1] = mIcon.mBackground.basePreviewOffsetY + p.transY + size / 2f;
+        out[2] = size;
+        return true;
+    }
+
+    /** Ares: hide/show every preview item, so tiles flying out of the folder aren't doubled by them. */
+    void setAllPreviewItemsHidden(boolean hidden) {
+        for (PreviewItemDrawingParams p : mFirstPageParams) {
+            if (p != null) p.hidden = hidden;
+        }
+    }
+
+    /**
      * Handles the case where items in the preview are either:
      * - Moving into the preview
      * - Moving into a new position
