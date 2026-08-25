@@ -2603,14 +2603,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // Each icon appears small at the teardrop tip, falls a short way into the card under gravity
         // (segment 1), then spreads + enlarges to its cell on an emphasized-decelerate settle
         // (segment 2). WP_FALL_SEG splits the two segments of one child's timeline.
-        const val WP_FALL_MS = 720L // one child, open (drop+spread; owner: slower fall, faster curve)
+        const val WP_FALL_MS = 650L // one child, open (drop+spread; owner: slightly slower)
         const val WP_FALL_STAGGER_MS = 54L // gap between successive children streaming out
         const val WP_FALL_CLOSE_MS = 320L // one child, close (quicker -- M3 exits are faster)
         const val WP_FALL_CLOSE_STAGGER_MS = 30L
-        // Fall gets the bigger share of the timeline so it reads SLOW + deliberate, leaving the curve a
-        // shorter slice = it ramps up and zips into place (owner 2026-08-24). At 720ms: fall ~418ms,
-        // curve ~302ms.
-        const val WP_FALL_SEG = 0.58f // fraction of the timeline that is the fall (rest is the spread)
+        const val WP_FALL_SEG = 0.44f // fraction of the timeline that is the fall (rest is the spread)
         const val WP_FALL_DROP_PX = 55f // dp the icon falls below the tip before spreading (owner tune)
         const val WP_FALL_TIP_SCALE = 0.3f // fallback start size (child past the 4 preview slots)
         // The mid-fall (drop-point) size is now a FRACTION of the way from the child's own start scale
