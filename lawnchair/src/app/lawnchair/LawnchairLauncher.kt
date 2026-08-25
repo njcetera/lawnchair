@@ -649,6 +649,9 @@ class LawnchairLauncher : QuickstepLauncher() {
                         dragLayer.viewTreeObserver.removeOnDrawListener(this)
                         // Drop stuck All Apps RenderEffect on icons after returning home.
                         depthController.clearStuckBlurOnResumeIfHome()
+                        // SPIKE (owner 2026-08-25): WP-style home reveal. No-op unless
+                        // AresHomeReveal.enabled -- fires once per home appearance when on.
+                        app.lawnchair.areslauncher.AresHomeReveal.maybePlayOnHomeAppear(this@LawnchairLauncher)
                     }
                 }
             },

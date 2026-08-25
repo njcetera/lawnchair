@@ -271,6 +271,14 @@ object AresTestInfo {
     const val REQUEST_SURFACE_STATE = "ares-surface-state"
 
     /**
+     * SPIKE trigger for the WP-style home reveal ([AresHomeReveal]). `arg`:
+     *  - `on` / `off` -- flip the every-home-appearance auto-trigger, or
+     *  - absent / `play` -- fire a single reveal now.
+     * Returns a short status string. Owner-review only; nothing here runs in a normal build.
+     */
+    const val REQUEST_HOME_REVEAL = "ares-home-reveal"
+
+    /**
      * The app list's edge-glow state: `topFinished|bottomFinished`.
      *
      * Ledger row 29: `mAllAppsOvershootStarted` armed by an overscroll pull was only released when
@@ -383,7 +391,18 @@ object AresTestInfo {
                 AresFolderDrop.isLiveCreateEnabled()
             },
         )
+        REQUEST_HOME_REVEAL -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> homeReveal(launcher, arg) },
+        )
         else -> null
+    }
+
+    /** See [REQUEST_HOME_REVEAL]. Runs on the UI thread via getLauncherUIProperty. */
+    private fun homeReveal(launcher: Launcher, arg: String?): String = when (arg) {
+        "on" -> { AresHomeReveal.enabled = true; "enabled" }
+        "off" -> { AresHomeReveal.enabled = false; "disabled" }
+        else -> { AresHomeReveal.play(launcher); "played(enabled=${AresHomeReveal.enabled})" }
     }
 
     /** See [REQUEST_LIVE_CREATE_SPIKE]. */
