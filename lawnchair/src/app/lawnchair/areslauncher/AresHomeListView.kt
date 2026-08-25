@@ -5,7 +5,11 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
 import android.util.Log
@@ -425,7 +429,131 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * list, without ever pushing the folder header off the top. Both run posted, after the insert's
      * layout pass, when the child holders exist. Collapse needs neither (the slide covers it).
      */
+    // --- Open-folder focus wash (owner 2026-08-25) --------------------------------------------
+    // While a WP folder is open, every home tile that is NOT part of it (other icons AND widgets)
+    // gets a dimmed colour wash, so the open folder stands out. The wash tints each tile's
+    // ACTUALLY-DRAWN content via a hardware-layer ColorMatrix paint -- transparent pixels stay
+    // transparent, so the wallpaper behind/around a tile is never tinted (owner: "not the
+    // background or wallpaper, the icons and widgets themselves"). The matrix is a partial
+    // desaturate plus a per-channel multiply toward [washColor] (MULTIPLY-style, so it only ever
+    // dims), which is why it reads as a dim colour wash rather than a flat scrim.
+    private val washColor by lazy { context.getColor(R.color.materialColorPrimary) }
+    private var washStrength = 0f
+    private var washPaint: Paint? = null
+    private var washAnimator: ValueAnimator? = null
+
+    // Tiles frozen (wiggle stopped, badges hidden) while washed in edit mode -- the differential
+    // that reads as "only the folder is editable" (owner 2026-08-25). Tracked by view identity so
+    // each is un-frozen exactly once on close.
+    private val frozenTiles = HashSet<View>()
+
+    /** Edit-mode only: stop a washed tile's wiggle and hide its ×/ⓘ/tint, so it reads as parked. */
+    private fun freezeTile(view: View) {
+        if (!isEditMode() || !frozenTiles.add(view)) return
+        AresEditWiggle.stop(view, wiggles.remove(view))
+        AresEditWiggle.reset(view)
+        setEditChromeAlpha(view, 0f)
+    }
+
+    /** Restores a frozen tile's wiggle and edit chrome when the folder closes (or it recycles). */
+    private fun unfreezeTile(view: View) {
+        if (!frozenTiles.remove(view)) return
+        if (isEditMode()) {
+            val pos = getChildAdapterPosition(view)
+            if (pos != NO_POSITION) AresEditWiggle.start(view, pos)?.let { wiggles[view] = it }
+            fadeInEditChrome(view)
+        }
+    }
+
+    private fun buildWashPaint(strength: Float): Paint {
+        val cm = ColorMatrix().apply { setSaturation(1f - WASH_SAT_DROP * strength) }
+        val wr = Color.red(washColor) / 255f
+        val wg = Color.green(washColor) / 255f
+        val wb = Color.blue(washColor) / 255f
+        // Per-channel multiply toward the wash colour (dim + tint); at strength 0 it is identity.
+        cm.postConcat(
+            ColorMatrix(
+                floatArrayOf(
+                    1f - (1f - wr * WASH_K) * strength, 0f, 0f, 0f, 0f,
+                    0f, 1f - (1f - wg * WASH_K) * strength, 0f, 0f, 0f,
+                    0f, 0f, 1f - (1f - wb * WASH_K) * strength, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            ),
+        )
+        return Paint().apply { colorFilter = ColorMatrixColorFilter(cm) }
+    }
+
+    /** Applies [strength] wash to one tile (0 clears it). Shared [washPaint] is reused per frame. */
+    private fun applyTileWash(view: View, strength: Float) {
+        if (strength <= 0.001f) {
+            if (view.layerType == LAYER_TYPE_HARDWARE) view.setLayerType(LAYER_TYPE_NONE, null)
+            return
+        }
+        val paint = washPaint ?: return
+        if (view.layerType != LAYER_TYPE_HARDWARE) {
+            view.setLayerType(LAYER_TYPE_HARDWARE, paint)
+        } else {
+            view.setLayerPaint(paint)
+        }
+    }
+
+    /** Washes every attached tile at [strength], leaving the open folder's own run untinted. */
+    private fun paintFolderWash(strength: Float) {
+        washStrength = strength
+        washPaint = if (strength > 0.001f) buildWashPaint(strength) else null
+        val run = aresAdapter.expandedRunRange()
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val pos = getChildAdapterPosition(child)
+            val inFolder = run != null && pos != NO_POSITION && pos in run
+            if (inFolder) {
+                applyTileWash(child, 0f)
+                if (child in frozenTiles) unfreezeTile(child)
+            } else {
+                applyTileWash(child, strength)
+                if (strength > 0.001f) freezeTile(child) // no-op outside edit mode
+            }
+        }
+    }
+
+    private fun clearAllTileWash() {
+        washStrength = 0f
+        washPaint = null
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            if (child.layerType == LAYER_TYPE_HARDWARE) child.setLayerType(LAYER_TYPE_NONE, null)
+        }
+        for (child in frozenTiles.toList()) unfreezeTile(child)
+    }
+
+    /** Fades the focus wash in (folder opened) or out (closed). */
+    private fun updateFolderWash(expanded: Boolean) {
+        val target = if (expanded) WASH_MAX else 0f
+        washAnimator?.cancel()
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            if (expanded) paintFolderWash(target) else clearAllTileWash()
+            return
+        }
+        washAnimator = ValueAnimator.ofFloat(washStrength, target).apply {
+            duration = WASH_MS
+            addUpdateListener { paintFolderWash(it.animatedValue as Float) }
+            addListener(
+                object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        washAnimator = null
+                        // Only tear the layers down once actually settled closed, so a rapid
+                        // reopen (which cancels this) does not strip a wash it is about to re-raise.
+                        if (target <= 0f && washStrength <= 0.001f) clearAllTileWash()
+                    }
+                },
+            )
+            start()
+        }
+    }
+
     private fun onWpFolderExpanded(folderInfo: FolderInfo, expanded: Boolean) {
+        updateFolderWash(expanded)
         if (!expanded) return
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return
@@ -1307,6 +1435,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
     /** Fires the armed arrival pop when its row binds. Wired to the adapter in `init`. */
     private fun onRowBound(info: ItemInfo, container: View) {
+        // Keep a freshly-bound (e.g. scrolled-in) tile in step with the open-folder wash. Membership
+        // is by id, not adapter position, because the view is not attached yet at bind time.
+        if (washStrength > 0.001f) {
+            val fid = aresAdapter.expandedWpFolder()
+            val partOfFolder = fid != -1 && (info.id == fid || info.container == fid)
+            applyTileWash(container, if (partOfFolder) 0f else washStrength)
+            if (partOfFolder) unfreezeTile(container) else freezeTile(container)
+        }
         if (pendingCreatedId == ItemInfo.NO_ID || info.id != pendingCreatedId) return
         pendingCreatedId = ItemInfo.NO_ID
         removeCallbacks(clearPendingCreated)
@@ -2769,6 +2905,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
+
+        // Open-folder focus wash. Feel is owner-tunable (owner 2026-08-25, "dimmed colour wash").
+        const val WASH_MAX = 0.85f      // target strength at full open
+        const val WASH_SAT_DROP = 0.35f // desaturation at full strength (0 = keep colour, 1 = grey)
+        const val WASH_K = 0.55f        // brightness of the wash: lower dims more
+        const val WASH_MS = 220L        // fade in/out duration
 
         /** Matches the edit-mode enter/exit scale animation. */
         const val EDIT_SCALE_MS = 120L
