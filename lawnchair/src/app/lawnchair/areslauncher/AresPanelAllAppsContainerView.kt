@@ -126,6 +126,32 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // Same for predictions: this pane has its own FloatingHeaderView and prediction row, and
         // predictions usually arrive before it is attached, so pull the current set now.
         (context as? QuickstepLauncher)?.applyAresPanePredictions()
+        unclipHostChain()
+    }
+
+    /**
+     * The pane is extended past its workspace cell (see [onMeasure]) so the app list reaches the
+     * physical screen edges and scrolled rows flow behind the status bar and nav gesture bar. That
+     * only shows if no ANCESTOR scissors it back to the cell. Measured hierarchy above the pane:
+     *   ShortcutAndWidgetContainer (clipChildren=TRUE) -> CellLayout (already false) -> Workspace
+     *   (clipChildren=true, but spans the FULL screen 0..displayHeight, so its clip is harmless).
+     * The `ShortcutAndWidgetContainer` is the sole culprit: its own onAttachedToWindow sets
+     * clipChildren/clipToPadding/clipToOutline to `!allowWidgetOverlap`, and that Lawnchair
+     * preference is off by default, so it re-clips the pane to the cell area and the list looks
+     * "cut off" at the bars (owner 2026-08-25). Clear the clip up to -- but NOT including -- the
+     * Workspace: the Workspace must keep clipping so horizontal paging still clips adjacent pages,
+     * and its full-screen bounds don't cut the behind-bar content anyway. Scoped to the pane's own
+     * host chain (this panel hosts nothing but the pane), so panel 0 / the home grid are untouched.
+     * Re-applied on every attach because the parent re-clips itself on each of its own attaches.
+     */
+    private fun unclipHostChain() {
+        var v: android.view.ViewParent? = parent
+        while (v is ViewGroup && v !is com.android.launcher3.Workspace<*>) {
+            v.clipChildren = false
+            v.clipToPadding = false
+            v.clipToOutline = false
+            v = v.parent
+        }
     }
 
     /**
