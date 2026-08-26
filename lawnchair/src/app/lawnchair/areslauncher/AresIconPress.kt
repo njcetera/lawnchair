@@ -40,8 +40,10 @@ object AresIconPress {
     // A real squash: the icon gets clearly SHORTER and a little WIDER as it's pressed down
     // (squash-and-stretch), not a uniform shrink -- so it reads as a squish, not a zoom-out. Owner
     // 2026-08-25: "more of a squish" and less spring.
-    private const val SQUASH_X = 1.05f        // presses a touch wider...
-    private const val SQUASH_Y = 0.80f        // ...and clearly shorter
+    // Cranked up to ~8/10 squash (owner 2026-08-25, "squish more like an 8"): the icon presses
+    // markedly flatter and wider, so it clearly reads as being squashed under the finger.
+    private const val SQUASH_X = 1.10f        // presses noticeably wider...
+    private const val SQUASH_Y = 0.70f        // ...and much shorter
     private const val TWIST_DEG = 4f          // the subtle twist while squashed
 
     // Slow and heavy, not snappy (owner 2026-08-25: "a little slower so it's like sludgier and not
