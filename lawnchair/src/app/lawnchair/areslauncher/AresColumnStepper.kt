@@ -177,7 +177,9 @@ object AresColumnStepper {
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            bottomMargin = dp(36f) + launcher.deviceProfile.insets.bottom
+            // Sit just above the nav bar so the pill covers the least home content -- higher up it
+            // overlapped tiles and blocked grabbing/editing them (owner 2026-08-26).
+            bottomMargin = dp(10f) + launcher.deviceProfile.insets.bottom
         }
         launcher.dragLayer.addView(row, lp)
         view = row

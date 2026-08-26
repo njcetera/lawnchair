@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "remove" (rounded), stroke with round caps. Tinted by the view. -->
+<!-- Material Symbols "remove" (Rounded, filled) — chunky bar with rounded terminals. Tinted by view. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M5,12H19"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.2"
-        android:strokeLineCap="round" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.3,10.8H5.7c-0.66,0 -1.2,0.54 -1.2,1.2s0.54,1.2 1.2,1.2h12.6c0.66,0 1.2,-0.54 1.2,-1.2s-0.54,-1.2 -1.2,-1.2z" />
 </vector>
