@@ -3,8 +3,9 @@
      ares_extract_badge.xml. It sits on an expanded WP-folder child in edit mode; tapping it EXTRACTS
      the app to the home grid (container -> DESKTOP with a legal cell). Deliberately NOT the remove
      cross: extract is not delete, and the review (M4/BL-5) required distinct iconography so the owner
-     cannot confuse "take out of folder" with "remove from home". The upload/eject mark (arrow rising
-     over a baseline) reads as "lift this up onto the grid". Tinted to match the remove badge.
+     cannot confuse "take out of folder" with "remove from home". A Material-style EJECT mark
+     (triangle over a rounded bar) reads as "lift this out onto the grid" (owner 2026-08-26). Tinted
+     to match the remove badge.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -14,5 +15,5 @@
     android:tint="@color/ares_edit_badge_icon">
     <path
         android:fillColor="@android:color/white"
-        android:pathData="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z" />
+        android:pathData="M12,5.5L6,14.5h12z M6.4,16.5h11.2a1,1 0 0 1 0,2H6.4a1,1 0 0 1 0,-2z" />
 </vector>
