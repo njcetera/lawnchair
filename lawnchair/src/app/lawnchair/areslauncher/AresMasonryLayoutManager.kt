@@ -282,6 +282,7 @@ class AresMasonryLayoutManager(
         if (animateNextLayout) {
             animateFromPreviousBounds()
             animateNextLayout = false
+            pendingAnimDurationMs = LAYOUT_ANIM_MS
             repackExemptItemId = -1L
             previousBounds.clear()
         } else if (reflow) {
@@ -295,9 +296,18 @@ class AresMasonryLayoutManager(
      * Call immediately before [invalidatePacking] for a user-initiated change. It is a one-shot
      * flag: it clears itself after the pass, so a scroll landing right afterwards is unaffected.
      */
-    fun animateNextLayout() {
+    fun animateNextLayout(durationMs: Long = LAYOUT_ANIM_MS) {
         animateNextLayout = true
+        pendingAnimDurationMs = durationMs
     }
+
+    /**
+     * Duration for the next [animateFromPreviousBounds] pass. Defaults to [LAYOUT_ANIM_MS] (the
+     * reorder/folder spring); a caller can request a longer one for a bigger rearrange -- a column
+     * change moves every tile, and at 200ms that read as an instant jump (owner 2026-08-26). Reset
+     * after each animated pass.
+     */
+    private var pendingAnimDurationMs = LAYOUT_ANIM_MS
 
     private fun capturePreviousBounds() {
         previousBounds.clear()
@@ -496,7 +506,7 @@ class AresMasonryLayoutManager(
                 .translationY(0f)
                 .scaleX(restScale)
                 .scaleY(restScale)
-                .setDuration(LAYOUT_ANIM_MS)
+                .setDuration(pendingAnimDurationMs)
                 .start()
         }
         // Resume each suspended tile's orbit once its animation is over. A single posted callback,
@@ -507,7 +517,7 @@ class AresMasonryLayoutManager(
         if (listView != null && suspended.isNotEmpty()) {
             listView.postDelayed(
                 { for (c in suspended) listView.resumeFloatAfterRepack(c) },
-                LAYOUT_ANIM_MS,
+                pendingAnimDurationMs,
             )
         }
     }

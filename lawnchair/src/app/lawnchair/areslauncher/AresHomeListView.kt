@@ -2519,7 +2519,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // packing and calls requestLayout() itself, and that flag must already be set when the
             // resulting layout pass runs -- otherwise the pass that actually reflows to the new
             // column count is the un-animated one, and the tiles snap.
-            masonry.animateNextLayout()
+            masonry.animateNextLayout(ARES_COLUMN_REFLOW_MS)
             masonry.columns = c
             invalidate()
         }
@@ -3116,6 +3116,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** Home grid column-override bounds for the edit-mode stepper (owner 2026-08-26). */
         const val ARES_HOME_COLUMNS_MIN = 3
         const val ARES_HOME_COLUMNS_MAX = 6
+
+        /**
+         * Reflow duration for a column-count change (owner 2026-08-26). Longer than the reorder/
+         * folder spring (200ms) because a column change moves EVERY tile at once -- at 200ms that
+         * read as an instant jump; this makes the rearrange clearly visible.
+         */
+        const val ARES_COLUMN_REFLOW_MS = 420L
 
         /**
          * True if [container] hosts the edge-to-edge home list. The list draws its content beyond the
