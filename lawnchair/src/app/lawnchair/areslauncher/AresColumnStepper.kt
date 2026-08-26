@@ -59,14 +59,15 @@ object AresColumnStepper {
 
         fun color(res: Int): Int = ContextCompat.getColor(ctx, res)
         val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val onSurface = color(R.color.materialColorOnSurface)
-        // The buttons are the PRIMARY accent so they read clearly against the neutral pill --
-        // secondaryContainer was too close to surfaceContainerHigh in this theme (owner 2026-08-26).
+        // The buttons AND the label are the PRIMARY accent so they read clearly against the neutral
+        // pill and the pill reads as one themed control -- secondaryContainer/onSurface were too
+        // close to surfaceContainerHigh in this theme (owner 2026-08-26).
         val tonal = color(R.color.materialColorPrimary)
         val onTonal = color(R.color.materialColorOnPrimary)
+        val labelColor = color(R.color.materialColorPrimary)
 
         val label = TextView(ctx).apply {
-            setTextColor(onSurface)
+            setTextColor(labelColor)
             textSize = 15f
             gravity = Gravity.CENTER
             minWidth = dp(104f)
