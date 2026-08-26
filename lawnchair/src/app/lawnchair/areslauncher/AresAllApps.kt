@@ -59,16 +59,17 @@ object AresAllApps {
             R.dimen.ares_app_list_top_padding_sheet
         }
         // UNFOLDED pane (isWorkspacePanel): the pane is extended past its cell up behind the status
-        // bar (AresPanelAllAppsContainerView.onMeasure), so the app list flows to the physical top
-        // edge like the folded full-screen sheet (owner 2026-08-25, "reach the top and bottom edge
-        // like when it's closed"). The recycler's top padding must EQUAL that extension --
-        // insets.top + workspacePadding.top -- so content still RESTS at the cell's top while
-        // clipToPadding=false lets it scroll up behind the status bar. No ergonomic band here (that
-        // was one-handed reach on the folded handheld). The folded sheet keeps the band. Bottom is
-        // handled the same way in ActivityAllAppsContainerView.applyAdapterSideAndBottomPaddings.
+        // bar (AresPanelAllAppsContainerView.onMeasure by insets.top + workspacePadding.top), and
+        // clipToPadding=false + the host-chain un-clip let scrolled rows flow behind the status bar.
+        // The recycler's REST padding, though, must line the first app-list row up with the HOME
+        // grid's first row (owner 2026-08-25, "start at the same place as the homepage"): both panes
+        // are pages of the same Workspace starting at the same cell top, so the pane needs the SAME
+        // total top offset the home grid gives itself -- the extension (to lift back to the cell top)
+        // PLUS homeListTopPaddingPx (the home grid's own §11c + ergonomic band). Using only the
+        // extension (the earlier scroll-fix value) left the app list a full band higher than home.
         if (isWorkspacePanel) {
             val dp = launcher.deviceProfile
-            return dp.insets.top + dp.workspacePadding.top
+            return dp.insets.top + dp.workspacePadding.top + homeListTopPaddingPx(launcher)
         }
         return launcher.resources.getDimensionPixelSize(dimen) + ergoTopPaddingPx(launcher)
     }
