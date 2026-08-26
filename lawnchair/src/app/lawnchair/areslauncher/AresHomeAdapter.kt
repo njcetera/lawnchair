@@ -1203,10 +1203,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        // AresJellyContainer is a FrameLayout that can render its own icon+label as a finger-tracking
-        // jelly warp (owner 2026-08-25); inert (plain FrameLayout behaviour) until AresIconPress
-        // starts a warp, which it only does for app icons out of edit mode.
-        val container = AresJellyContainer(parent.context)
+        val container = FrameLayout(parent.context)
         // The layout manager measures each holder to its exact cell footprint, so the container
         // fills whatever it is given rather than sizing itself.
         container.layoutParams = RecyclerView.LayoutParams(
@@ -1252,11 +1249,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is BubbleTextView) {
             applyGridStyle(itemView)
-            // Playful finger-tracking jelly on press (owner 2026-08-25). Observe-only, so the
-            // tap/scroll/long-press pipeline is untouched; the warp itself lives in the
-            // AresJellyContainer this tile sits in. See AresIconPress.
-            (holder.container as? AresJellyContainer)?.cancelJelly()
-            AresIconPress.attach(itemView) { editMode }
         }
 
         // WP folders BL-4 (design/wp-folder-design.md): a Windows-Phone-style folder NEVER opens the
