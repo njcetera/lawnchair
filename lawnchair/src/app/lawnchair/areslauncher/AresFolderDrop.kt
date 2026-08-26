@@ -82,6 +82,19 @@ object AresFolderDrop {
     private const val TAG = "AresFolderDrop"
 
     /**
+     * Mark a freshly-built desktop folder as a Windows-Phone-style (inline) folder and give it the
+     * default title -- exactly what the (now-removed) new-folder FAB did. Every folder AresLauncher
+     * creates is a WP folder now (owner 2026-08-25, "disable the old folder style"): the drag-merge
+     * that used to build a stock OVERLAY folder builds a WP one instead, so a tap inline-expands it
+     * rather than opening the overlay. Called BEFORE `addItemToDatabase`, so the `FLAG_ARES_WP` bit
+     * is persisted with the row and every later load reads it back as WP.
+     */
+    private fun stampAresWp(launcher: Launcher, folderInfo: FolderInfo) {
+        folderInfo.options = folderInfo.options or FolderInfo.FLAG_ARES_WP
+        folderInfo.title = launcher.getString(R.string.ares_wp_folder_default_title)
+    }
+
+    /**
      * How long the drag must hold still over a folder before it becomes the drop target.
      *
      * The user described "roughly half a second". Stock's comparable delays bracket it — the
@@ -915,6 +928,7 @@ object AresFolderDrop {
         }
 
         val folderInfo = FolderInfo()
+        stampAresWp(launcher, folderInfo)
         // Not final -- persistOrder below renumbers the whole grid densely -- but it means the row
         // is right on its first pass instead of arriving at 0 and sorting to the top.
         folderInfo.rank = targetInfo.rank
@@ -1016,6 +1030,7 @@ object AresFolderDrop {
             return null
         }
         val folderInfo = FolderInfo()
+        stampAresWp(launcher, folderInfo)
         folderInfo.rank = target.rank
         launcher.modelWriter.addItemToDatabase(
             folderInfo, Favorites.CONTAINER_DESKTOP, screenId, cell[0], cell[1],
@@ -1095,6 +1110,17 @@ object AresFolderDrop {
             return
         }
         if (folder.isDestroyed) return
+        // WP folders (every folder AresLauncher creates now) NEVER open the overlay -- they
+        // inline-expand on the home grid (owner 2026-08-25). The tile is laid out (checked above),
+        // which is what the expand's teardrop/bloom geometry needs. This replaces the overlay
+        // `animateOpen()` + `AresFolderEdit.attach` path, which stays only as the fallback for any
+        // hypothetical non-WP folder reaching here.
+        val info = folder.info
+        if (info.isAresWpFolder) {
+            list.aresAdapter.toggleWpFolder(info)
+            Log.i(TAG, "live-create: WP folder $folderId inline-expanded contents=${info.getContents().size}")
+            return
+        }
         try {
             folder.animateOpen()
         } catch (t: Throwable) {

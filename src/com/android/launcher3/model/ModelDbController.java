@@ -548,6 +548,41 @@ public class ModelDbController {
     }
 
     /**
+     * AresLauncher (owner 2026-08-25, "disable the old folder style"): stamp {@code FLAG_ARES_WP}
+     * onto every existing DESKTOP folder, converting it to a Windows-Phone-style inline folder so a
+     * tap inline-expands it instead of opening the stock overlay. Every folder AresLauncher creates
+     * is already WP; this migrates the ones made before that (e.g. an imported Google folder).
+     *
+     * <p>Idempotent by construction -- the WHERE clause excludes rows that already carry the bit --
+     * so running it on every load is cheap and converges after the first. It MUST run before the
+     * workspace cursor query (see LoaderTask.loadWorkspaceImpl) so the folders are read back as WP
+     * this session rather than one reload later.
+     *
+     * <p>Scoped to {@link Favorites#CONTAINER_DESKTOP}: a hotseat folder has no masonry to
+     * inline-expand into, so it keeps the stock overlay. Keep the {@link FolderInfo#FLAG_ARES_WP}
+     * reference in sync with {@link #deleteEmptyFolders()}'s SQL.
+     */
+    @WorkerThread
+    public void migrateAresWpFolders() {
+        createDbIfNotExists();
+
+        SQLiteDatabase db = mOpenHelper.getWritableDatabase();
+        try {
+            db.execSQL("UPDATE " + Favorites.TABLE_NAME + " SET "
+                    + LauncherSettings.Favorites.OPTIONS + " = "
+                    + LauncherSettings.Favorites.OPTIONS + " | " + FolderInfo.FLAG_ARES_WP
+                    + " WHERE " + LauncherSettings.Favorites.ITEM_TYPE + " = "
+                    + LauncherSettings.Favorites.ITEM_TYPE_FOLDER + " AND "
+                    + LauncherSettings.Favorites.CONTAINER + " = "
+                    + LauncherSettings.Favorites.CONTAINER_DESKTOP + " AND "
+                    + "(" + LauncherSettings.Favorites.OPTIONS + " & "
+                    + FolderInfo.FLAG_ARES_WP + ") = 0");
+        } catch (SQLException ex) {
+            Log.e(TAG, "migrateAresWpFolders failed", ex);
+        }
+    }
+
+    /**
      * Deletes any app pair that doesn't contain 2 member apps from the DB.
      * @return Ids of deleted app pairs.
      */

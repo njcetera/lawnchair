@@ -448,6 +448,12 @@ public class LoaderTask implements Runnable {
         Log.d(TAG, "loadWorkspace: loading default favorites if necessary");
         dbController.loadDefaultFavoritesIfNecessary();
 
+        // AresLauncher (owner 2026-08-25, "disable the old folder style"): convert every existing
+        // desktop folder to a WP inline folder BEFORE the cursor query below reads them, so they
+        // load already-WP this session (a tap inline-expands them) rather than one reload later.
+        // Idempotent -- see ModelDbController.migrateAresWpFolders.
+        dbController.migrateAresWpFolders();
+
         synchronized (mBgDataModel) {
             mBgDataModel.clear();
             mPendingPackages.clear();
