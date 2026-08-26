@@ -2482,45 +2482,50 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     /**
-     * The column count to render at: the [aresHomeColumns] override when the owner has set one
+     * The column count to render at: the in-memory [aresColumnOverride] when the owner has set one
      * (3..6, applied to BOTH postures per owner 2026-08-26), otherwise the device profile's own
      * [deviceDefault] for this posture. Render-only -- the masonry packs by rank, so this never
      * touches cellX/cellY and cannot trip the loader's occupancy purge (unlike the IDP grid prefs).
+     *
+     * The override is cached in MEMORY, not read from the pref each call. applyGridMetrics runs on
+     * every onMeasure, and the pref write in [setGridColumns] is async -- reading the pref here would
+     * revert columns to the stale value on the very next measure, which consumed the reflow's animate
+     * flag against the OLD count and snapped the real change (owner 2026-08-26 reflow-jump bug). The
+     * persisted value is loaded into the cache once, lazily.
      */
     private fun resolveColumns(deviceDefault: Int): Int {
-        val override = try {
-            app.lawnchair.preferences2.PreferenceManager2.getInstance(context)
-                .aresHomeColumns.firstBlocking()
-        } catch (t: Throwable) {
-            0
+        if (aresColumnOverride == COLUMN_OVERRIDE_UNLOADED) {
+            aresColumnOverride = try {
+                app.lawnchair.preferences2.PreferenceManager2.getInstance(context)
+                    .aresHomeColumns.firstBlocking()
+            } catch (t: Throwable) {
+                0
+            }
         }
-        return if (override in ARES_HOME_COLUMNS_MIN..ARES_HOME_COLUMNS_MAX) override else deviceDefault
+        val ov = aresColumnOverride
+        return if (ov in ARES_HOME_COLUMNS_MIN..ARES_HOME_COLUMNS_MAX) ov else deviceDefault
     }
+
+    /** In-memory home-column override; -1 until lazily loaded from the pref. See [resolveColumns]. */
+    private var aresColumnOverride = COLUMN_OVERRIDE_UNLOADED
 
     /** The column count the home grid is currently rendering at. */
     fun currentColumns(): Int = masonry.columns
 
     /**
      * Set the home grid column count from the edit-mode stepper (owner 2026-08-26). Clamps to
-     * [ARES_HOME_COLUMNS_MIN]..[ARES_HOME_COLUMNS_MAX], applies it to the live masonry immediately
-     * (an animated repack, since the layout manager reflows by rank on requestLayout), and persists
-     * it so it survives a relaunch and applies to both postures on the next fold. The immediate set
-     * writes masonry.columns directly rather than re-reading the pref, because the persist is async
-     * and firstBlocking would race it.
+     * 3..6, updates the in-memory override SYNCHRONOUSLY (so applyGridMetrics -- which runs every
+     * onMeasure -- reads the new value instead of the async-lagging pref, the bug that snapped the
+     * reflow), arms the reflow animation, applies the new count through applyGridMetrics (whose
+     * masonry.columns setter nulls the packing and requests a layout), and persists to the pref for a
+     * relaunch.
      */
     fun setGridColumns(n: Int) {
         val c = n.coerceIn(ARES_HOME_COLUMNS_MIN, ARES_HOME_COLUMNS_MAX)
+        aresColumnOverride = c
         if (masonry.columns != c) {
-            // Animate the reflow: capture every tile's current bounds and slide+scale it to its new
-            // cell (the same spring the WP folder open/reorder uses), so a column change is a smooth
-            // rearrange rather than a teleport (owner 2026-08-26: tiles were jumping).
-            //
-            // Order matters: arm animateNextLayout FIRST. The `columns` setter invalidates the
-            // packing and calls requestLayout() itself, and that flag must already be set when the
-            // resulting layout pass runs -- otherwise the pass that actually reflows to the new
-            // column count is the un-animated one, and the tiles snap.
             masonry.animateNextLayout(ARES_COLUMN_REFLOW_MS)
-            masonry.columns = c
+            applyGridMetrics() // sets masonry.columns from the just-set override; its setter relayouts
             invalidate()
         }
         (launcher as? app.lawnchair.LawnchairLauncher)?.lifecycleScope?.launch {
@@ -3116,6 +3121,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         /** Home grid column-override bounds for the edit-mode stepper (owner 2026-08-26). */
         const val ARES_HOME_COLUMNS_MIN = 3
         const val ARES_HOME_COLUMNS_MAX = 6
+
+        /** Sentinel for [aresColumnOverride] before it is lazily loaded from the pref. */
+        private const val COLUMN_OVERRIDE_UNLOADED = -1
 
         /**
          * Reflow duration for a column-count change (owner 2026-08-26). Longer than the reorder/
