@@ -740,7 +740,16 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // the dim + freeze to every tile of the fresh list -- the whole home left dimmed and frozen
         // with no folder open. (Adversarial review 2026-08-25, Finding 1.)
         if (expandedWpFolderId != -1) {
-            launcher.workspace?.aresHomeList?.tearDownFolderWashImmediate()
+            val list = launcher.workspace?.aresHomeList
+            list?.tearDownFolderWashImmediate()
+            // A rebind that discards the expanded folder's rows also bypasses onWpFolderCollapsing,
+            // so an inline rename editor open at that moment would be stranded and leave
+            // suppressTitle stuck true (adversarial review 2026-08-25, Finding 1). Tear it down.
+            // commit = false here on purpose: we are mid model-rebind, and renameWpFolder writes back
+            // to the model -- a re-entrant write against a folder whose rows are being thrown away is
+            // exactly the folder-surface race the project has been bitten by, so drop the editor
+            // cleanly rather than committing into a rebuild.
+            list?.dismissInlineFolderRename(commit = false)
         }
         val size = items.size
         // A full rebind rebuilds every row from the model; any transient WP expansion is gone with
@@ -1014,6 +1023,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
         flushPendingCollapse()
         val id = expandedWpFolderId
         if (id == -1) return false
+        // This path bypasses onWpFolderCollapsing (which normally tears the inline rename editor
+        // down), so dismiss it here too. Otherwise an editor left up when the folder is force-closed
+        // (e.g. the home reveal collapses it on return-to-home) strands the EditText over the grid
+        // AND leaves folderBounds.suppressTitle stuck true -- killing the drawn title on every later
+        // folder and making rename dead for the session (adversarial review 2026-08-25, Finding 1).
+        // commit = true: preserve whatever the owner had typed before they left.
+        launcher.workspace?.aresHomeList?.dismissInlineFolderRename(commit = true)
         finishCollapse(id)
         return true
     }
