@@ -891,10 +891,19 @@ class PreferenceManager2 @Inject constructor(
             .onEach { cachedPreferences = it }
             .launchIn(scope)
 
+        // Operator order is load-bearing: distinctUntilChanged() BEFORE drop(1), never the reverse.
+        // These observers reload/recreate the launcher on a genuine CHANGE and must ignore the
+        // initial stored value. With drop(1) first, distinctUntilChanged() never sees that initial
+        // value, so the FIRST foreign write to the DataStore (any key, e.g. the edit-mode column
+        // stepper's aresHomeColumns.set) re-emits every key's UNCHANGED value and it passes distinct
+        // as "first seen" -> a spurious reloadHelper.recreate() that, mid edit-mode, silently rebuilt
+        // the activity and dropped the user out of edit mode (owner 2026-08-26, root-caused by
+        // stack-trace on device). distinct-then-drop sets the baseline from the real initial value,
+        // so unchanged re-emits are suppressed and only genuine changes fire.
         initializeIconShape(iconShape.firstCached(this))
         iconShape.get()
-            .drop(1)
             .distinctUntilChanged()
+            .drop(1)
             .onEach { shape ->
                 initializeIconShape(shape)
                 L3ThemeManager.INSTANCE.get(context)
@@ -903,14 +912,14 @@ class PreferenceManager2 @Inject constructor(
             .launchIn(scope)
 
         hotseatMode.get()
-            .drop(1)
             .distinctUntilChanged()
+            .drop(1)
             .onEach { reloadHelper.restart() }
             .launchIn(scope)
 
         isHotseatEnabled.get()
-            .drop(1)
             .distinctUntilChanged()
+            .drop(1)
             .onEach {
                 reloadHelper.recreate()
                 reloadHelper.reloadGrid()
@@ -918,14 +927,14 @@ class PreferenceManager2 @Inject constructor(
             .launchIn(scope)
 
         hotseatQsbProvider.get()
-            .drop(1)
             .distinctUntilChanged()
+            .drop(1)
             .onEach { reloadHelper.recreate() }
             .launchIn(scope)
 
         enableLabelInDock.get()
-            .drop(1)
             .distinctUntilChanged()
+            .drop(1)
             .onEach { reloadHelper.reloadGrid() }
             .launchIn(scope)
     }
