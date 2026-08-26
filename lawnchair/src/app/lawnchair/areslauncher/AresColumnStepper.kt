@@ -8,6 +8,8 @@ import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -84,13 +86,24 @@ object AresColumnStepper {
             btn.alpha = if (enabled) 1f else DISABLED_ALPHA
         }
 
-        val refreshFn = {
+        fun labelText(n: Int): CharSequence =
+            ctx.resources.getQuantityString(R.plurals.ares_home_columns_label, n, n)
+
+        // Update ENABLED state only (folder open + bounds); never the text -- an animated count
+        // change owns the label so this must not clobber the roll mid-flight.
+        val updateEnabled = {
             val n = list.currentColumns()
             val folderOpen = list.aresAdapter.expandedWpFolderInfo() != null
-            label.text = ctx.resources.getQuantityString(R.plurals.ares_home_columns_label, n, n)
             label.alpha = if (folderOpen) DISABLED_ALPHA else 1f
             setEnabled(minusBtn, !folderOpen && n > AresHomeListView.ARES_HOME_COLUMNS_MIN)
             setEnabled(plusBtn, !folderOpen && n < AresHomeListView.ARES_HOME_COLUMNS_MAX)
+        }
+
+        // Full refresh (attach + folder open/close): enabled state plus the text set plainly, since
+        // the count did not change through the stepper on those paths.
+        val refreshFn = {
+            updateEnabled()
+            label.text = labelText(list.currentColumns())
         }
 
         fun tonalIconButton(glyph: String, delta: Int): TextView = TextView(ctx).apply {
@@ -121,9 +134,14 @@ object AresColumnStepper {
                 if (!isEnabled) return@setOnClickListener
                 val before = list.currentColumns()
                 list.setGridColumns(before + delta)
-                refresh?.invoke()
+                val after = list.currentColumns()
+                updateEnabled()
                 bounce(this) // springy press feedback on the tapped disc
-                if (list.currentColumns() != before) popLabel(label) // pop the count when it changes
+                if (after != before) {
+                    // Odometer-style roll: old count leaves in the direction of change, new count
+                    // enters from the opposite side.
+                    animateCount(label, labelText(after), up = after > before)
+                }
             }
         }
 
@@ -133,6 +151,8 @@ object AresColumnStepper {
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false // let the count label's vertical roll slide past the row bounds
+            clipToPadding = false
             val padV = dp(8f)
             val padH = dp(10f)
             setPadding(padH, padV, padH, padV)
@@ -159,35 +179,71 @@ object AresColumnStepper {
         }
         launcher.dragLayer.addView(row, lp)
         view = row
-    }
-
-    fun detach() {
-        view?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        view = null
-        refresh = null
-    }
-
-    /** Springy squash-and-release on the tapped +/- disc (M3 Expressive press feedback). */
-    private fun bounce(v: View) {
-        v.animate().cancel()
-        v.scaleX = 0.8f
-        v.scaleY = 0.8f
-        v.animate()
-            .scaleX(1f).scaleY(1f)
-            .setDuration(260)
-            .setInterpolator(OvershootInterpolator(3.5f))
+        // Enter: slide up from below the bottom edge and settle with a bounce (owner 2026-08-26).
+        row.translationY = dp(160f).toFloat()
+        row.animate()
+            .translationY(0f)
+            .setDuration(380)
+            .setInterpolator(OvershootInterpolator(1.7f))
             .start()
     }
 
-    /** A quick overshoot pop on the count label when the number actually changes. */
-    private fun popLabel(v: View) {
+    fun detach() {
+        val v = view ?: return
+        view = null
+        refresh = null
+        // Exit: slide back down out of the bottom edge, then remove.
+        val marginBottom = (v.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
+        val drop = v.height.toFloat() + marginBottom + v.resources.displayMetrics.density * 24f
+        v.animate()
+            .translationY(drop)
+            .setDuration(240)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction { (v.parent as? ViewGroup)?.removeView(v) }
+            .start()
+    }
+
+    /**
+     * Springy squash-and-release on the tapped +/- disc (M3 Expressive press feedback). The disc
+     * overshoots slightly past its resting size on the way back, so the pill's row is laid out
+     * clipChildren=false/clipToPadding=false -- otherwise the overshoot is cropped at the cell edge
+     * (owner 2026-08-26: "the buttons ... getting clipped by padding").
+     */
+    private fun bounce(v: View) {
         v.animate().cancel()
-        v.scaleX = 1.18f
-        v.scaleY = 1.18f
+        v.scaleX = 0.85f
+        v.scaleY = 0.85f
         v.animate()
             .scaleX(1f).scaleY(1f)
-            .setDuration(220)
-            .setInterpolator(OvershootInterpolator(2f))
+            .setDuration(260)
+            .setInterpolator(OvershootInterpolator(2.5f))
+            .start()
+    }
+
+    /**
+     * Odometer-style count change: the current label slides out (up when the count increases, down
+     * when it decreases) and fades, then the new text is set and slides in from the opposite side
+     * with a small overshoot -- so the number reads as rolling to its new value.
+     */
+    private fun animateCount(label: TextView, newText: CharSequence, up: Boolean) {
+        val dist = (if (label.height > 0) label.height else label.lineHeight).toFloat() * 0.6f
+        label.animate().cancel()
+        label.animate()
+            .translationY(if (up) -dist else dist)
+            .alpha(0f)
+            .setDuration(100)
+            .withEndAction {
+                label.text = newText
+                label.translationY = if (up) dist else -dist
+                label.alpha = 0f
+                // Clean settle -- decelerate to rest, no overshoot/pop (owner 2026-08-26).
+                label.animate()
+                    .translationY(0f)
+                    .alpha(1f)
+                    .setDuration(180)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
             .start()
     }
 }
