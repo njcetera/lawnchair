@@ -664,7 +664,7 @@ class LawnchairLauncher : QuickstepLauncher() {
                             // that the reset just brought into view (scrollToPosition requestLayouts
                             // async, so the post lets that pass land before the reveal reads tiles).
                             val list = workspace?.aresHomeList
-                            val bg = android.os.SystemClock.uptimeMillis() - aresStoppedAt
+                            val bg = android.os.SystemClock.elapsedRealtime() - aresStoppedAt
                             if (list != null && bg >= ARES_HOME_TOP_RESET_MS) {
                                 list.scrollToPosition(0)
                                 list.post {
@@ -690,17 +690,22 @@ class LawnchairLauncher : QuickstepLauncher() {
     private var aresWasStopped = false
 
     /**
-     * Monotonic time ([android.os.SystemClock.uptimeMillis]) the launcher was last backgrounded, so
-     * the next [onResume] can tell a quick there-and-back (came home within
+     * Wall-clock time ([android.os.SystemClock.elapsedRealtime]) the launcher was last backgrounded,
+     * so the next [onResume] can tell a quick there-and-back (came home within
      * [ARES_HOME_TOP_RESET_MS]) from a real absence in an app. See onResume: a quick return keeps
      * the home list where it was; a longer one resets it to the top (owner 2026-08-25).
+     *
+     * elapsedRealtime, not uptimeMillis: uptime freezes during deep sleep, so a long screen-off with
+     * the launcher backgrounded would read as a sub-5s "quick return" and wrongly keep the old
+     * scroll position. elapsedRealtime counts wall time through sleep (adversarial review
+     * 2026-08-25, Finding 5).
      */
     private var aresStoppedAt = 0L
 
     override fun onStop() {
         super.onStop()
         aresWasStopped = true
-        aresStoppedAt = android.os.SystemClock.uptimeMillis()
+        aresStoppedAt = android.os.SystemClock.elapsedRealtime()
     }
 
     override fun onStateSetEnd(state: LauncherState) {
