@@ -183,6 +183,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
 
+import app.lawnchair.areslauncher.AresMotion;
 import app.lawnchair.compat.LawnchairQuickstepCompat;
 
 /**
@@ -592,7 +593,10 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
             if (!skipAllAppsScale) {
                 SCALE_PROPERTY.set(appsView, scales[0]);
                 ObjectAnimator scale = ObjectAnimator.ofFloat(appsView, SCALE_PROPERTY, scales);
-                scale.setInterpolator(AGGRESSIVE_EASE);
+                // AresLauncher (owner 2026-08-25, "fun, lively, playful"): the app-list zoom on a
+                // launch-from-the-drawer settles with an M3 Expressive spatial-spring overshoot
+                // instead of the flat aggressive ease. See AresMotion.
+                scale.setInterpolator(AresMotion.SPATIAL_DEFAULT);
                 scale.setDuration(CONTENT_SCALE_DURATION);
                 launcherAnimator.play(scale);
             }
@@ -641,7 +645,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
                 ObjectAnimator scaleAnim = ObjectAnimator.ofFloat(view, SCALE_PROPERTY, scale)
                         .setDuration(CONTENT_SCALE_DURATION);
-                scaleAnim.setInterpolator(DECELERATE_1_5);
+                // AresLauncher (owner 2026-08-25, "fun, lively, playful"): the workspace + hotseat
+                // zoom that rides an app open/close now settles with an M3 Expressive spatial-spring
+                // overshoot instead of a plain decelerate -- so home springs back with a little pop
+                // on return, matching the folder bloom and home reveal. See AresMotion.
+                scaleAnim.setInterpolator(AresMotion.SPATIAL_DEFAULT);
                 launcherAnimator.play(scaleAnim);
             });
 
