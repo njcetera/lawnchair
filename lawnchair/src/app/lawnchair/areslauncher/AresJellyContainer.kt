@@ -49,7 +49,15 @@ class AresJellyContainer(context: Context) : FrameLayout(context) {
     private val meshPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isAntiAlias = true }
 
     /** How far a vertex can be dragged, as a fraction of tile width, before the pull is clamped. */
-    private val maxPullFrac = 0.35f
+    private val maxPullFrac = 0.60f
+
+    /**
+     * Amplifies the finger delta into the warp (owner 2026-08-25, "make it more intense"). The
+     * finger can only travel a few millimetres before the RecyclerView claims the gesture for
+     * scrolling, so a 1:1 pull is barely visible; multiplying it makes a small nudge stretch the
+     * tile a lot, up to the [maxPullFrac] clamp.
+     */
+    private val gain = 4.5f
 
     /** Begin a jelly warp anchored at ([downX],[downY]) in this container's coordinates. */
     fun startJelly(downX: Float, downY: Float) {
@@ -145,12 +153,12 @@ class AresJellyContainer(context: Context) : FrameLayout(context) {
 
     private fun computeVerts() {
         val maxPull = width * maxPullFrac
-        var dx = (fingerX - anchorX) * pull
-        var dy = (fingerY - anchorY) * pull
+        var dx = (fingerX - anchorX) * pull * gain
+        var dy = (fingerY - anchorY) * pull * gain
         // Clamp so a fast pre-CANCEL scroll can't stretch the tile absurdly before it releases.
         dx = dx.coerceIn(-maxPull, maxPull)
         dy = dy.coerceIn(-maxPull, maxPull)
-        val sigma = width * 0.30f
+        val sigma = width * 0.40f
         val twoSigmaSq = 2f * sigma * sigma
         var i = 0
         while (i < restVerts.size) {
