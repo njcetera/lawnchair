@@ -44,10 +44,12 @@ object AresIconPress {
     private const val SQUASH_Y = 0.80f        // ...and clearly shorter
     private const val TWIST_DEG = 4f          // the subtle twist while squashed
 
-    private const val PRESS_MS = 80L          // fast, so even a quick tap shows the squash
-    // Release is now a CLEAN SETTLE, not a spring: the owner found the overshoot "kinda springy" and
-    // wants the squash to be the star. No bounce past rest -- just ease back.
-    private const val RELEASE_MS = 190L
+    // Slow and heavy, not snappy (owner 2026-08-25: "a little slower so it's like sludgier and not
+    // so fidgity"). The squash oozes down and eases back like it has weight, rather than flicking.
+    private const val PRESS_MS = 150L
+    // Release is a CLEAN SETTLE, not a spring: the owner found the overshoot "kinda springy" and
+    // wants the squash to be the star. No bounce past rest -- just a slow ease back.
+    private const val RELEASE_MS = 320L
 
     /**
      * Attach the press→launch animation to [view] (an app icon). Idempotent per bind.
