@@ -47,15 +47,22 @@ object AresColumnStepper {
     private var view: View? = null
     private var refresh: (() -> Unit)? = null
 
-    fun isAttached(): Boolean = view != null
-
     /** Re-evaluate button enabled/disabled state (bounds + whether a folder is open). No-op if detached. */
     fun refreshEnabled() {
         refresh?.invoke()
     }
 
     fun attach(launcher: Launcher, list: AresHomeListView) {
-        if (view != null) return
+        val existing = view
+        if (existing != null) {
+            // Same activity re-entering edit mode: already showing, don't add a second pill.
+            if (existing.context === launcher) return
+            // Left over from a PREVIOUS activity that was recreated while edit mode was active: a
+            // theme/config-change recreate() never runs exitEditMode, so detach() never fired and the
+            // singleton still points at the destroyed activity. Drop the stale pill now (releasing
+            // that activity) and attach a fresh one for this one (adversarial panel R1, 2026-08-26).
+            clearStale()
+        }
         val ctx: Context = launcher
         val density = ctx.resources.displayMetrics.density
         fun dp(v: Float): Int = (v * density).toInt()
@@ -67,7 +74,7 @@ object AresColumnStepper {
         // close to surfaceContainerHigh in this theme (owner 2026-08-26).
         val tonal = color(R.color.materialColorPrimary)
         val onTonal = color(R.color.materialColorOnPrimary)
-        val labelColor = color(R.color.materialColorPrimary)
+        val labelColor = tonal // buttons and label share the primary accent
 
         val label = TextView(ctx).apply {
             setTextColor(labelColor)
@@ -191,6 +198,30 @@ object AresColumnStepper {
             .setDuration(380)
             .setInterpolator(OvershootInterpolator(1.7f))
             .start()
+    }
+
+    /**
+     * Synchronously drop the current pill with no exit animation, releasing the captured
+     * activity/list references. Used when a stale pill is left behind by an activity that was
+     * recreated while edit mode was active (see [attach]) and when the host list detaches
+     * ([onHostDetached]) -- neither of which should play the exit slide.
+     */
+    private fun clearStale() {
+        view?.let {
+            it.animate().cancel()
+            (it.parent as? ViewGroup)?.removeView(it)
+        }
+        view = null
+        refresh = null
+    }
+
+    /**
+     * Called when a host [AresHomeListView] detaches from its window (activity teardown). If the
+     * live pill belongs to that host's activity, drop it now so this object singleton does not pin a
+     * destroyed activity until the next edit session (adversarial panel R1, 2026-08-26).
+     */
+    fun onHostDetached(launcher: Launcher) {
+        if (view?.context === launcher) clearStale()
     }
 
     fun detach() {

@@ -2783,6 +2783,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     override fun onDetachedFromWindow() {
         cancelEmptySpaceLongPress()
         emptySpacePopupTook = false
+        // Release the edit-mode column-stepper pill if it belongs to this (now tearing-down) host,
+        // so its object singleton does not pin a destroyed activity (adversarial panel R1).
+        AresColumnStepper.onHostDetached(launcher)
         super.onDetachedFromWindow()
     }
 
