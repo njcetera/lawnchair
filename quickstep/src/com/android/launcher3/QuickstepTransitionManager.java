@@ -206,6 +206,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
     public static final long APP_LAUNCH_DURATION = 500;
 
+    // AresLauncher radial launch (owner 2026-08-25): the opening window stays rounded to half its
+    // short side -- a circle at the icon, a capsule as it grows -- until this fraction of the open,
+    // then rounds off to the normal window corner, so the app blooms out radially.
+    private static final float ARES_RADIAL_SQUARE_START = 0.62f;
+
     public static final long APP_LAUNCH_ALPHA_DURATION = 50;
     public static final long APP_LAUNCH_ALPHA_START_DELAY = 25;
 
@@ -891,6 +896,18 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
                 final int windowCropWidth = crop.width();
                 final int windowCropHeight = crop.height();
+
+                // AresLauncher radial launch: round the window to half its SHORT side (a circle/
+                // capsule) for most of the grow, then square off to the normal corner in the final
+                // stretch. `initialWindowRadius` already starts circular; stock just collapses it on
+                // the same fast curve, so the round phase is over in a blink. Driving it off the live
+                // crop keeps it round the whole way out instead.
+                final float aresCircleRadius = Math.min(windowCropWidth, windowCropHeight) / 2f;
+                final float aresSquareOff = Utilities.boundToRange(
+                        (percent - ARES_RADIAL_SQUARE_START) / (1f - ARES_RADIAL_SQUARE_START),
+                        0f, 1f);
+                final float aresRadialRadius =
+                        aresCircleRadius + (finalWindowRadius - aresCircleRadius) * aresSquareOff;
                 if (rotationChange != 0) {
                     Utilities.rotateBounds(crop, mDeviceProfile.getDeviceProperties().getWidthPx(),
                             mDeviceProfile.getDeviceProperties().getHeightPx(), rotationChange);
@@ -926,7 +943,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 if (initOnly) {
                     // For the init pass, we want full alpha since the window is not yet ready.
                     floatingView.update(1f, floatingIconBounds, percent, 0f,
-                            mWindowRadius.value * scale, true /* isOpening */);
+                            aresRadialRadius * scale, true /* isOpening */);
                     return;
                 }
 
@@ -954,11 +971,11 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                         }
 
                         floatingView.update(mIconAlpha.value, floatingIconBounds, percent, 0f,
-                                mWindowRadius.value * scale, true /* isOpening */);
+                                aresRadialRadius * scale, true /* isOpening */);
                         builder.setMatrix(matrix)
                                 .setWindowCrop(crop)
                                 .setAlpha(1f - mIconAlpha.value)
-                                .setCornerRadius(mWindowRadius.value)
+                                .setCornerRadius(aresRadialRadius)
                                 .setShadowRadius(mShadowRadius.value);
                     } else if (target.mode == MODE_CLOSING) {
                         if (target.localBounds != null) {
