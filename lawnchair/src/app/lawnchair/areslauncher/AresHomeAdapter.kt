@@ -1249,6 +1249,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is BubbleTextView) {
             applyGridStyle(itemView)
+            // Reset any transform an earlier use of a pooled view may have left, then attach the
+            // playful press->launch squash+twist+sprint (owner 2026-08-25). Observe-only, so the
+            // tap/scroll/long-press pipeline is untouched. See AresIconPress.
+            itemView.scaleX = 1f
+            itemView.scaleY = 1f
+            itemView.rotation = 0f
+            AresIconPress.attach(itemView) { editMode }
         }
 
         // WP folders BL-4 (design/wp-folder-design.md): a Windows-Phone-style folder NEVER opens the
