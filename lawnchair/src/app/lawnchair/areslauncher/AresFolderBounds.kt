@@ -78,6 +78,22 @@ class AresFolderBounds(
     /** Vertical space to reserve BELOW the opened apps: the card's bottom padding and a gap. */
     val expandedBottomPadPx: Int = (cardBottomPad + bottomGap).toInt()
 
+    /** Title text size in px, so an inline rename editor can match the drawn title exactly. */
+    val titleTextSizePx: Float get() = titlePaint.textSize
+
+    /** Title text colour, for the same reason. */
+    val titleTextColor: Int get() = titlePaint.color
+
+    /** Horizontal inset the drawn title keeps from the card edge; the editor uses the same. */
+    val titleHPadPx: Float get() = titleHPad
+
+    /**
+     * When true, [onDraw] omits the title text so an inline rename EditText overlaid on the title
+     * band can stand in its place without the drawn title showing through behind it (owner
+     * 2026-08-25, "rename in place rather than a popup"). The caller invalidates after flipping this.
+     */
+    var suppressTitle: Boolean = false
+
     private val rect = RectF()
 
     // Material-3 "fade through" for the card as the folder opens: the surface fades in with the
@@ -173,6 +189,28 @@ class AresFolderBounds(
         return x in left..right && y in bandTop..(bandTop + titleBandPx)
     }
 
+    /**
+     * The title band rectangle in the list's coordinate space at REST (bloom == 1, which is the
+     * folder's state once it is fully open and a rename can be raised), written into [out]. Same
+     * geometry as [titleBandContains]. Returns false when nothing is expanded or the run has no
+     * on-screen apps. Used to position the inline rename EditText over the drawn title band.
+     */
+    fun titleBandRect(out: RectF): Boolean {
+        val run = list.aresAdapter.expandedRunRange() ?: return false
+        var minTop = Int.MAX_VALUE
+        for (pos in (run.first + 1)..run.last) {
+            val v = list.findViewHolderForAdapterPosition(pos)?.itemView ?: continue
+            if (v.top < minTop) minTop = v.top
+        }
+        if (minTop == Int.MAX_VALUE) return false
+        val left = list.paddingLeft.toFloat()
+        val right = (list.width - list.paddingRight).toFloat()
+        if (right <= left) return false
+        val bandTop = minTop - cardPad - titleBandPx
+        out.set(left, bandTop, right, bandTop + titleBandPx)
+        return true
+    }
+
     override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
         val run = list.aresAdapter.expandedRunRange()
         if (run == null) {
@@ -233,7 +271,7 @@ class AresFolderBounds(
         // The folder title, centred in the band at the top of the (bloomed) card, standing in for the
         // label that the folder icon hides while expanded.
         val title = list.aresAdapter.expandedWpFolderTitle()?.toString()
-        if (!title.isNullOrEmpty()) {
+        if (!suppressTitle && !title.isNullOrEmpty()) {
             val avail = (sRight - sLeft - 2 * titleHPad).coerceAtLeast(0f)
             val shown = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END)
             val baseline = sTop + titleVPad - titlePaint.ascent()

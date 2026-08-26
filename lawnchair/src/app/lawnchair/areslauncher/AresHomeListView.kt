@@ -85,6 +85,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     private lateinit var folderBounds: AresFolderBounds
 
+    /**
+     * The live inline rename EditText overlaid on an expanded folder's title band, or null when no
+     * rename is in progress. Owned here (not by the adapter) because it lives in the DragLayer and is
+     * positioned from this view's coordinate space. See [beginInlineFolderRename].
+     */
+    private var inlineRenameEditor: android.widget.EditText? = null
+    private val tmpBandRect = RectF()
+
     init {
         layoutManager = masonry
         adapter = aresAdapter
@@ -1108,7 +1116,111 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * then defers the structural collapse until it finishes. Returns 0 when
      * there is nothing to animate (folder scrolled off, empty) so the adapter collapses immediately.
      */
+    /**
+     * Rename the inline-expanded folder IN PLACE (owner 2026-08-25, "rename in place rather than a
+     * popup"): overlay a real EditText exactly on the drawn title band and let the owner type over
+     * the title, instead of raising the stock AlertDialog. Raised by tapping the title band (see the
+     * tap handler in the touch listener).
+     *
+     * The title is CANVAS-DRAWN by [AresFolderBounds] (an ItemDecoration, not a view), so "in place"
+     * means: hide the drawn title ([AresFolderBounds.suppressTitle]) and float an EditText, styled to
+     * match the drawn title, over that band. The band rect is in this view's coordinate space; the
+     * EditText lives in the shared DragLayer (like every other floating affordance here), so both
+     * corners are mapped through [BaseDragLayer.getDescendantCoordRelativeToSelf] -- which also folds
+     * in the workspace scale/translation this view sits under. Commit is [renameWpFolder]'s existing
+     * semantics (blank refused), fired on IME "done" or focus loss; either way the editor is removed
+     * and the drawn title restored.
+     */
+    fun beginInlineFolderRename() {
+        if (inlineRenameEditor != null) return
+        val folder = aresAdapter.expandedWpFolderInfo() ?: return
+        if (!folderBounds.titleBandRect(tmpBandRect)) return
+
+        // Map the band's top-left and bottom-right from this view's space into DragLayer space.
+        val dl = launcher.dragLayer
+        val tl = floatArrayOf(tmpBandRect.left, tmpBandRect.top)
+        val br = floatArrayOf(tmpBandRect.right, tmpBandRect.bottom)
+        dl.getDescendantCoordRelativeToSelf(this, tl)
+        dl.getDescendantCoordRelativeToSelf(this, br)
+        val x = Math.round(Math.min(tl[0], br[0]))
+        val y = Math.round(Math.min(tl[1], br[1]))
+        val w = Math.round(Math.abs(br[0] - tl[0]))
+        val h = Math.round(Math.abs(br[1] - tl[1]))
+        if (w <= 0 || h <= 0) return
+
+        val editor = android.widget.EditText(context).apply {
+            setText(folder.title ?: "")
+            setSelection(text.length)
+            setSingleLine(true)
+            // Match the drawn title so the swap reads as editing the same text, not a new widget.
+            gravity = android.view.Gravity.CENTER
+            setTextColor(folderBounds.titleTextColor)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, folderBounds.titleTextSizePx)
+            background = null // the card behind it is the visual background
+            val hp = folderBounds.titleHPadPx.toInt()
+            setPadding(hp, 0, hp, 0)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            isFocusableInTouchMode = true
+        }
+        val lp = com.android.launcher3.views.BaseDragLayer.LayoutParams(w, h).apply {
+            customPosition = true
+            this.x = x
+            this.y = y
+        }
+        dl.addView(editor, lp)
+        inlineRenameEditor = editor
+        folderBounds.suppressTitle = true
+        invalidate()
+
+        editor.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                dismissInlineFolderRename(commit = true)
+                true
+            } else {
+                false
+            }
+        }
+        editor.setOnFocusChangeListener { _, hasFocus ->
+            // Losing focus (tapping elsewhere, the keyboard dismissing) commits, matching the way an
+            // inline rename is expected to behave -- typed text is not silently thrown away.
+            if (!hasFocus) dismissInlineFolderRename(commit = true)
+        }
+        editor.requestFocus()
+        editor.post {
+            val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(editor, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    /**
+     * Tear down the inline rename editor if one is showing: optionally [commit] the typed text
+     * through [renameWpFolder] (blank/unchanged refused there), then remove the EditText, hide the
+     * keyboard and restore the drawn title. Safe to call when no rename is in progress. Called on IME
+     * done, on focus loss, and whenever the folder collapses out from under the editor.
+     */
+    fun dismissInlineFolderRename(commit: Boolean) {
+        val editor = inlineRenameEditor ?: return
+        inlineRenameEditor = null
+        // Clear the focus listener first: removeView drops focus and would otherwise re-enter this.
+        editor.onFocusChangeListener = null
+        if (commit) {
+            aresAdapter.expandedWpFolderInfo()?.let { aresAdapter.renameWpFolder(it, editor.text) }
+        }
+        val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(editor.windowToken, 0)
+        (editor.parent as? ViewGroup)?.removeView(editor)
+        folderBounds.suppressTitle = false
+        invalidate()
+    }
+
     fun onWpFolderCollapsing(folderInfo: FolderInfo): Int {
+        // A collapse pulls the title band away; commit and remove any inline rename first so the
+        // editor never lingers over a folder that is closing.
+        dismissInlineFolderRename(commit = true)
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return 0
         val endScale = if (isEditMode()) EDIT_MODE_SCALE else 1f
@@ -2266,7 +2378,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                         // Tapping the folder's TITLE on the card renames it (owner 2026-08-24), rather
                         // than closing -- checked first, since the title band is "outside" any tile.
                         if (folderBounds.titleBandContains(e.x, e.y)) {
-                            aresAdapter.promptRenameExpandedFolder()
+                            beginInlineFolderRename()
                             return true
                         }
                         val pos = downChild?.let { getChildAdapterPosition(it) } ?: NO_POSITION

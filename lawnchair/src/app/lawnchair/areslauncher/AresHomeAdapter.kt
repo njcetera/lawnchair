@@ -841,6 +841,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
         return (items.firstOrNull { it.id == id } as? FolderInfo)?.title
     }
 
+    /** The currently inline-expanded WP folder's [FolderInfo], or null when none is expanded. */
+    fun expandedWpFolderInfo(): FolderInfo? {
+        val id = expandedWpFolderId
+        if (id == -1) return null
+        return items.firstOrNull { it.id == id } as? FolderInfo
+    }
+
     /**
      * WP folders Phase 3 #3: the contiguous adapter index range covering the inline-expanded folder
      * tile and the children spliced immediately after it, or null when nothing is expanded. Handed to
