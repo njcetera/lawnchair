@@ -471,6 +471,21 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         syncAresAppListPane();
         pruneAresStrayPages();
         leaveAllAppsWhileThePaneIsPersistent();
+        updateAresHotseatVisibility();
+    }
+
+    /**
+     * Hide the hotseat (dock) when unfolded (owner 2026-08-25). The dual-pane layout keeps the app
+     * list one swipe away, so the dock is redundant on the large screen; the folded posture keeps
+     * it. Runs from {@link #syncAresDualPane()}, which {@link #setInsets(Rect)} posts on every fold
+     * and unfold, so it re-applies on each posture change. State transitions animate the hotseat's
+     * alpha, not its visibility, so GONE/VISIBLE here does not fight them.
+     */
+    private void updateAresHotseatVisibility() {
+        Hotseat hotseat = mLauncher.getHotseat();
+        if (hotseat != null) {
+            hotseat.setVisibility(isTwoPanelEnabled() ? GONE : VISIBLE);
+        }
     }
 
     /**
