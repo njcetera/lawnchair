@@ -2,6 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.animation.ValueAnimator
 import android.view.View
+import android.view.ViewGroup
 import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.Launcher
 
@@ -59,7 +60,9 @@ object AresHomeReveal {
         return u * u * ((tension + 1f) * u + tension) + 1f
     }
 
-    private var running: ValueAnimator? = null
+    // One animator per animating container (home list, and the unfolded app-list pane's recycler),
+    // so running the reveal on both does not have the second cancel the first.
+    private val running = mutableListOf<ValueAnimator>()
 
     /** Fires the reveal across the home tiles. Safe to call repeatedly; cancels any prior run. */
     @JvmStatic
@@ -67,18 +70,28 @@ object AresHomeReveal {
         val list = launcher.workspace?.aresHomeList ?: return
         // No folder (inline or overlay) should stay open across a reveal (owner 2026-08-25).
         AbstractFloatingView.closeAllOpenViews(launcher, false)
+        running.forEach { it.cancel() }
+        running.clear()
+        // The unfolded dual-pane app list gets the SAME reveal as the home grid (owner 2026-08-25):
+        // its rows rise from the bottom of the pane and zoom in, staggered. Null while folded (no
+        // pane) or before its recycler exists. Its rows are centre-aligned full-width, so p0x == 0
+        // and the motion is a clean vertical rise + zoom with no horizontal fan.
+        val paneRv: ViewGroup? = launcher.workspace?.aresAppListPane?.activeRecyclerView
         if (list.aresAdapter.collapseWpFolderImmediate()) {
             // A folder was open: let its structural collapse + relayout settle one frame, then reveal.
-            list.post { playInner(list) }
+            list.post {
+                playInner(list)
+                paneRv?.let { playInner(it) }
+            }
         } else {
             playInner(list)
+            paneRv?.let { playInner(it) }
         }
     }
 
-    private fun playInner(list: AresHomeListView) {
+    private fun playInner(list: ViewGroup) {
         val n = list.childCount
         if (n == 0) return
-        running?.cancel()
 
         val clusterX = list.width * CLUSTER_X_FRAC
         val startClusterY = list.height * START_Y_FRAC
@@ -120,7 +133,7 @@ object AresHomeReveal {
             ((MAX_TOTAL_MS - budget) / (children.size - 1).coerceAtLeast(1))
         }
 
-        running = ValueAnimator.ofFloat(0f, total.toFloat()).apply {
+        val anim = ValueAnimator.ofFloat(0f, total.toFloat()).apply {
             duration = total
             addUpdateListener {
                 val t = it.animatedValue as Float
@@ -158,6 +171,10 @@ object AresHomeReveal {
             )
             start()
         }
+        // Tracked so the next play() can cancel it; the list is cleared (and all cancelled) each
+        // play(), and cancelling an already-finished animator is a no-op, so finished entries are
+        // harmless until then.
+        running.add(anim)
     }
 
     private fun reset(children: List<View>) {
@@ -167,7 +184,6 @@ object AresHomeReveal {
             v.translationX = 0f
             v.translationY = 0f
         }
-        running = null
     }
 
     /** Guarded entry for the onResume hook: no-op unless [enabled]. */
