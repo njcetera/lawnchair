@@ -193,8 +193,13 @@ class ModelCallbacks(private var launcher: Launcher) : BgDataModel.Callbacks {
         // from here, where the full app set, model flags and uid map are in scope -- the store's
         // flags and map have no accessors, so mirroring from the launcher's store elsewhere could
         // not be faithful. No-op while folded, when the pane does not exist.
-        launcher.workspace?.aresAppListPane?.appsStore
-            ?.setApps(apps, flags, packageUserKeytoUidMap)
+        // Feed the pane's independent store whether or not it is attached (getAresAppListPane is
+        // null while folded, which used to let an install landing while folded skip the pane and
+        // leave the unfolded list stale/empty). Pre-inflate only when the pane is on screen; while
+        // detached, just update the data -- it renders on the next attach.
+        launcher.workspace?.aresAppListPaneForModelFeed?.let { pane ->
+            pane.appsStore.setApps(apps, flags, packageUserKeytoUidMap, pane.isAttachedToWindow)
+        }
         PopupContainerWithArrow.dismissInvalidPopup(launcher)
         if (
             hadWorkApps != launcher.appsView.shouldShowTabs() &&

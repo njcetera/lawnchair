@@ -1431,6 +1431,23 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * The app-list pane instance for the model store feed, whether or not it is currently attached.
+     *
+     * <p>The pane is inflated once and reused across fold cycles ({@link #syncAresAppListPane()} only
+     * detaches it while folded, never nulls it), and it holds its own independent
+     * {@link com.android.launcher3.allapps.AllAppsStore}. Feeding that store even while the pane is
+     * detached (folded) keeps it current, so the next unfold shows the right app list immediately --
+     * closing the gap where an app installed while folded, or a bind that lands between the pane's
+     * detach and re-attach, left the unfolded list stale or empty (owner 2026-08-25, "only when
+     * unfolded"). Distinct from {@link #getAresAppListPane()}, which stays null while detached for
+     * callers that need the pane actually on screen.
+     */
+    @Nullable
+    public AresPanelAllAppsContainerView getAresAppListPaneForModelFeed() {
+        return mAresAppList;
+    }
+
+    /**
      * Per-posture ownership of the floating search affordance.
      *
      * Both the folded container and the unfolded pane are full

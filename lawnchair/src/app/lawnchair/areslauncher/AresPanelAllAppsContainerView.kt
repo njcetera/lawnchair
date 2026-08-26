@@ -174,7 +174,18 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      */
     private fun seedAppsFromLauncher() {
         val source = (context as? Launcher)?.appsView?.appsStore ?: return
-        if (source.apps.isNullOrEmpty() || !appsStore.apps.isNullOrEmpty()) return
-        appsStore.setApps(source.apps, 0, emptyMap())
+        val src = source.apps ?: return
+        if (src.isEmpty()) return
+        // Re-sync from the launcher's store whenever this pane is OUT OF STEP with it -- empty
+        // (first populate) or stale. This pane is inflated once and reused across fold cycles, and
+        // while FOLDED it is detached, so bindAllApplications feeds the launcher's store but SKIPS
+        // this pane (getAresAppListPane() is null while detached). On the next UNFOLD the pane must
+        // pull the current set, or an app installed/removed while folded leaves the unfolded list
+        // stale or empty (owner 2026-08-25, "only when unfolded"). Comparing size catches
+        // add/remove; ModelCallbacks.bindAllApplications stays the authoritative feed (real flags +
+        // uid map) whenever the pane is attached, so the earlier "only when my store is empty" guard
+        // -- which let a stale pane survive -- is replaced by this size check.
+        if (appsStore.apps?.size == src.size) return
+        appsStore.setApps(src, 0, emptyMap())
     }
 }
