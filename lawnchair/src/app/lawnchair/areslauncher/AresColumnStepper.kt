@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -77,10 +78,10 @@ object AresColumnStepper {
             letterSpacing = 0.01f
         }
 
-        lateinit var minusBtn: TextView
-        lateinit var plusBtn: TextView
+        lateinit var minusBtn: ImageView
+        lateinit var plusBtn: ImageView
 
-        fun setEnabled(btn: TextView, enabled: Boolean) {
+        fun setEnabled(btn: View, enabled: Boolean) {
             btn.isEnabled = enabled
             btn.isClickable = enabled
             btn.alpha = if (enabled) 1f else DISABLED_ALPHA
@@ -106,17 +107,18 @@ object AresColumnStepper {
             label.text = labelText(list.currentColumns())
         }
 
-        fun tonalIconButton(glyph: String, delta: Int): TextView = TextView(ctx).apply {
-            text = glyph
-            setTextColor(onTonal)
-            textSize = 20f
-            gravity = Gravity.CENTER
+        fun tonalIconButton(iconRes: Int, delta: Int): ImageView = ImageView(ctx).apply {
+            setImageResource(iconRes)
+            imageTintList = ColorStateList.valueOf(onTonal)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             val d = dp(46f)
-            minWidth = d
-            minHeight = d
+            minimumWidth = d
+            minimumHeight = d
+            val padIcon = dp(12f) // inset the 24dp glyph so it reads at ~22dp inside the disc
+            setPadding(padIcon, padIcon, padIcon, padIcon)
             isClickable = true
             isFocusable = true
-            // M3 filled-tonal icon button: a secondary-container disc with a state-layer ripple.
+            // M3 filled icon button: a primary-accent disc with a state-layer ripple.
             val fill = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(tonal)
@@ -145,8 +147,8 @@ object AresColumnStepper {
             }
         }
 
-        minusBtn = tonalIconButton("−", -1) // MINUS SIGN
-        plusBtn = tonalIconButton("+", +1)
+        minusBtn = tonalIconButton(R.drawable.ic_ares_stepper_remove, -1)
+        plusBtn = tonalIconButton(R.drawable.ic_ares_stepper_add, +1)
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL

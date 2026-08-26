@@ -2511,12 +2511,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     fun setGridColumns(n: Int) {
         val c = n.coerceIn(ARES_HOME_COLUMNS_MIN, ARES_HOME_COLUMNS_MAX)
         if (masonry.columns != c) {
-            masonry.columns = c
             // Animate the reflow: capture every tile's current bounds and slide+scale it to its new
             // cell (the same spring the WP folder open/reorder uses), so a column change is a smooth
-            // rearrange rather than a teleport (owner 2026-08-26).
+            // rearrange rather than a teleport (owner 2026-08-26: tiles were jumping).
+            //
+            // Order matters: arm animateNextLayout FIRST. The `columns` setter invalidates the
+            // packing and calls requestLayout() itself, and that flag must already be set when the
+            // resulting layout pass runs -- otherwise the pass that actually reflows to the new
+            // column count is the un-animated one, and the tiles snap.
             masonry.animateNextLayout()
-            requestLayout()
+            masonry.columns = c
             invalidate()
         }
         (launcher as? app.lawnchair.LawnchairLauncher)?.lifecycleScope?.launch {
