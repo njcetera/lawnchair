@@ -655,7 +655,26 @@ class LawnchairLauncher : QuickstepLauncher() {
                         // launcher (owner: don't animate if already home).
                         if (aresWasStopped) {
                             aresWasStopped = false
-                            app.lawnchair.areslauncher.AresHomeReveal.maybePlayOnHomeAppear(this@LawnchairLauncher)
+                            // Home scroll reset (owner 2026-08-25): if the launcher was gone long
+                            // enough to count as "left for an app" (>= ARES_HOME_TOP_RESET_MS), come
+                            // back at the TOP of the vertical list rather than wherever it was
+                            // scrolled to. A quick there-and-back (tapped an app, swiped straight
+                            // home) stays put, so an accidental launch returns you where you were.
+                            // Scroll first, then post the reveal so its rise plays on the top rows
+                            // that the reset just brought into view (scrollToPosition requestLayouts
+                            // async, so the post lets that pass land before the reveal reads tiles).
+                            val list = workspace?.aresHomeList
+                            val bg = android.os.SystemClock.uptimeMillis() - aresStoppedAt
+                            if (list != null && bg >= ARES_HOME_TOP_RESET_MS) {
+                                list.scrollToPosition(0)
+                                list.post {
+                                    app.lawnchair.areslauncher.AresHomeReveal
+                                        .maybePlayOnHomeAppear(this@LawnchairLauncher)
+                                }
+                            } else {
+                                app.lawnchair.areslauncher.AresHomeReveal
+                                    .maybePlayOnHomeAppear(this@LawnchairLauncher)
+                            }
                         }
                     }
                 }
@@ -670,9 +689,18 @@ class LawnchairLauncher : QuickstepLauncher() {
      */
     private var aresWasStopped = false
 
+    /**
+     * Monotonic time ([android.os.SystemClock.uptimeMillis]) the launcher was last backgrounded, so
+     * the next [onResume] can tell a quick there-and-back (came home within
+     * [ARES_HOME_TOP_RESET_MS]) from a real absence in an app. See onResume: a quick return keeps
+     * the home list where it was; a longer one resets it to the top (owner 2026-08-25).
+     */
+    private var aresStoppedAt = 0L
+
     override fun onStop() {
         super.onStop()
         aresWasStopped = true
+        aresStoppedAt = android.os.SystemClock.uptimeMillis()
     }
 
     override fun onStateSetEnd(state: LauncherState) {
@@ -758,6 +786,11 @@ class LawnchairLauncher : QuickstepLauncher() {
         // §9 app-list wallpaper dim fade timings (owner: long, gentle 2s fade both ways).
         private const val APP_LIST_DIM_FADE_IN_MS = 2000L
         private const val APP_LIST_DIM_FADE_OUT_MS = 2000L
+
+        // How long the launcher must have been backgrounded for a return to reset the home list to
+        // the top (owner 2026-08-25, "after 5 seconds of being in an app... takes them back to the
+        // top"). Under this, a there-and-back keeps the prior scroll position. One knob to tune.
+        private const val ARES_HOME_TOP_RESET_MS = 5000L
 
         var sRestartFlags = 0
 
