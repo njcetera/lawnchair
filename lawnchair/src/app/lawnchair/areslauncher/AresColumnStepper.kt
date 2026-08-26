@@ -52,6 +52,24 @@ object AresColumnStepper {
         refresh?.invoke()
     }
 
+    /**
+     * True if `(rawX, rawY)` (screen coordinates) falls within the pill's **resting** bounds --
+     * deliberately ignoring the enter/exit slide translation, so a tap aimed at the settled pill
+     * while it is still sliding in still counts as "on the pill". The grid's tap-to-leave-edit-mode
+     * handler consults this so a tap on (or aimed at) the stepper never drops the user out of edit
+     * mode (owner 2026-08-26). No-op false when detached.
+     */
+    fun tapWithinRestingPill(rawX: Float, rawY: Float): Boolean {
+        val v = view ?: return false
+        val loc = IntArray(2)
+        v.getLocationOnScreen(loc)
+        // getLocationOnScreen reports the CURRENT (translated) position; subtract the slide offset
+        // to recover where the pill rests, so the guard holds all through the enter animation.
+        val left = loc[0] - v.translationX
+        val top = loc[1] - v.translationY
+        return rawX >= left && rawX <= left + v.width && rawY >= top && rawY <= top + v.height
+    }
+
     fun attach(launcher: Launcher, list: AresHomeListView) {
         val existing = view
         if (existing != null) {
@@ -162,6 +180,11 @@ object AresColumnStepper {
             gravity = Gravity.CENTER_VERTICAL
             clipChildren = false // let the count label's vertical roll slide past the row bounds
             clipToPadding = false
+            // Consume any tap that lands on the pill but OFF the two discs (the label, the padding).
+            // Without this a near-miss falls through to the grid's OnItemTouchListener, which reads a
+            // stationary tap on non-item space as "leave edit mode" (AresHomeListView ~2410) -- so the
+            // first tap at the stepper would sometimes drop the user out of edit mode (owner 2026-08-26).
+            isClickable = true
             val padV = dp(8f)
             val padH = dp(10f)
             setPadding(padH, padV, padH, padV)

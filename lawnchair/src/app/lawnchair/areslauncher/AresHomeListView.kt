@@ -2407,7 +2407,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                     if (editMode && tap) {
                         // On empty space: leave the mode. On an item: swallow it, so the tile stays
                         // inert. Either way the child gets ACTION_CANCEL and does not click.
-                        if (!onItem) exitEditMode()
+                        // Exception: a tap on (or aimed at) the column-stepper pill must NOT leave the
+                        // mode. The pill floats in the DragLayer above this list; a tap that misses the
+                        // discs, or lands where the pill will settle while it is still sliding in,
+                        // falls through to here as non-item empty space -- so the first stepper tap
+                        // would sometimes drop the user out of edit mode (owner 2026-08-26). Its resting
+                        // bounds (slide translation ignored) are the guard.
+                        if (!onItem && !AresColumnStepper.tapWithinRestingPill(e.rawX, e.rawY)) exitEditMode()
                         // A folder is the exception -- let its click through so it opens, and arm
                         // the in-folder × affordances for the folder that click is about to open.
                         if (onFolder != null) {
