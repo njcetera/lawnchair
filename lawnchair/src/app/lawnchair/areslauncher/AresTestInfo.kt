@@ -279,6 +279,14 @@ object AresTestInfo {
     const val REQUEST_HOME_REVEAL = "ares-home-reveal"
 
     /**
+     * Home grid column override (owner 2026-08-26). No `arg` → reports the current effective count;
+     * `arg` = 3..6 → sets it (the same render-only path the edit-mode stepper drives). Returns
+     * `columns=<n>`. Lets a test drive the column count deterministically without the flaky
+     * stepper tap.
+     */
+    const val REQUEST_HOME_COLUMNS = "ares-home-columns"
+
+    /**
      * The app list's edge-glow state: `topFinished|bottomFinished`.
      *
      * Ledger row 29: `mAllAppsOvershootStarted` armed by an overscroll pull was only released when
@@ -391,11 +399,22 @@ object AresTestInfo {
                 AresFolderDrop.isLiveCreateEnabled()
             },
         )
+        REQUEST_HOME_COLUMNS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> homeColumns(launcher, arg) },
+        )
         REQUEST_HOME_REVEAL -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> homeReveal(launcher, arg) },
         )
         else -> null
+    }
+
+    /** See [REQUEST_HOME_COLUMNS]. Runs on the UI thread via getLauncherUIProperty. */
+    private fun homeColumns(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        arg?.trim()?.toIntOrNull()?.let { list.setGridColumns(it) }
+        return "columns=${list.currentColumns()}"
     }
 
     /** See [REQUEST_HOME_REVEAL]. Runs on the UI thread via getLauncherUIProperty. */

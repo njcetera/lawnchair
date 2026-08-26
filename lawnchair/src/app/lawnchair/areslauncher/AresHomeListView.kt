@@ -35,6 +35,9 @@ import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.model.data.LauncherAppWidgetInfo
 import com.android.launcher3.widget.LauncherAppWidgetHostView
+import androidx.lifecycle.lifecycleScope
+import com.patrykmichalik.opto.core.firstBlocking
+import kotlinx.coroutines.launch
 
 /**
  * Continuously-scrolling **masonry grid** of home-screen items, replacing CellLayout's paged grid
@@ -1412,6 +1415,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // and edit mode is still NORMAL -- so without this the mode can only be left with the BACK
         // key. See LawnchairLauncher.aresWantsBackGesture.
         launcher.updateDisallowBack()
+        // The home-grid column stepper (owner 2026-08-26): a bottom pill to change how many columns
+        // the grid renders at, shown only while editing.
+        AresColumnStepper.attach(launcher, this)
     }
 
     /** Leaves edit mode, cancelling any in-flight drag. Safe to call when not in edit mode. */
@@ -1419,6 +1425,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         if (!editMode) return false
         editMode = false
         setReorderInProgress(false)
+        // The column stepper belongs to this mode -- remove it however the mode ends (BACK, HOME,
+        // a home gesture from another app).
+        AresColumnStepper.detach()
         // Drop any i-menu label suppression BEFORE the un-hide walk below. If a popup is still open
         // when the mode ends (HOME / a home gesture from another app runs exitEditMode before super
         // closes floating views), a still-set flag would make the walk's un-hide read
@@ -2468,8 +2477,47 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     private fun applyGridMetrics() {
         val dp = launcher.deviceProfile
-        masonry.columns = dp.inv.numColumns.coerceAtLeast(1)
+        masonry.columns = resolveColumns(dp.inv.numColumns.coerceAtLeast(1))
         masonry.cellHeightPx = dp.cellHeightPx.coerceAtLeast(1)
+    }
+
+    /**
+     * The column count to render at: the [aresHomeColumns] override when the owner has set one
+     * (3..6, applied to BOTH postures per owner 2026-08-26), otherwise the device profile's own
+     * [deviceDefault] for this posture. Render-only -- the masonry packs by rank, so this never
+     * touches cellX/cellY and cannot trip the loader's occupancy purge (unlike the IDP grid prefs).
+     */
+    private fun resolveColumns(deviceDefault: Int): Int {
+        val override = try {
+            app.lawnchair.preferences2.PreferenceManager2.getInstance(context)
+                .aresHomeColumns.firstBlocking()
+        } catch (t: Throwable) {
+            0
+        }
+        return if (override in ARES_HOME_COLUMNS_MIN..ARES_HOME_COLUMNS_MAX) override else deviceDefault
+    }
+
+    /** The column count the home grid is currently rendering at. */
+    fun currentColumns(): Int = masonry.columns
+
+    /**
+     * Set the home grid column count from the edit-mode stepper (owner 2026-08-26). Clamps to
+     * [ARES_HOME_COLUMNS_MIN]..[ARES_HOME_COLUMNS_MAX], applies it to the live masonry immediately
+     * (an animated repack, since the layout manager reflows by rank on requestLayout), and persists
+     * it so it survives a relaunch and applies to both postures on the next fold. The immediate set
+     * writes masonry.columns directly rather than re-reading the pref, because the persist is async
+     * and firstBlocking would race it.
+     */
+    fun setGridColumns(n: Int) {
+        val c = n.coerceIn(ARES_HOME_COLUMNS_MIN, ARES_HOME_COLUMNS_MAX)
+        if (masonry.columns != c) {
+            masonry.columns = c
+            requestLayout()
+            invalidate()
+        }
+        (launcher as? app.lawnchair.LawnchairLauncher)?.lifecycleScope?.launch {
+            app.lawnchair.preferences2.PreferenceManager2.getInstance(context).aresHomeColumns.set(c)
+        }
     }
 
     /**
@@ -3057,6 +3105,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     companion object {
+        /** Home grid column-override bounds for the edit-mode stepper (owner 2026-08-26). */
+        const val ARES_HOME_COLUMNS_MIN = 3
+        const val ARES_HOME_COLUMNS_MAX = 6
+
         /**
          * True if [container] hosts the edge-to-edge home list. The list draws its content beyond the
          * container's bounds -- behind the transparent system bars (see onMeasure's overscan). A

@@ -381,6 +381,19 @@ class PreferenceManager2 @Inject constructor(
         defaultValue = Workspace.DEFAULT_PAGE,
     )
 
+    /**
+     * AresLauncher home grid column override (owner 2026-08-26). 0 = follow the device profile's
+     * numColumns per posture (the default, unchanged behaviour); 3..6 = an explicit column count
+     * applied to BOTH postures. This is a RENDER-ONLY override -- the masonry home packs by rank, so
+     * changing it never touches cellX/cellY and cannot trip the loader's occupancy purge (unlike the
+     * IDP grid prefs). Set from the edit-mode column stepper. Deliberately a plain preference, NOT an
+     * idpPreference: it must not reloadGrid() / rewrite the database grid.
+     */
+    val aresHomeColumns = preference(
+        key = intPreferencesKey(name = "ares_home_columns"),
+        defaultValue = 0,
+    )
+
     val legacyPopupOptionsMigrated = preference(
         key = booleanPreferencesKey(name = "legacy_popup_options_migrated"),
         defaultValue = false,

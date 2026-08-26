@@ -52,4 +52,10 @@
          Renaming stamps FLAG_MANUAL_FOLDER_NAME so the loader's auto-labeler never overwrites it. -->
     <string name="ares_wp_rename_title">Rename folder</string>
 
+    <!-- Edit-mode home-grid column stepper (owner 2026-08-26). %1$d is the column count. -->
+    <plurals name="ares_home_columns_label">
+        <item quantity="one"><xliff:g id="count" example="4">%1$d</xliff:g> column</item>
+        <item quantity="other"><xliff:g id="count" example="4">%1$d</xliff:g> columns</item>
+    </plurals>
+
 </resources>
