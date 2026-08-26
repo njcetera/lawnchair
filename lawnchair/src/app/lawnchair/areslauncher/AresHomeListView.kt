@@ -1148,6 +1148,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val h = Math.round(Math.abs(br[1] - tl[1]))
         if (w <= 0 || h <= 0) return
 
+        // The band rect (and therefore the EditText's on-screen w/h) is mapped through
+        // getDescendantCoordRelativeToSelf, which folds in the workspace scale this list sits under.
+        // In edit mode that scale is EDIT_MODE_SCALE (< 1), so the box comes out shrunk -- the text
+        // size and padding, which come straight from the UNSCALED paint metrics, must be shrunk by
+        // the same factor or the text is oversized and clipped inside the box (adversarial review
+        // 2026-08-25, Finding 3).
+        val renameScale = if (isEditMode()) EDIT_MODE_SCALE else 1f
         val editor = android.widget.EditText(context).apply {
             setText(folder.title ?: "")
             setSelection(text.length)
@@ -1155,9 +1162,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // Match the drawn title so the swap reads as editing the same text, not a new widget.
             gravity = android.view.Gravity.CENTER
             setTextColor(folderBounds.titleTextColor)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, folderBounds.titleTextSizePx)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, folderBounds.titleTextSizePx * renameScale)
             background = null // the card behind it is the visual background
-            val hp = folderBounds.titleHPadPx.toInt()
+            val hp = (folderBounds.titleHPadPx * renameScale).toInt()
             setPadding(hp, 0, hp, 0)
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
