@@ -203,8 +203,7 @@ object AresColumnStepper {
     /**
      * Synchronously drop the current pill with no exit animation, releasing the captured
      * activity/list references. Used when a stale pill is left behind by an activity that was
-     * recreated while edit mode was active (see [attach]) and when the host list detaches
-     * ([onHostDetached]) -- neither of which should play the exit slide.
+     * recreated while edit mode was active (see [attach]); it does not play the exit slide.
      */
     private fun clearStale() {
         view?.let {
@@ -213,15 +212,6 @@ object AresColumnStepper {
         }
         view = null
         refresh = null
-    }
-
-    /**
-     * Called when a host [AresHomeListView] detaches from its window (activity teardown). If the
-     * live pill belongs to that host's activity, drop it now so this object singleton does not pin a
-     * destroyed activity until the next edit session (adversarial panel R1, 2026-08-26).
-     */
-    fun onHostDetached(launcher: Launcher) {
-        if (view?.context === launcher) clearStale()
     }
 
     fun detach() {
