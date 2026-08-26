@@ -181,11 +181,21 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // while FOLDED it is detached, so bindAllApplications feeds the launcher's store but SKIPS
         // this pane (getAresAppListPane() is null while detached). On the next UNFOLD the pane must
         // pull the current set, or an app installed/removed while folded leaves the unfolded list
-        // stale or empty (owner 2026-08-25, "only when unfolded"). Comparing size catches
-        // add/remove; ModelCallbacks.bindAllApplications stays the authoritative feed (real flags +
-        // uid map) whenever the pane is attached, so the earlier "only when my store is empty" guard
-        // -- which let a stale pane survive -- is replaced by this size check.
-        if (appsStore.apps?.size == src.size) return
+        // stale or empty (owner 2026-08-25, "only when unfolded"). ModelCallbacks.bindAllApplications
+        // stays the authoritative feed (real flags + uid map) whenever the pane is attached, so the
+        // earlier "only when my store is empty" guard -- which let a stale pane survive -- is replaced
+        // by an identity comparison here.
+        //
+        // Compare by component-key SET, not size: installing one app and uninstalling another while
+        // folded leaves the count unchanged, and a size-equality skip would then keep the stale set
+        // (adversarial review 2026-08-25, Finding 4). Size is the cheap first gate; only when it
+        // matches do we build the key sets.
+        val current = appsStore.apps
+        if (current != null && current.size == src.size &&
+            current.mapTo(HashSet()) { it.toComponentKey() } == src.mapTo(HashSet()) { it.toComponentKey() }
+        ) {
+            return
+        }
         appsStore.setApps(src, 0, emptyMap())
     }
 }
