@@ -1203,7 +1203,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val container = FrameLayout(parent.context)
+        // AresJellyContainer is a FrameLayout that can render its own icon+label as a finger-tracking
+        // jelly warp (owner 2026-08-25); inert (plain FrameLayout behaviour) until AresIconPress
+        // starts a warp, which it only does for app icons out of edit mode.
+        val container = AresJellyContainer(parent.context)
         // The layout manager measures each holder to its exact cell footprint, so the container
         // fills whatever it is given rather than sizing itself.
         container.layoutParams = RecyclerView.LayoutParams(
@@ -1249,12 +1252,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
         if (itemView is BubbleTextView) {
             applyGridStyle(itemView)
-            // Reset any transform an earlier use of a pooled view may have left, then attach the
-            // playful press->launch squash+twist+sprint (owner 2026-08-25). Observe-only, so the
-            // tap/scroll/long-press pipeline is untouched. See AresIconPress.
-            itemView.scaleX = 1f
-            itemView.scaleY = 1f
-            itemView.rotation = 0f
+            // Playful finger-tracking jelly on press (owner 2026-08-25). Observe-only, so the
+            // tap/scroll/long-press pipeline is untouched; the warp itself lives in the
+            // AresJellyContainer this tile sits in. See AresIconPress.
+            (holder.container as? AresJellyContainer)?.cancelJelly()
             AresIconPress.attach(itemView) { editMode }
         }
 
