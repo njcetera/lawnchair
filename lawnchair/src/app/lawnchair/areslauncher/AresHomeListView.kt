@@ -2512,6 +2512,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val c = n.coerceIn(ARES_HOME_COLUMNS_MIN, ARES_HOME_COLUMNS_MAX)
         if (masonry.columns != c) {
             masonry.columns = c
+            // Animate the reflow: capture every tile's current bounds and slide+scale it to its new
+            // cell (the same spring the WP folder open/reorder uses), so a column change is a smooth
+            // rearrange rather than a teleport (owner 2026-08-26).
+            masonry.animateNextLayout()
             requestLayout()
             invalidate()
         }

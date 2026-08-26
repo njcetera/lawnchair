@@ -8,6 +8,7 @@ import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.OvershootInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -59,8 +60,10 @@ object AresColumnStepper {
         fun color(res: Int): Int = ContextCompat.getColor(ctx, res)
         val surface = color(R.color.materialColorSurfaceContainerHigh)
         val onSurface = color(R.color.materialColorOnSurface)
-        val tonal = color(R.color.materialColorSecondaryContainer)
-        val onTonal = color(R.color.materialColorOnSecondaryContainer)
+        // The buttons are the PRIMARY accent so they read clearly against the neutral pill --
+        // secondaryContainer was too close to surfaceContainerHigh in this theme (owner 2026-08-26).
+        val tonal = color(R.color.materialColorPrimary)
+        val onTonal = color(R.color.materialColorOnPrimary)
 
         val label = TextView(ctx).apply {
             setTextColor(onSurface)
@@ -115,8 +118,11 @@ object AresColumnStepper {
             )
             setOnClickListener {
                 if (!isEnabled) return@setOnClickListener
-                list.setGridColumns(list.currentColumns() + delta)
+                val before = list.currentColumns()
+                list.setGridColumns(before + delta)
                 refresh?.invoke()
+                bounce(this) // springy press feedback on the tapped disc
+                if (list.currentColumns() != before) popLabel(label) // pop the count when it changes
             }
         }
 
@@ -158,5 +164,29 @@ object AresColumnStepper {
         view?.let { (it.parent as? ViewGroup)?.removeView(it) }
         view = null
         refresh = null
+    }
+
+    /** Springy squash-and-release on the tapped +/- disc (M3 Expressive press feedback). */
+    private fun bounce(v: View) {
+        v.animate().cancel()
+        v.scaleX = 0.8f
+        v.scaleY = 0.8f
+        v.animate()
+            .scaleX(1f).scaleY(1f)
+            .setDuration(260)
+            .setInterpolator(OvershootInterpolator(3.5f))
+            .start()
+    }
+
+    /** A quick overshoot pop on the count label when the number actually changes. */
+    private fun popLabel(v: View) {
+        v.animate().cancel()
+        v.scaleX = 1.18f
+        v.scaleY = 1.18f
+        v.animate()
+            .scaleX(1f).scaleY(1f)
+            .setDuration(220)
+            .setInterpolator(OvershootInterpolator(2f))
+            .start()
     }
 }
