@@ -37,13 +37,17 @@ import kotlin.math.abs
  */
 object AresIconPress {
 
-    private const val SQUASH = 0.86f          // resting 1.0 -> squashed scale on press
-    private const val SQUASH_FLATTEN = 0.94f  // y a touch flatter than x, so it reads as a squash
+    // A real squash: the icon gets clearly SHORTER and a little WIDER as it's pressed down
+    // (squash-and-stretch), not a uniform shrink -- so it reads as a squish, not a zoom-out. Owner
+    // 2026-08-25: "more of a squish" and less spring.
+    private const val SQUASH_X = 1.05f        // presses a touch wider...
+    private const val SQUASH_Y = 0.80f        // ...and clearly shorter
     private const val TWIST_DEG = 4f          // the subtle twist while squashed
 
-    private const val PRESS_MS = 90L          // fast, so the squash feels like a real press
-    private const val SPRINT_MS = 280L        // the spring-forward-and-settle on launch
-    private const val RELAX_MS = 200L         // the quiet relax when the press is abandoned
+    private const val PRESS_MS = 80L          // fast, so even a quick tap shows the squash
+    // Release is now a CLEAN SETTLE, not a spring: the owner found the overshoot "kinda springy" and
+    // wants the squash to be the star. No bounce past rest -- just ease back.
+    private const val RELEASE_MS = 190L
 
     /**
      * Attach the press→launch animation to [view] (an app icon). Idempotent per bind.
@@ -105,8 +109,8 @@ object AresIconPress {
         v.pivotX = v.width / 2f
         v.pivotY = v.height / 2f
         v.animate()
-            .scaleX(SQUASH)
-            .scaleY(SQUASH * SQUASH_FLATTEN)
+            .scaleX(SQUASH_X)
+            .scaleY(SQUASH_Y)
             .rotation(TWIST_DEG)
             .setInterpolator(AresMotion.EFFECTS_DEFAULT) // press-in, no overshoot
             .setDuration(PRESS_MS)
@@ -117,15 +121,16 @@ object AresIconPress {
         v.animate().cancel()
         v.pivotX = v.width / 2f
         v.pivotY = v.height / 2f
-        // A launch releases with the spatial overshoot -- scale springs past 1 (the forward lunge)
-        // and the twist rotates through straight -- so the icon "sprints forward" as the app opens.
-        // An abandoned press just relaxes back.
+        // Clean settle back to rest -- no overshoot, no spring (owner: less springy). The twist
+        // unwinds to straight on the same ease. `sprint` (a launching tap vs an abandoned press) no
+        // longer changes the curve; both simply un-squash, the launch tap just does it now as the
+        // app opens.
         v.animate()
             .scaleX(1f)
             .scaleY(1f)
             .rotation(0f)
-            .setInterpolator(if (sprint) AresMotion.SPATIAL_DEFAULT else AresMotion.SPATIAL_FAST)
-            .setDuration(if (sprint) SPRINT_MS else RELAX_MS)
+            .setInterpolator(AresMotion.EFFECTS_DEFAULT)
+            .setDuration(RELEASE_MS)
             .start()
     }
 }
