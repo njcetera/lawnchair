@@ -74,11 +74,18 @@ class LawnchairIconProvider @Inject constructor(
 
     private var themeMapName: String = ""
     private var _themeMap: Map<String, ThemeData>? = null
+    // Tracks which theming state [_themeMap] was built for, so it reloads when the Ares tint flips
+    // the effective theming on/off (hybrid B needs the real map even when themed icons are off).
+    private var themeMapThemed: Boolean? = null
 
     val themeMap: Map<String, ThemeData>
         get() {
-            if (!themedIconsEnabled) {
-                _themeMap = DISABLED_MAP
+            // Hybrid B: the Ares icon tint renders native themed icons for themeable apps, so it
+            // needs the real themed-icon map even when the separate themed-icons pref is off.
+            val effectiveThemed = themedIconsEnabled || AresIconTint.isActive(prefs2)
+            if (themeMapThemed != effectiveThemed) {
+                themeMapThemed = effectiveThemed
+                _themeMap = if (effectiveThemed) getThemedIconMap() else DISABLED_MAP
             }
             if (_themeMap == null) {
                 _themeMap = getThemedIconMap()
@@ -162,6 +169,12 @@ class LawnchairIconProvider @Inject constructor(
 
         val themedColors = ThemedIconDrawable.getColors(context)
 
+        // Ares icon tint, option B / hybrid (owner 2026-08-27): an app that ships a themed
+        // (monochrome) layer follows Material You theming naturally, so when the tint is on we render
+        // its NATIVE themed icon -- even if the separate themed-icons pref is off -- and only apps
+        // without one get the wash (below). So the tint also enables the themed path here.
+        val wantThemed = themedIconsEnabled || AresIconTint.isActive(prefs2)
+
         if (iconEntry != null) {
             val clock = iconPackProvider.getClockMetadata(iconEntry)
 
@@ -170,8 +183,8 @@ class LawnchairIconProvider @Inject constructor(
             }
 
             when {
-                !themedIconsEnabled -> {
-                    // theming is disabled, don't populate theme data
+                !wantThemed -> {
+                    // theming is disabled and the tint is off, don't populate theme data
                     themedIcon = null
                 }
 
@@ -213,9 +226,10 @@ class LawnchairIconProvider @Inject constructor(
 
         val iconPackIcon = iconPackEntry?.let { iconPackProvider.getDrawable(it, iconDpi, user) }
 
-        val result = themedIcon ?: iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
-        // Ares icon tint (owner 2026-08-27, option A): a uniform Material You wash toward the themed
-        // accent, baked into the icon here so it covers home, app list and folders alike.
+        // Hybrid: a themed icon already follows Material You theming, so keep it as-is; wash only the
+        // icons that have NO themed icon (owner 2026-08-27, option B).
+        if (themedIcon != null) return themedIcon
+        val result = iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
         return AresIconTint.wash(result, prefs2, themedColors[1])
     }
 

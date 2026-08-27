@@ -13,17 +13,18 @@ import com.patrykmichalik.opto.core.firstBlocking
  * Material You wash that cross-fades every icon from its normal look (0%) toward a themed,
  * accent-monochrome look (100%), across the home grid, the app list, and folder contents.
  *
- * **Option A (owner 2026-08-27) -- uniform wash.** For strength `s` in 0..1 each icon is rendered
- * through a [ColorMatrix] that linearly interpolates identity with an accent duotone (map luminance
- * onto the Material You accent). Because the matrix is linear, the interpolation is exactly
- * `out = (1-s)*original + s*duotone(original)` -- one coherent look for every app, no per-app
- * monochrome layer required. `s=0` is untouched; `s=1` is an accent monochrome.
+ * **Option B / hybrid (owner 2026-08-27).** An app that ships a themed (monochrome) layer already
+ * follows Material You theming naturally, so [app.lawnchair.icons.LawnchairIconProvider.getIcon]
+ * renders its NATIVE themed icon when the tint is on. Only apps WITHOUT a themed icon get the
+ * [wash] here: for strength `s` in 0..1 the icon is rendered through a [ColorMatrix] that linearly
+ * interpolates identity with an accent duotone (map luminance onto the Material You accent), exactly
+ * `out = (1-s)*original + s*duotone(original)`. `s=0` is untouched; `s=1` is an accent monochrome
+ * matching the themed icons. The strength governs the wash intensity for the non-themed apps.
  *
- * The wash is applied as a plain `colorFilter` on the final icon [Drawable] in
- * [app.lawnchair.icons.LawnchairIconProvider.getIcon]; the icon factory bakes it into the cached
- * bitmap. Changing the tint prefs runs `reloadHelper.reloadIcons()` (icon-cache clear +
- * `reloadIfActive`) -- an icon reload, NOT a recreate, so edit mode is retained (same live path the
- * shape pill uses).
+ * The wash is applied as a plain `colorFilter` on the final icon [Drawable]; the icon factory bakes
+ * it into the cached bitmap. A tint change is folded into `LawnchairThemeManager`'s icon state, so
+ * every icon regenerates in place (`onThemeChanged`) -- an icon reload, NOT a recreate, so edit mode
+ * is retained (same live path the shape pill uses).
  */
 object AresIconTint {
 
