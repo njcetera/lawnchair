@@ -543,7 +543,11 @@ object AresEditCarousel {
             bounce(cells[i])
             strip.centerOn(i)
             (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
+                // Folders follow the icon shape (owner 2026-08-27): a circle folder in a grid of
+                // squircles looks out of place, and the folder's preview grid already distinguishes
+                // it from an app. Set both so picking a shape reshapes icons AND folders.
                 prefs.iconShape.set(choices[i].shape)
+                prefs.folderShape.set(choices[i].shape)
             }
         }
         cells = choices.mapIndexed { i, choice ->
