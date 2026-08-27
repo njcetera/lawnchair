@@ -2,7 +2,11 @@ package app.lawnchair.areslauncher
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
@@ -22,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairLauncher
+import app.lawnchair.icons.shape.IconShape
 import app.lawnchair.preferences2.PreferenceManager2
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
@@ -66,6 +71,7 @@ object AresEditCarousel {
     private val pageBuilders: List<(Launcher, AresHomeListView) -> List<Pill>> = listOf(
         ::buildColumnPage,
         ::buildTintPage,
+        ::buildShapePage,
     )
 
     /** Re-evaluate every pill's enabled/disabled state (folder open, bounds, etc.). No-op if detached. */
@@ -341,7 +347,7 @@ object AresEditCarousel {
         lateinit var minusBtn: ImageView
         lateinit var plusBtn: ImageView
 
-        fun labelText(): CharSequence = "Tint $strength%"
+        fun labelText(): CharSequence = if (enabled) "Tint $strength%" else "Tint off"
 
         // Only the amount pill reflects enabled/disabled; the toggle pill stays fully lit.
         val syncAmount = {
@@ -417,6 +423,113 @@ object AresEditCarousel {
             Pill(togglePill) {},
             Pill(amountPill) { syncAmount() },
         )
+    }
+
+    // ---- pill 3: icon shape ------------------------------------------------------------------
+
+    private class ShapeChoice(val shape: IconShape, val nameRes: Int)
+
+    /** A curated, ordered set of Lawnchair's built-in icon shapes offered by the shape pill. */
+    private fun shapeChoices(): List<ShapeChoice> = listOf(
+        ShapeChoice(IconShape.Circle, R.string.icon_shape_circle),
+        ShapeChoice(IconShape.RoundedSquare, R.string.icon_shape_rounded_square),
+        ShapeChoice(IconShape.Square, R.string.icon_shape_square),
+        ShapeChoice(IconShape.SharpSquare, R.string.icon_shape_sharp_square),
+        ShapeChoice(IconShape.Squircle, R.string.icon_shape_squircle),
+        ShapeChoice(IconShape.Teardrop, R.string.icon_shape_teardrop),
+        ShapeChoice(IconShape.Cylinder, R.string.icon_shape_cylinder),
+        ShapeChoice(IconShape.Cupertino, R.string.icon_shape_cupertino),
+        ShapeChoice(IconShape.Hexagon, R.string.icon_shape_hexagon),
+        ShapeChoice(IconShape.Octagon, R.string.icon_shape_octagon),
+        ShapeChoice(IconShape.Diamond, R.string.icon_shape_diamond),
+        ShapeChoice(IconShape.Pebble, R.string.icon_shape_pebble),
+        ShapeChoice(IconShape.Egg, R.string.icon_shape_egg),
+        ShapeChoice(IconShape.Cloudy, R.string.icon_shape_cloudy),
+        ShapeChoice(IconShape.Flower, R.string.icon_shape_flower),
+        ShapeChoice(IconShape.Heart, R.string.icon_shape_heart),
+    )
+
+    /**
+     * The icon-shape page (owner 2026-08-26): a single pill whose `-`/`+` cycle every app icon's
+     * shape through Lawnchair's built-in shapes, with a live swatch of the current shape. Applies
+     * globally (home, app list, folders) via the existing `iconShape` preference -- writing it
+     * reloads the icon cache in the new shape (NOT a recreate, so edit mode is retained). The list
+     * wraps around, so the `-`/`+` never disable.
+     */
+    private fun buildShapePage(launcher: Launcher, list: AresHomeListView): List<Pill> {
+        val ctx: Context = launcher
+        fun color(res: Int) = ContextCompat.getColor(ctx, res)
+        val surface = color(R.color.materialColorSurfaceContainerHigh)
+        val tonal = color(R.color.materialColorPrimary)
+        val onTonal = color(R.color.materialColorOnPrimary)
+
+        val prefs = PreferenceManager2.getInstance(ctx)
+        val choices = shapeChoices()
+        val current = prefs.iconShape.firstBlocking()
+        var idx = choices.indexOfFirst { it.shape.toString() == current.toString() }.coerceAtLeast(0)
+
+        val swatch = ShapeSwatchView(ctx)
+        val name = pillLabel(ctx, tonal)
+        lateinit var minusBtn: ImageView
+        lateinit var plusBtn: ImageView
+
+        val sync = {
+            val c = choices[idx]
+            swatch.set(c.shape, tonal)
+            name.text = ctx.getString(c.nameRes)
+        }
+
+        fun cycle(delta: Int, disc: View) {
+            idx = ((idx + delta) % choices.size + choices.size) % choices.size
+            sync()
+            bounce(disc)
+            val shape = choices[idx].shape
+            (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
+                prefs.iconShape.set(shape)
+            }
+        }
+        minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { cycle(-1, it) }
+        plusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_add, tonal, onTonal) { cycle(+1, it) }
+
+        val mid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(swatch, LinearLayout.LayoutParams(dpOf(ctx, 26f), dpOf(ctx, 26f)))
+            addView(name, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        val pill = pillRow(ctx, surface).apply {
+            addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
+            addView(mid, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
+        }
+        sync()
+        return listOf(Pill(pill) { sync() })
+    }
+
+    /** Draws an [IconShape]'s mask (its 0..100 path) scaled and centred, filled with a colour. */
+    private class ShapeSwatchView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val scaled = Path()
+        private val matrix = Matrix()
+        private var basePath: Path? = null
+
+        fun set(shape: IconShape, color: Int) {
+            paint.color = color
+            basePath = shape.getMaskPath()
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val p = basePath ?: return
+            val s = minOf(width, height).toFloat()
+            if (s <= 0f) return
+            matrix.reset()
+            matrix.setScale(s / 100f, s / 100f)
+            matrix.postTranslate((width - s) / 2f, (height - s) / 2f)
+            scaled.set(p)
+            scaled.transform(matrix)
+            canvas.drawPath(scaled, paint)
+        }
     }
 
     // ---- feel ---------------------------------------------------------------------------------
