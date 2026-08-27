@@ -212,13 +212,23 @@ class LawnchairIconProvider @Inject constructor(
 
                 else -> {
                     // regular icon
-                    themedIcon = if (themeData != null) {
-                        CustomAdaptiveIconDrawable(
+                    themedIcon = when {
+                        themeData != null -> CustomAdaptiveIconDrawable(
                             themedColors[0].toDrawable(),
                             themeData.loadPaddedDrawable().apply { setTint(themedColors[1]) },
                         )
-                    } else {
-                        null
+                        // Hybrid B (owner 2026-08-27): if the tint is on and the app ships its own
+                        // system <monochrome> layer (Android 13+ themed icon), use THAT -- covers
+                        // every themeable app, not just Lawnchair's curated grayscale map. The mono
+                        // layer is already an adaptive foreground, so it drops straight in.
+                        AresIconTint.isActive(prefs2) && componentName != null ->
+                            ThemedIconCompat.getThemedIcon(context, componentName)?.let { mono ->
+                                CustomAdaptiveIconDrawable(
+                                    themedColors[0].toDrawable(),
+                                    mono.mutate().apply { setTint(themedColors[1]) },
+                                )
+                            }
+                        else -> null
                     }
                 }
             }
