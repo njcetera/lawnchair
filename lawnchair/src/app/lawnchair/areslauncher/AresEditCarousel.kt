@@ -323,7 +323,9 @@ object AresEditCarousel {
     // ---- pill 2: icon tint (Phase 1 UI shell) ------------------------------------------------
 
     private const val TINT_STEP = 20
-    private const val TINT_MIN = 0
+    // 0% tint is identical to off, so the amount floors at 20% and stepping below it turns the
+    // tint OFF (owner 2026-08-27) rather than offering a meaningless "Tint 0%".
+    private const val TINT_MIN = 20
     private const val TINT_MAX = 100
 
     /**
@@ -346,24 +348,35 @@ object AresEditCarousel {
         val label = pillLabel(ctx, tonal)
         lateinit var minusBtn: ImageView
         lateinit var plusBtn: ImageView
+        lateinit var toggleSwitch: Switch
+        // Guards programmatic toggle updates so syncing the switch to `enabled` (e.g. when stepping
+        // below the floor turns the tint off) does not re-fire the checked listener.
+        var syncing = false
 
         fun labelText(): CharSequence = if (enabled) "Tint $strength%" else "Tint off"
 
-        // Only the amount pill reflects enabled/disabled; the toggle pill stays fully lit.
-        val syncAmount = {
-            label.text = labelText()
+        // Controls only -- alpha, +/- enablement, and the toggle's checked state. It deliberately
+        // does NOT touch label.text: the label is set by `setLabelNow()` (immediate: toggle/off) or
+        // by `animateCount()` (the roll on a strength change), so the roll goes old->new not new->new
+        // (nightly review F4).
+        val updateControls = {
             label.alpha = if (enabled) 1f else DISABLED_ALPHA
-            setBtnEnabled(minusBtn, enabled && strength > TINT_MIN)
+            // Minus stays live at the floor so a further press can turn the tint off.
+            setBtnEnabled(minusBtn, enabled)
             setBtnEnabled(plusBtn, enabled && strength < TINT_MAX)
+            if (toggleSwitch.isChecked != enabled) {
+                syncing = true; toggleSwitch.isChecked = enabled; syncing = false
+            }
         }
+        fun setLabelNow() { label.text = labelText() }
 
         fun persist() {
+            // onSet on both prefs runs reloadHelper.reloadIcons() -- the live re-tint (icon reload,
+            // not a recreate; edit mode retained).
             (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
                 prefs.aresIconTintEnabled.set(enabled)
                 prefs.aresIconTintStrength.set(strength)
             }
-            // Phase 2 wires the live re-tint here.
-            AresIconTint.apply(launcher, enabled, strength)
         }
 
         // ---- toggle pill: droplet + switch ----
@@ -375,7 +388,7 @@ object AresEditCarousel {
             setPadding(pad, pad, pad, pad)
         }
         // Set checked BEFORE attaching the listener so setup does not fire it.
-        val toggleSwitch = Switch(ctx).apply {
+        toggleSwitch = Switch(ctx).apply {
             isChecked = enabled
             trackTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
@@ -387,8 +400,12 @@ object AresEditCarousel {
             )
             setPadding(dpOf(ctx, 2f), 0, dpOf(ctx, 6f), 0)
             setOnCheckedChangeListener { _, checked ->
+                if (syncing) return@setOnCheckedChangeListener
                 enabled = checked
-                syncAmount()
+                // Turning on from a floored/zeroed state starts at the minimum.
+                if (enabled && strength < TINT_MIN) strength = TINT_MIN
+                updateControls()
+                setLabelNow()
                 persist()
             }
         }
@@ -399,18 +416,28 @@ object AresEditCarousel {
 
         // ---- amount pill: - Tint N% + ----
         minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { disc ->
-            val before = strength
-            strength = (strength - TINT_STEP).coerceIn(TINT_MIN, TINT_MAX)
-            syncAmount()
             bounce(disc)
-            if (strength != before) { animateCount(label, labelText(), up = false); persist() }
+            if (!enabled) return@tonalIconButton
+            if (strength > TINT_MIN) {
+                strength -= TINT_STEP
+                updateControls()
+                animateCount(label, labelText(), up = false)
+                persist()
+            } else {
+                // At the floor: a further step down turns the tint off (owner 2026-08-27).
+                enabled = false
+                updateControls()
+                setLabelNow()
+                persist()
+            }
         }
         plusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_add, tonal, onTonal) { disc ->
-            val before = strength
-            strength = (strength + TINT_STEP).coerceIn(TINT_MIN, TINT_MAX)
-            syncAmount()
             bounce(disc)
-            if (strength != before) { animateCount(label, labelText(), up = true); persist() }
+            if (!enabled || strength >= TINT_MAX) return@tonalIconButton
+            strength += TINT_STEP
+            updateControls()
+            animateCount(label, labelText(), up = true)
+            persist()
         }
         val amountPill = pillRow(ctx, surface).apply {
             addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
@@ -418,10 +445,11 @@ object AresEditCarousel {
             addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
         }
 
-        syncAmount()
+        updateControls()
+        setLabelNow()
         return listOf(
             Pill(togglePill) {},
-            Pill(amountPill) { syncAmount() },
+            Pill(amountPill) { updateControls(); setLabelNow() },
         )
     }
 

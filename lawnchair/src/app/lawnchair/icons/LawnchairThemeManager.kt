@@ -2,6 +2,7 @@ package app.lawnchair.icons
 
 import android.content.Context
 import android.util.Log
+import app.lawnchair.areslauncher.AresIconTint
 import app.lawnchair.icons.shape.IconShape
 import app.lawnchair.icons.shape.PathShapeDelegate
 import app.lawnchair.preferences.PreferenceChangeListener
@@ -63,6 +64,10 @@ constructor(
             prefs2.customIconShape.get(),
             prefs2.folderShape.get(),
             prefs2.customFolderShape.get(),
+            // Ares icon tint folds into the icon state so a tint change triggers the SAME complete
+            // icon regeneration the shape prefs get (onThemeChanged), not the partial reloadIcons().
+            prefs2.aresIconTintEnabled.get(),
+            prefs2.aresIconTintStrength.get(),
         ).onEach { verifyIconState() }
             .launchIn(scope)
 
@@ -102,7 +107,10 @@ constructor(
         val currentPrefs1State = prefs1State()
         val appShapeKey = currentAppShape.getHashString() + currentPrefs1State
         val folderShapeKey = currentFolderShape.getHashString() + currentPrefs1State
-        val combinedKey = "$appShapeKey:$folderShapeKey"
+        // Fold the Ares icon-tint state into the icon identity key so toggling/adjusting the tint
+        // changes iconState and forces every icon to regenerate through getIcon() (with the wash).
+        val tintKey = AresIconTint.stateFragment(prefs2)
+        val combinedKey = "$appShapeKey:$folderShapeKey:$tintKey"
 
         val appShape =
             if (oldState != null && (oldState.iconShape as? PathShapeDelegate)?.iconShape == currentAppShape) {

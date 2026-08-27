@@ -26,12 +26,14 @@ import android.util.ArrayMap
 import android.util.Log
 import androidx.core.content.getSystemService
 import androidx.core.graphics.drawable.toDrawable
+import app.lawnchair.areslauncher.AresIconTint
 import app.lawnchair.data.iconoverride.IconOverrideRepository
 import app.lawnchair.icons.iconpack.IconPack
 import app.lawnchair.icons.iconpack.IconPackProvider
 import app.lawnchair.icons.picker.IconEntry
 import app.lawnchair.icons.picker.IconType
 import app.lawnchair.preferences.PreferenceManager
+import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.util.MultiSafeCloseable
 import app.lawnchair.util.isPackageInstalled
 import app.lawnchair.util.requireSystemService
@@ -56,6 +58,7 @@ class LawnchairIconProvider @Inject constructor(
     themeManager,
 ) {
     private val prefs = PreferenceManager.getInstance(context)
+    private val prefs2 = PreferenceManager2.getInstance(context)
     private val themedIconsEnabled get() = prefs.themedIcons.get()
 
     private val iconPackPref = prefs.iconPackPackage
@@ -210,7 +213,10 @@ class LawnchairIconProvider @Inject constructor(
 
         val iconPackIcon = iconPackEntry?.let { iconPackProvider.getDrawable(it, iconDpi, user) }
 
-        return themedIcon ?: iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
+        val result = themedIcon ?: iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
+        // Ares icon tint (owner 2026-08-27, option A): a uniform Material You wash toward the themed
+        // accent, baked into the icon here so it covers home, app list and folders alike.
+        return AresIconTint.wash(result, prefs2, themedColors[1])
     }
 
     override fun getStateForApp(info: ApplicationInfo?): String {
@@ -228,6 +234,7 @@ class LawnchairIconProvider @Inject constructor(
             "dti=${prefs.drawerThemedIcons.get()}," +
             "fm=${prefs.forceIconMonochrome.get()}," +
             "tb=${prefs.tintIconPackBackgrounds.get()}," +
+            "${AresIconTint.stateFragment(prefs2)}," +
             "ov=$overrideState"
     }
 

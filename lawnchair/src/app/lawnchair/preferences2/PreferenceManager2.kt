@@ -395,21 +395,27 @@ class PreferenceManager2 @Inject constructor(
     )
 
     /**
-     * Edit-mode icon-tint personalization pill (owner 2026-08-26). Whether the Material You icon
-     * tint is on, and its strength 0..100 (unified intensity: cross-fades every icon from normal ->
-     * tinted). PLAIN preferences on purpose -- NO `onSet` reload/recreate: the tint applies via a
-     * live icon re-render, and a pref write while the user is in edit mode must never rebuild the
-     * activity (that dropped the user out of edit mode -- see defect-ledger 2026-08-26 / the
-     * distinctUntilChanged-before-drop fix).
+     * Edit-mode icon-tint personalization pill (owner 2026-08-26/27). Whether the Material You icon
+     * tint is on, and its strength 20..100 (unified intensity: cross-fades every icon from normal ->
+     * accent-monochrome; see [app.lawnchair.areslauncher.AresIconTint]).
+     *
+     * `onSet` runs `reloadHelper.reloadIcons()` -- the SAME icon-cache clear + `reloadIfActive` the
+     * `iconShape` pref uses. That is an **icon reload, NOT a recreate**: it re-renders icons in place
+     * and keeps the user in edit mode (proven by the shape pill). The thing that must never happen
+     * on a mid-edit pref write is a `recreate()` (that dropped the user out of edit mode -- see
+     * defect-ledger 2026-08-26 / the distinctUntilChanged-before-drop fix); `reloadIcons()` is not
+     * one, so it is safe here.
      */
     val aresIconTintEnabled = preference(
         key = booleanPreferencesKey(name = "ares_icon_tint_enabled"),
         defaultValue = false,
+        onSet = { reloadHelper.reloadIcons() },
     )
 
     val aresIconTintStrength = preference(
         key = intPreferencesKey(name = "ares_icon_tint_strength"),
         defaultValue = 100,
+        onSet = { reloadHelper.reloadIcons() },
     )
 
     val legacyPopupOptionsMigrated = preference(
