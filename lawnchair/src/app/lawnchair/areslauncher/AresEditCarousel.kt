@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
  * Material 3 pills at the bottom of the screen, one visible at a time, with a dots indicator above.
  * Each pill is one personalization control; swipe left/right ON THE PILL to move between them.
  *
- * Registry-driven ([pillBuilders]) so adding a pill is one entry. The initial pills are the home
+ * Registry-driven ([pageBuilders]) so adding a page is one entry. The initial pages are the home
  * **column** stepper and the **icon tint** control (see `design/personalization-carousel.md`).
  *
  * Lives in the shared [BaseDragLayer] like every other floating edit-mode affordance, added on
@@ -57,10 +57,15 @@ object AresEditCarousel {
     /** One personalization pill: its control view plus a hook to re-evaluate enabled/disabled state. */
     private class Pill(val view: View, val refreshEnabled: () -> Unit)
 
-    /** Ordered registry. Append a builder to add a pill. */
-    private val pillBuilders: List<(Launcher, AresHomeListView) -> Pill> = listOf(
-        ::buildColumnPill,
-        ::buildTintPill,
+    /**
+     * Ordered registry of carousel PAGES. Each builder returns the pills shown together on one page
+     * (laid out side by side). One page == one swipe position == one dot. Columns is a single-pill
+     * page; icon tint is a two-pill page (a toggle pill + an amount pill). Append a builder to add a
+     * page.
+     */
+    private val pageBuilders: List<(Launcher, AresHomeListView) -> List<Pill>> = listOf(
+        ::buildColumnPage,
+        ::buildTintPage,
     )
 
     /** Re-evaluate every pill's enabled/disabled state (folder open, bounds, etc.). No-op if detached. */
@@ -97,12 +102,13 @@ object AresEditCarousel {
         val density = ctx.resources.displayMetrics.density
         fun dp(v: Float): Int = (v * density).toInt()
 
-        val built = pillBuilders.map { it(launcher, list) }
-        pills = built
+        val pages: List<List<Pill>> = pageBuilders.map { it(launcher, list) }
+        pills = pages.flatten()
+        val pageViews = pages.map { buildPageContainer(ctx, it) }
 
-        val pager = PillPager(ctx).apply { setPages(built.map { it.view }) }
+        val pager = PillPager(ctx).apply { setPages(pageViews) }
 
-        val dots = DotsIndicator(ctx, built.size)
+        val dots = DotsIndicator(ctx, pageViews.size)
         pager.onPageChanged = { dots.setActive(it) }
 
         val container = LinearLayout(ctx).apply {
@@ -110,8 +116,8 @@ object AresEditCarousel {
             gravity = Gravity.CENTER_HORIZONTAL
             clipChildren = false
             clipToPadding = false
-            // Only show the dots when there is more than one pill to move between.
-            if (built.size > 1) {
+            // Only show the dots when there is more than one page to move between.
+            if (pageViews.size > 1) {
                 addView(
                     dots,
                     LinearLayout.LayoutParams(
@@ -196,6 +202,24 @@ object AresEditCarousel {
         elevation = dpOf(ctx, 3f).toFloat()
     }
 
+    /** Lays one page's pills side by side (with a gap) into a single swipeable page view. */
+    private fun buildPageContainer(ctx: Context, pagePills: List<Pill>): View =
+        LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            clipChildren = false
+            clipToPadding = false
+            pagePills.forEachIndexed { i, pill ->
+                addView(
+                    pill.view,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { marginStart = if (i == 0) 0 else dpOf(ctx, 8f) },
+                )
+            }
+        }
+
     /** An M3 filled circular icon button (primary-accent disc, state-layer ripple). */
     private fun tonalIconButton(
         ctx: Context,
@@ -240,6 +264,9 @@ object AresEditCarousel {
     }
 
     // ---- pill 1: home columns ----------------------------------------------------------------
+
+    private fun buildColumnPage(launcher: Launcher, list: AresHomeListView): List<Pill> =
+        listOf(buildColumnPill(launcher, list))
 
     private fun buildColumnPill(launcher: Launcher, list: AresHomeListView): Pill {
         val ctx: Context = launcher
@@ -293,7 +320,13 @@ object AresEditCarousel {
     private const val TINT_MIN = 0
     private const val TINT_MAX = 100
 
-    private fun buildTintPill(launcher: Launcher, list: AresHomeListView): Pill {
+    /**
+     * The icon-tint PAGE (owner 2026-08-26): two side-by-side pills -- a toggle pill (droplet glyph +
+     * on/off switch) and an amount pill (`-  Tint N%  +`). Only the amount pill dims when tint is off;
+     * the toggle pill stays bright, since it is how you turn tint on. Both pills share the in-memory
+     * enabled/strength state and persist via the PLAIN prefs (no recreate).
+     */
+    private fun buildTintPage(launcher: Launcher, list: AresHomeListView): List<Pill> {
         val ctx: Context = launcher
         fun color(res: Int) = ContextCompat.getColor(ctx, res)
         val surface = color(R.color.materialColorSurfaceContainerHigh)
@@ -301,7 +334,6 @@ object AresEditCarousel {
         val onTonal = color(R.color.materialColorOnPrimary)
 
         val prefs = PreferenceManager2.getInstance(ctx)
-        // In-memory state; write async for persistence (plain prefs, no recreate).
         var enabled = prefs.aresIconTintEnabled.firstBlocking()
         var strength = prefs.aresIconTintStrength.firstBlocking().coerceIn(TINT_MIN, TINT_MAX)
 
@@ -309,14 +341,14 @@ object AresEditCarousel {
         lateinit var minusBtn: ImageView
         lateinit var plusBtn: ImageView
 
-        fun labelText(): CharSequence = if (!enabled) "Tint off" else "Tint $strength%"
+        fun labelText(): CharSequence = "Tint $strength%"
 
-        val updateEnabled = {
+        // Only the amount pill reflects enabled/disabled; the toggle pill stays fully lit.
+        val syncAmount = {
             label.text = labelText()
             label.alpha = if (enabled) 1f else DISABLED_ALPHA
             setBtnEnabled(minusBtn, enabled && strength > TINT_MIN)
             setBtnEnabled(plusBtn, enabled && strength < TINT_MAX)
-            // The switch reflects its own on/off state; the amount stepper dims when tint is off.
         }
 
         fun persist() {
@@ -328,8 +360,15 @@ object AresEditCarousel {
             AresIconTint.apply(launcher, enabled, strength)
         }
 
-        // A real on/off switch (owner 2026-08-26: reads clearly as on/off, one row with the stepper),
-        // tinted to the primary accent. Set checked BEFORE the listener so setup does not fire it.
+        // ---- toggle pill: droplet + switch ----
+        val droplet = ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_ares_tint)
+            imageTintList = ColorStateList.valueOf(tonal)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            val pad = dpOf(ctx, 5f)
+            setPadding(pad, pad, pad, pad)
+        }
+        // Set checked BEFORE attaching the listener so setup does not fire it.
         val toggleSwitch = Switch(ctx).apply {
             isChecked = enabled
             trackTintList = ColorStateList(
@@ -340,37 +379,44 @@ object AresEditCarousel {
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                 intArrayOf(onTonal, ColorUtils.blendARGB(tonal, Color.WHITE, 0.65f)),
             )
-            val padH = dpOf(ctx, 6f)
-            setPadding(padH, 0, padH, 0)
+            setPadding(dpOf(ctx, 2f), 0, dpOf(ctx, 6f), 0)
             setOnCheckedChangeListener { _, checked ->
                 enabled = checked
-                updateEnabled()
+                syncAmount()
                 persist()
             }
         }
+        val togglePill = pillRow(ctx, surface).apply {
+            addView(droplet, LinearLayout.LayoutParams(dpOf(ctx, 34f), dpOf(ctx, 46f)))
+            addView(toggleSwitch, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dpOf(ctx, 46f)))
+        }
+
+        // ---- amount pill: - Tint N% + ----
         minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { disc ->
             val before = strength
             strength = (strength - TINT_STEP).coerceIn(TINT_MIN, TINT_MAX)
-            updateEnabled()
+            syncAmount()
             bounce(disc)
             if (strength != before) { animateCount(label, labelText(), up = false); persist() }
         }
         plusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_add, tonal, onTonal) { disc ->
             val before = strength
             strength = (strength + TINT_STEP).coerceIn(TINT_MIN, TINT_MAX)
-            updateEnabled()
+            syncAmount()
             bounce(disc)
             if (strength != before) { animateCount(label, labelText(), up = true); persist() }
         }
-
-        val row = pillRow(ctx, surface).apply {
-            addView(toggleSwitch, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dpOf(ctx, 46f)))
+        val amountPill = pillRow(ctx, surface).apply {
             addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
             addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
         }
-        updateEnabled()
-        return Pill(row) { updateEnabled() }
+
+        syncAmount()
+        return listOf(
+            Pill(togglePill) {},
+            Pill(amountPill) { syncAmount() },
+        )
     }
 
     // ---- feel ---------------------------------------------------------------------------------
