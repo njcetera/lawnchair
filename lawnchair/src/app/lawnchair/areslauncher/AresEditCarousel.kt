@@ -16,6 +16,7 @@ import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
@@ -307,7 +308,6 @@ object AresEditCarousel {
         val label = pillLabel(ctx, tonal)
         lateinit var minusBtn: ImageView
         lateinit var plusBtn: ImageView
-        lateinit var toggleBtn: ImageView
 
         fun labelText(): CharSequence = if (!enabled) "Tint off" else "Tint $strength%"
 
@@ -316,8 +316,7 @@ object AresEditCarousel {
             label.alpha = if (enabled) 1f else DISABLED_ALPHA
             setBtnEnabled(minusBtn, enabled && strength > TINT_MIN)
             setBtnEnabled(plusBtn, enabled && strength < TINT_MAX)
-            // The toggle stays tappable in both states; its disc dims when tint is off.
-            toggleBtn.alpha = if (enabled) 1f else DISABLED_ALPHA
+            // The switch reflects its own on/off state; the amount stepper dims when tint is off.
         }
 
         fun persist() {
@@ -329,11 +328,25 @@ object AresEditCarousel {
             AresIconTint.apply(launcher, enabled, strength)
         }
 
-        toggleBtn = tonalIconButton(ctx, R.drawable.ic_ares_tint, tonal, onTonal) { disc ->
-            enabled = !enabled
-            updateEnabled()
-            bounce(disc)
-            persist()
+        // A real on/off switch (owner 2026-08-26: reads clearly as on/off, one row with the stepper),
+        // tinted to the primary accent. Set checked BEFORE the listener so setup does not fire it.
+        val toggleSwitch = Switch(ctx).apply {
+            isChecked = enabled
+            trackTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(tonal, ColorUtils.setAlphaComponent(tonal, 0x33)),
+            )
+            thumbTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(onTonal, ColorUtils.blendARGB(tonal, Color.WHITE, 0.65f)),
+            )
+            val padH = dpOf(ctx, 6f)
+            setPadding(padH, 0, padH, 0)
+            setOnCheckedChangeListener { _, checked ->
+                enabled = checked
+                updateEnabled()
+                persist()
+            }
         }
         minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { disc ->
             val before = strength
@@ -351,7 +364,7 @@ object AresEditCarousel {
         }
 
         val row = pillRow(ctx, surface).apply {
-            addView(toggleBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
+            addView(toggleSwitch, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dpOf(ctx, 46f)))
             addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
             addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
