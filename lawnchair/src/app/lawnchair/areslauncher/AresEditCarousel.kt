@@ -24,6 +24,8 @@ import android.widget.Switch
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.icons.shape.IconShape
@@ -152,6 +154,18 @@ object AresEditCarousel {
         }
         launcher.dragLayer.addView(container, lp)
         view = container
+        // F2 (nightly review 2026-08-27): if this activity is destroyed while still "attached" --
+        // a recreate() mid edit-mode skips exitEditMode->detach -- release the carousel so the
+        // DESTROYED activity (and the launcher/list its pills captured) is not pinned until the next
+        // edit-mode entry. Keyed on the activity's DESTROY lifecycle event, NOT view-detach: the
+        // launcher handles fold as a config change (no destroy), so this never fires on a fold --
+        // that is the regression the old onHostDetached (view-detach) hook caused (af49c86).
+        (launcher as? LawnchairLauncher)?.lifecycle?.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                if (view?.context === owner) clearStale()
+                owner.lifecycle.removeObserver(this)
+            }
+        })
         // Enter: slide up from below the bottom edge and settle with a bounce.
         container.translationY = dp(160f).toFloat()
         container.animate()
