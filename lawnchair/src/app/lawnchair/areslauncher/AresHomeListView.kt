@@ -1417,7 +1417,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         launcher.updateDisallowBack()
         // The home-grid column stepper (owner 2026-08-26): a bottom pill to change how many columns
         // the grid renders at, shown only while editing.
-        AresColumnStepper.attach(launcher, this)
+        AresEditCarousel.attach(launcher, this)
     }
 
     /** Leaves edit mode, cancelling any in-flight drag. Safe to call when not in edit mode. */
@@ -1427,7 +1427,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         setReorderInProgress(false)
         // The column stepper belongs to this mode -- remove it however the mode ends (BACK, HOME,
         // a home gesture from another app).
-        AresColumnStepper.detach()
+        AresEditCarousel.detach()
         // Drop any i-menu label suppression BEFORE the un-hide walk below. If a popup is still open
         // when the mode ends (HOME / a home gesture from another app runs exitEditMode before super
         // closes floating views), a still-set flag would make the walk's un-hide read
@@ -2413,7 +2413,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                         // falls through to here as non-item empty space -- so the first stepper tap
                         // would sometimes drop the user out of edit mode (owner 2026-08-26). Its resting
                         // bounds (slide translation ignored) are the guard.
-                        if (!onItem && !AresColumnStepper.tapWithinRestingPill(e.rawX, e.rawY)) exitEditMode()
+                        if (!onItem && !AresEditCarousel.tapWithinRestingPill(e.rawX, e.rawY)) exitEditMode()
                         // A folder is the exception -- let its click through so it opens, and arm
                         // the in-folder × affordances for the folder that click is about to open.
                         if (onFolder != null) {

@@ -394,6 +394,24 @@ class PreferenceManager2 @Inject constructor(
         defaultValue = 0,
     )
 
+    /**
+     * Edit-mode icon-tint personalization pill (owner 2026-08-26). Whether the Material You icon
+     * tint is on, and its strength 0..100 (unified intensity: cross-fades every icon from normal ->
+     * tinted). PLAIN preferences on purpose -- NO `onSet` reload/recreate: the tint applies via a
+     * live icon re-render, and a pref write while the user is in edit mode must never rebuild the
+     * activity (that dropped the user out of edit mode -- see defect-ledger 2026-08-26 / the
+     * distinctUntilChanged-before-drop fix).
+     */
+    val aresIconTintEnabled = preference(
+        key = booleanPreferencesKey(name = "ares_icon_tint_enabled"),
+        defaultValue = false,
+    )
+
+    val aresIconTintStrength = preference(
+        key = intPreferencesKey(name = "ares_icon_tint_strength"),
+        defaultValue = 100,
+    )
+
     val legacyPopupOptionsMigrated = preference(
         key = booleanPreferencesKey(name = "legacy_popup_options_migrated"),
         defaultValue = false,

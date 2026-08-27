@@ -924,7 +924,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         expandedWpFolderId = folderInfo.id
         // The edit-mode column stepper is disabled while a folder is open (re-columning would fight
         // the reserved run); tell it the state changed (no-op if not in edit mode).
-        AresColumnStepper.refreshEnabled()
+        AresEditCarousel.refreshEnabled()
         // Hide the redundant mini-icon preview inside the (still-bound) folder tile.
         setWpFolderPreviewHidden(folderInfo.id, true)
         if (children.isEmpty()) {
@@ -1095,7 +1095,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val folderInfo = items.getOrNull(folderRow) as? FolderInfo
         expandedWpFolderId = -1
         // Re-enable the edit-mode column stepper now the folder is closing (no-op outside edit mode).
-        AresColumnStepper.refreshEnabled()
+        AresEditCarousel.refreshEnabled()
         if (folderRow < 0) {
             if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
             return
