@@ -17,7 +17,10 @@ import android.view.ViewGroup
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.graphics.Outline
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Switch
@@ -342,6 +345,10 @@ object AresEditCarousel {
     private const val TINT_MIN = 20
     private const val TINT_MAX = 100
 
+    // Icon-shape direct-select strip.
+    private const val SHAPE_CELL_DP = 44f
+    private const val SHAPE_STRIP_DP = 232f
+
     /**
      * The icon-tint PAGE (owner 2026-08-26): two side-by-side pills -- a toggle pill (droplet glyph +
      * on/off switch) and an amount pill (`-  Tint N%  +`). Only the amount pill dims when tint is off;
@@ -516,76 +523,155 @@ object AresEditCarousel {
         val current = prefs.iconShape.firstBlocking()
         val currentIdx = baseChoices.indexOfFirst { it.shape.toString() == current.toString() }
         // The current shape can be OFF the curated 16: the default `icon_shape` is "system", which
-        // resolves to a device mask that is often none of them, and Lawnchair also ships shapes we
-        // don't cycle (Sammy, RoundedHexagon). Coercing a -1 match to 0 would mislabel the real
-        // shape as "Circle" AND make the first +/- silently discard it (jump to a neighbour of
-        // Circle). Instead, prepend the real current shape as a leading entry so the swatch + label
-        // are honest and the user can cycle away from -- and back to -- their actual shape.
+        // resolves to a device mask that is often none of them, and Lawnchair also ships shapes not
+        // in the list (Sammy, RoundedHexagon). Surface the real current shape as a leading swatch so
+        // it is shown and selectable rather than silently mislabelled/replaced (F1).
         val choices = if (currentIdx >= 0) baseChoices
         else listOf(ShapeChoice(current, offListShapeNameRes(current))) + baseChoices
-        var idx = if (currentIdx >= 0) currentIdx else 0
+        var selectedIdx = if (currentIdx >= 0) currentIdx else 0
 
-        val swatch = ShapeSwatchView(ctx)
-        val name = pillLabel(ctx, tonal)
-        lateinit var minusBtn: ImageView
-        lateinit var plusBtn: ImageView
-
-        val sync = {
-            val c = choices[idx]
-            swatch.set(c.shape, tonal)
-            name.text = ctx.getString(c.nameRes)
-        }
-
-        fun cycle(delta: Int, disc: View) {
-            idx = ((idx + delta) % choices.size + choices.size) % choices.size
-            sync()
-            bounce(disc)
-            val shape = choices[idx].shape
+        // Direct-select strip (owner 2026-08-27): every shape is a swatch; tap to select, the chosen
+        // one fills with the accent. Replaces the -/+ cycle. The strip scrolls horizontally and only
+        // hands the drag back to the carousel pager at its ends (see [ShapeStrip]).
+        val strip = ShapeStrip(ctx)
+        lateinit var cells: List<ShapeCell>
+        fun select(i: Int) {
+            if (i == selectedIdx) return
+            cells[selectedIdx].isChosen = false
+            selectedIdx = i
+            cells[i].isChosen = true
+            bounce(cells[i])
+            strip.centerOn(i)
             (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
-                prefs.iconShape.set(shape)
+                prefs.iconShape.set(choices[i].shape)
             }
         }
-        minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { cycle(-1, it) }
-        plusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_add, tonal, onTonal) { cycle(+1, it) }
+        cells = choices.mapIndexed { i, choice ->
+            ShapeCell(ctx, choice.shape, tonal, onTonal).apply {
+                isChosen = i == selectedIdx
+                setOnClickListener { select(i) }
+                strip.row.addView(
+                    this,
+                    LinearLayout.LayoutParams(dpOf(ctx, SHAPE_CELL_DP), dpOf(ctx, SHAPE_CELL_DP))
+                        .apply { marginStart = if (i == 0) 0 else dpOf(ctx, 2f) },
+                )
+            }
+        }
 
-        val mid = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(swatch, LinearLayout.LayoutParams(dpOf(ctx, 26f), dpOf(ctx, 26f)))
-            addView(name, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
         val pill = pillRow(ctx, surface).apply {
-            addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
-            addView(mid, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
+            addView(strip, LinearLayout.LayoutParams(dpOf(ctx, SHAPE_STRIP_DP), dpOf(ctx, SHAPE_CELL_DP)))
         }
-        sync()
-        return listOf(Pill(pill) { sync() })
+        // Open with the current shape centred (no animation on first layout).
+        strip.post { strip.centerOn(selectedIdx, smooth = false) }
+        return listOf(Pill(pill) {})
     }
 
     /** Draws an [IconShape]'s mask (its 0..100 path) scaled and centred, filled with a colour. */
-    private class ShapeSwatchView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    /**
+     * One shape swatch in the shape-select strip. Draws the shape's mask; when [isChosen] it fills
+     * an accent disc behind and draws the shape in the on-accent colour, so the current shape reads
+     * as selected at a glance.
+     */
+    private class ShapeCell(
+        context: Context,
+        shape: IconShape,
+        private val accent: Int,
+        private val onAccent: Int,
+    ) : View(context) {
+        private val discPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = accent }
+        private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         private val scaled = Path()
         private val matrix = Matrix()
-        private var basePath: Path? = null
+        private val base: Path = shape.getMaskPath()
 
-        fun set(shape: IconShape, color: Int) {
-            paint.color = color
-            basePath = shape.getMaskPath()
-            invalidate()
+        var isChosen = false
+            set(value) { if (field != value) { field = value; invalidate() } }
+
+        init {
+            isClickable = true
+            isFocusable = true
         }
 
         override fun onDraw(canvas: Canvas) {
-            val p = basePath ?: return
-            val s = minOf(width, height).toFloat()
+            val cx = width / 2f
+            val cy = height / 2f
+            if (isChosen) {
+                canvas.drawCircle(cx, cy, minOf(width, height) / 2f * 0.94f, discPaint)
+            }
+            val s = minOf(width, height).toFloat() * (if (isChosen) 0.48f else 0.54f)
             if (s <= 0f) return
+            shapePaint.color = if (isChosen) onAccent else accent
             matrix.reset()
             matrix.setScale(s / 100f, s / 100f)
-            matrix.postTranslate((width - s) / 2f, (height - s) / 2f)
-            scaled.set(p)
+            matrix.postTranslate(cx - s / 2f, cy - s / 2f)
+            scaled.set(base)
             scaled.transform(matrix)
-            canvas.drawPath(scaled, paint)
+            canvas.drawPath(scaled, shapePaint)
+        }
+    }
+
+    /**
+     * A horizontally-scrolling strip of [ShapeCell]s. Grabs the drag from the carousel [PillPager]
+     * on touch-down so it scrolls, and only hands the drag back (so the pager can page) at its
+     * scroll edges -- resolving the pill-swipe-vs-strip-scroll collision. Taps on cells still fire.
+     */
+    private class ShapeStrip(context: Context) : HorizontalScrollView(context) {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        private var lastX = 0f
+
+        init {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            // The carousel pill and pager set clipChildren=false (so shadows/bounces aren't clipped),
+            // which also lets the off-window swatches spill across the screen. clipToOutline clips
+            // the strip's content to its own bounds regardless of the ancestors.
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(v: View, outline: Outline) {
+                    outline.setRect(0, 0, v.width, v.height)
+                }
+            }
+            clipToOutline = true
+            addView(row, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+        }
+
+        // A few px of slack so a fling that stops just shy of the edge still counts as "at the edge"
+        // and hands the drag off to the pager (otherwise paging away from the strip can feel stuck).
+        private val edgeSlack = (4 * resources.displayMetrics.density).toInt()
+        private fun atStart() = scrollX <= edgeSlack
+        private fun atEnd() = scrollX >= (row.width - width).coerceAtLeast(0) - edgeSlack
+        // True when the strip's content fits without scrolling -- then it must never trap paging.
+        private fun notScrollable() = row.width <= width
+
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                lastX = ev.x
+                // Claim the gesture from the pager up front; released only at the edges (below).
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            return super.onInterceptTouchEvent(ev)
+        }
+
+        override fun onTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> lastX = ev.x
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.x - lastX
+                    lastX = ev.x
+                    // At an edge and still dragging outward: let the pager page instead of dead-scroll.
+                    val handOff = notScrollable() || (atStart() && dx > 0f) || (atEnd() && dx < 0f)
+                    parent?.requestDisallowInterceptTouchEvent(!handOff)
+                }
+            }
+            return super.onTouchEvent(ev)
+        }
+
+        fun centerOn(index: Int, smooth: Boolean = true) {
+            val child = row.getChildAt(index) ?: return
+            val target = (child.left + child.width / 2 - width / 2).coerceAtLeast(0)
+            if (smooth) smoothScrollTo(target, 0) else scrollTo(target, 0)
         }
     }
 
