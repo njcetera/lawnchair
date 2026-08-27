@@ -449,6 +449,12 @@ object AresEditCarousel {
         ShapeChoice(IconShape.Heart, R.string.icon_shape_heart),
     )
 
+    /** Label for a current shape that is not one of [shapeChoices]; honest, never a wrong name. */
+    private fun offListShapeNameRes(shape: IconShape): Int = when (shape.toString()) {
+        "sammy" -> R.string.icon_shape_sammy
+        else -> R.string.custom
+    }
+
     /**
      * The icon-shape page (owner 2026-08-26): a single pill whose `-`/`+` cycle every app icon's
      * shape through Lawnchair's built-in shapes, with a live swatch of the current shape. Applies
@@ -464,9 +470,18 @@ object AresEditCarousel {
         val onTonal = color(R.color.materialColorOnPrimary)
 
         val prefs = PreferenceManager2.getInstance(ctx)
-        val choices = shapeChoices()
+        val baseChoices = shapeChoices()
         val current = prefs.iconShape.firstBlocking()
-        var idx = choices.indexOfFirst { it.shape.toString() == current.toString() }.coerceAtLeast(0)
+        val currentIdx = baseChoices.indexOfFirst { it.shape.toString() == current.toString() }
+        // The current shape can be OFF the curated 16: the default `icon_shape` is "system", which
+        // resolves to a device mask that is often none of them, and Lawnchair also ships shapes we
+        // don't cycle (Sammy, RoundedHexagon). Coercing a -1 match to 0 would mislabel the real
+        // shape as "Circle" AND make the first +/- silently discard it (jump to a neighbour of
+        // Circle). Instead, prepend the real current shape as a leading entry so the swatch + label
+        // are honest and the user can cycle away from -- and back to -- their actual shape.
+        val choices = if (currentIdx >= 0) baseChoices
+        else listOf(ShapeChoice(current, offListShapeNameRes(current))) + baseChoices
+        var idx = if (currentIdx >= 0) currentIdx else 0
 
         val swatch = ShapeSwatchView(ctx)
         val name = pillLabel(ctx, tonal)
