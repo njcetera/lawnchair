@@ -238,6 +238,9 @@ class LawnchairIconProvider @Inject constructor(
         // regular adaptive icon (like Android 16's auto-theming). Only a non-adaptive icon, which has
         // no layers to monochrome, falls through to the accent wash.
         if (AresIconTint.isActive(prefs2)) {
+            // Ares theming uses its OWN vibrant colour pair (M3 primary bg + light on-primary glyph),
+            // not `themedColors` (the pale stock light-mode scheme) -- owner 2026-08-27.
+            val ares = AresIconTint.themedColors(context)
             val adaptive = result as? AdaptiveIconDrawable
             val nativeMono: Drawable? =
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -247,18 +250,19 @@ class LawnchairIconProvider @Inject constructor(
                 }) ?: componentName?.let { ThemedIconCompat.getThemedIcon(context, it) }
             if (nativeMono != null) {
                 return CustomAdaptiveIconDrawable(
-                    themedColors[0].toDrawable(),
-                    nativeMono.mutate().apply { setTint(themedColors[1]) },
+                    ares[0].toDrawable(),
+                    nativeMono.mutate().apply { setTint(ares[1]) },
                 )
             }
             if (adaptive != null) {
-                val synth = AresIconTint.generateMono(context, adaptive, themedColors[1])
+                val synth = AresIconTint.generateMono(context, adaptive, ares[1])
                 if (synth != null) {
-                    return CustomAdaptiveIconDrawable(themedColors[0].toDrawable(), synth)
+                    return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
+            return AresIconTint.wash(result, prefs2, ares[0])
         }
-        return AresIconTint.wash(result, prefs2, themedColors[1])
+        return result
     }
 
     override fun getStateForApp(info: ApplicationInfo?): String {
