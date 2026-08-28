@@ -43,6 +43,20 @@ object AresIconTransition {
     // enough to drop a stale overlay from a rapid re-toggle before starting the next.
     private var active: RevealOverlay? = null
 
+    /**
+     * Cancel any in-flight reveal and release its overlay + snapshot. Called on activity destroy (and
+     * on edit-mode exit) so a reveal that is still animating never pins a destroyed activity via the
+     * static [active] field -- the same leak class the carousel guards as F2 (nightly 2026-08-28,
+     * finding 5). Safe to call when nothing is animating. Main thread.
+     */
+    fun cancel() {
+        val o = active ?: return
+        active = null
+        // anim.cancel() fires onAnimationCancel -> the doOnEnd cleanup (remove view + recycle bmp).
+        o.anim?.cancel()
+        (o.parent as? ViewGroup)?.removeView(o)
+    }
+
     /** Play the radial reveal over [target] (the home grid). No-op if it has no size yet. */
     fun reveal(launcher: Launcher, target: View) {
         val dragLayer: BaseDragLayer<*> = launcher.dragLayer ?: return

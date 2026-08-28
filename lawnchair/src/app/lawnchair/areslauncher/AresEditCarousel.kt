@@ -166,6 +166,9 @@ object AresEditCarousel {
         (launcher as? LawnchairLauncher)?.lifecycle?.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
                 if (view?.context === owner) clearStale()
+                // Also drop any in-flight icon reveal so its overlay never pins this destroyed
+                // activity (nightly 2026-08-28, finding 5).
+                AresIconTransition.cancel()
                 owner.lifecycle.removeObserver(this)
             }
         })
@@ -180,6 +183,7 @@ object AresEditCarousel {
 
     /** Synchronously drop the carousel with no exit animation, releasing captured references. */
     private fun clearStale() {
+        AresIconTransition.cancel()
         view?.let {
             it.animate().cancel()
             (it.parent as? ViewGroup)?.removeView(it)
@@ -189,6 +193,7 @@ object AresEditCarousel {
     }
 
     fun detach() {
+        AresIconTransition.cancel()
         val v = view ?: return
         view = null
         pills = emptyList()
