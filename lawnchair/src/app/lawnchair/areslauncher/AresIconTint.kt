@@ -51,24 +51,24 @@ object AresIconTint {
     // Bump when the theming RENDERING changes so cached icons invalidate and regenerate even though
     // the app's versionCode is fixed across debug builds. 1=uniform wash, 2=hybrid, 3=hybrid+system
     // mono, 4=system mono outside the icon-pack gate, 5=full theming (synth mono for every app;
-    // % dropped), 6=vibrant M3 primary/on-primary colours (was pale accent1_100/dark glyph).
-    private const val RENDER_VERSION = 6
+    // % dropped), 6=vibrant M3 primary/on-primary colours, 7=colours flipped (light bg + vibrant glyph).
+    private const val RENDER_VERSION = 7
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
         prefs.aresIconTintEnabled.firstBlocking()
 
     /**
-     * The Ares theming colour pair, `[background, glyph]`. Owner (2026-08-27) wants the vibrant
-     * native look: a saturated Material You accent BACKGROUND with a LIGHT glyph -- the M3
-     * primary / on-primary roles -- NOT the pale primary-container background + dark glyph that stock
-     * Android themed icons use in light mode (which reads washed out). Both track the wallpaper-derived
-     * dynamic palette, so the theming follows Material You. Used for BOTH the native-monochrome path
-     * and the synthesized-monochrome path so every themed icon shares one consistent, vibrant scheme.
+     * The Ares theming colour pair, `[background, glyph]`. Owner (2026-08-27) reviewed the vibrant
+     * scheme (primary background, on-primary glyph) on device and asked to FLIP it: a LIGHT
+     * background (M3 on-primary, near-white) with a VIBRANT accent GLYPH (M3 primary). Both track the
+     * wallpaper-derived dynamic palette, so the theming follows Material You. Used for BOTH the
+     * native-monochrome path and the synthesized-monochrome path so every themed icon shares one
+     * consistent scheme.
      */
     fun themedColors(context: Context): IntArray = intArrayOf(
-        ContextCompat.getColor(context, R.color.materialColorPrimary),
         ContextCompat.getColor(context, R.color.materialColorOnPrimary),
+        ContextCompat.getColor(context, R.color.materialColorPrimary),
     )
 
     /**
