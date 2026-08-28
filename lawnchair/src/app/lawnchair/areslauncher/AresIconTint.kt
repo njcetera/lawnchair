@@ -52,8 +52,10 @@ object AresIconTint {
     // Bump when the theming RENDERING changes so cached icons invalidate and regenerate even though
     // the app's versionCode is fixed across debug builds. 1=uniform wash, 2=hybrid, 3=hybrid+system
     // mono, 4=system mono outside the icon-pack gate, 5=full theming (synth mono for every app;
-    // % dropped), 6=vibrant M3 primary/on-primary colours, 7=colours flipped (light bg + vibrant glyph).
-    private const val RENDER_VERSION = 7
+    // % dropped), 6=vibrant M3 primary/on-primary colours, 7=colours flipped (light bg + vibrant glyph),
+    // 8=synth mono centred (use MonochromeIconFactory directly, not its ClippedMonoDrawable wrapper,
+    //   which cropped the synth glyph into the top-left corner).
+    private const val RENDER_VERSION = 8
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
@@ -82,11 +84,21 @@ object AresIconTint {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
         return try {
             val size = LauncherAppState.getIDP(context).iconBitmapSize.coerceAtLeast(1)
+            // MonochromeIconFactory.wrap() has a SIDE EFFECT -- it bakes the icon into the factory's
+            // internal mono bitmap -- and RETURNS a ClippedMonoDrawable (an InsetDrawable with a
+            // NEGATIVE inset plus its own icon-mask clip). That wrapper is meant to be rasterised to a
+            // bitmap, NOT used as a live AdaptiveIconDrawable foreground: wrapping it as the foreground
+            // of CustomAdaptiveIconDrawable made the negative inset + inner clip shove the glyph into
+            // the TOP-LEFT and crop it (owner 2026-08-28). The factory ITSELF is a plain Drawable
+            // whose draw() scales the mono bitmap to fill its bounds -- exactly like a native
+            // monochrome layer, which composes correctly -- so use it directly and let the single
+            // outer CustomAdaptiveIconDrawable shape mask do the clipping.
             // MonochromeIconFactory doesn't honour setTint (it paints white), so colour it with a
-            // SRC_IN blend filter, which InsetDrawable/ClippedMonoDrawable forwards to the generator.
-            MonochromeIconFactory(size).wrap(adaptive, adaptive.iconMask).apply {
-                colorFilter = BlendModeColorFilter(accent, BlendMode.SRC_IN)
-            }
+            // SRC_IN blend filter.
+            val factory = MonochromeIconFactory(size)
+            factory.wrap(adaptive, adaptive.iconMask)
+            factory.colorFilter = BlendModeColorFilter(accent, BlendMode.SRC_IN)
+            factory
         } catch (t: Throwable) {
             Log.w(TAG, "monochrome synthesis failed", t)
             null
