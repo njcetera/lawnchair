@@ -666,10 +666,25 @@ class LawnchairLauncher : QuickstepLauncher() {
                             val list = workspace?.aresHomeList
                             val bg = android.os.SystemClock.elapsedRealtime() - aresStoppedAt
                             if (list != null && bg >= ARES_HOME_TOP_RESET_MS) {
+                                // Return to the TOP of the list on a real return from an app
+                                // (owner 2026-08-25) -- but INVISIBLY. A bare scrollToPosition(0)
+                                // snaps the content from wherever it was scrolled up to the top in
+                                // the ~3 frames before the posted reveal displaces the tiles, and
+                                // that instant mid-list -> top content jump reads as a jarring
+                                // "reload/refresh without animation" (owner 2026-08-28). So hide the
+                                // list across the scroll + relayout; the reveal then rises the tiles
+                                // in from off-screen, so the jump is never drawn -- the user just
+                                // sees the wave land on the top rows. alpha is restored in a finally
+                                // so a disabled or empty reveal can never leave the grid blank.
                                 list.scrollToPosition(0)
+                                list.alpha = 0f
                                 list.post {
-                                    app.lawnchair.areslauncher.AresHomeReveal
-                                        .maybePlayOnHomeAppear(this@LawnchairLauncher)
+                                    try {
+                                        app.lawnchair.areslauncher.AresHomeReveal
+                                            .maybePlayOnHomeAppear(this@LawnchairLauncher)
+                                    } finally {
+                                        list.alpha = 1f
+                                    }
                                 }
                             } else {
                                 app.lawnchair.areslauncher.AresHomeReveal
