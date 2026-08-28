@@ -18,7 +18,9 @@ import android.content.pm.ComponentInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageItemInfo
 import android.content.res.Resources
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.os.Handler
 import android.os.UserHandle
 import android.os.UserManager
@@ -212,23 +214,13 @@ class LawnchairIconProvider @Inject constructor(
 
                 else -> {
                     // regular icon
-                    themedIcon = when {
-                        themeData != null -> CustomAdaptiveIconDrawable(
+                    themedIcon = if (themeData != null) {
+                        CustomAdaptiveIconDrawable(
                             themedColors[0].toDrawable(),
                             themeData.loadPaddedDrawable().apply { setTint(themedColors[1]) },
                         )
-                        // Hybrid B (owner 2026-08-27): if the tint is on and the app ships its own
-                        // system <monochrome> layer (Android 13+ themed icon), use THAT -- covers
-                        // every themeable app, not just Lawnchair's curated grayscale map. The mono
-                        // layer is already an adaptive foreground, so it drops straight in.
-                        AresIconTint.isActive(prefs2) && componentName != null ->
-                            ThemedIconCompat.getThemedIcon(context, componentName)?.let { mono ->
-                                CustomAdaptiveIconDrawable(
-                                    themedColors[0].toDrawable(),
-                                    mono.mutate().apply { setTint(themedColors[1]) },
-                                )
-                            }
-                        else -> null
+                    } else {
+                        null
                     }
                 }
             }
@@ -236,10 +228,27 @@ class LawnchairIconProvider @Inject constructor(
 
         val iconPackIcon = iconPackEntry?.let { iconPackProvider.getDrawable(it, iconDpi, user) }
 
-        // Hybrid: a themed icon already follows Material You theming, so keep it as-is; wash only the
-        // icons that have NO themed icon (owner 2026-08-27, option B).
+        // Hybrid B (owner 2026-08-27): a themed icon already follows Material You theming; keep it.
         if (themedIcon != null) return themedIcon
         val result = iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
+        // When the tint is on, prefer the app's OWN monochrome layer (its native Android 13+ themed
+        // icon) over the wash -- done HERE, outside the icon-pack gate above, so it applies to every
+        // app regardless of whether an icon pack is set. Only apps with no monochrome layer at all
+        // fall through to the wash.
+        if (AresIconTint.isActive(prefs2)) {
+            val mono: Drawable? =
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    (result as? AdaptiveIconDrawable)?.monochrome
+                } else {
+                    null
+                }) ?: componentName?.let { ThemedIconCompat.getThemedIcon(context, it) }
+            if (mono != null) {
+                return CustomAdaptiveIconDrawable(
+                    themedColors[0].toDrawable(),
+                    mono.mutate().apply { setTint(themedColors[1]) },
+                )
+            }
+        }
         return AresIconTint.wash(result, prefs2, themedColors[1])
     }
 

@@ -35,8 +35,9 @@ object AresIconTint {
 
     // Bump when the tint RENDERING changes so cached icons invalidate and regenerate even though the
     // app's versionCode is fixed across debug builds (otherwise a code-only change keeps serving the
-    // old bitmaps while the tint setting is unchanged). 1=uniform wash, 2=hybrid, 3=hybrid+system mono.
-    private const val RENDER_VERSION = 3
+    // old bitmaps while the tint setting is unchanged). 1=uniform wash, 2=hybrid, 3=hybrid+system
+    // mono, 4=system mono applied outside the icon-pack gate (the fix that actually themes apps).
+    private const val RENDER_VERSION = 4
 
     /** True when a tint should be baked into generated icons. */
     fun isActive(prefs: PreferenceManager2): Boolean =
