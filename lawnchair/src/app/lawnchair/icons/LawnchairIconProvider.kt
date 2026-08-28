@@ -231,22 +231,31 @@ class LawnchairIconProvider @Inject constructor(
         // Hybrid B (owner 2026-08-27): a themed icon already follows Material You theming; keep it.
         if (themedIcon != null) return themedIcon
         val result = iconPackIcon ?: super.getIcon(info, appInfo, iconDpi)
-        // When the tint is on, prefer the app's OWN monochrome layer (its native Android 13+ themed
-        // icon) over the wash -- done HERE, outside the icon-pack gate above, so it applies to every
-        // app regardless of whether an icon pack is set. Only apps with no monochrome layer at all
-        // fall through to the wash.
+        // Full theming (owner 2026-08-27): when theming is on, render EVERY app as an accent
+        // monochrome -- done HERE, outside the icon-pack gate above, so it applies regardless of
+        // whether an icon pack is set. Prefer the app's own monochrome layer (its native Android 13+
+        // themed icon); else an icon pack's themed layer; else synthesize a monochrome from the
+        // regular adaptive icon (like Android 16's auto-theming). Only a non-adaptive icon, which has
+        // no layers to monochrome, falls through to the accent wash.
         if (AresIconTint.isActive(prefs2)) {
-            val mono: Drawable? =
+            val adaptive = result as? AdaptiveIconDrawable
+            val nativeMono: Drawable? =
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    (result as? AdaptiveIconDrawable)?.monochrome
+                    adaptive?.monochrome
                 } else {
                     null
                 }) ?: componentName?.let { ThemedIconCompat.getThemedIcon(context, it) }
-            if (mono != null) {
+            if (nativeMono != null) {
                 return CustomAdaptiveIconDrawable(
                     themedColors[0].toDrawable(),
-                    mono.mutate().apply { setTint(themedColors[1]) },
+                    nativeMono.mutate().apply { setTint(themedColors[1]) },
                 )
+            }
+            if (adaptive != null) {
+                val synth = AresIconTint.generateMono(context, adaptive, themedColors[1])
+                if (synth != null) {
+                    return CustomAdaptiveIconDrawable(themedColors[0].toDrawable(), synth)
+                }
             }
         }
         return AresIconTint.wash(result, prefs2, themedColors[1])

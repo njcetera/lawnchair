@@ -337,23 +337,17 @@ object AresEditCarousel {
         return Pill(row, refreshFn)
     }
 
-    // ---- pill 2: icon tint (Phase 1 UI shell) ------------------------------------------------
-
-    private const val TINT_STEP = 20
-    // 0% tint is identical to off, so the amount floors at 20% and stepping below it turns the
-    // tint OFF (owner 2026-08-27) rather than offering a meaningless "Tint 0%".
-    private const val TINT_MIN = 20
-    private const val TINT_MAX = 100
+    // ---- pill 2: icon theming (Material You) --------------------------------------------------
 
     // Icon-shape direct-select strip.
     private const val SHAPE_CELL_DP = 44f
     private const val SHAPE_STRIP_DP = 232f
 
     /**
-     * The icon-tint PAGE (owner 2026-08-26): two side-by-side pills -- a toggle pill (droplet glyph +
-     * on/off switch) and an amount pill (`-  Tint N%  +`). Only the amount pill dims when tint is off;
-     * the toggle pill stays bright, since it is how you turn tint on. Both pills share the in-memory
-     * enabled/strength state and persist via the PLAIN prefs (no recreate).
+     * The icon-theming PAGE (owner 2026-08-27): a single pill -- a droplet glyph, a "Themed icons"
+     * label, and an on/off switch. Full theming renders EVERY app as an accent monochrome (see
+     * [AresIconTint]), so there is nothing to partially tint and thus no amount stepper -- it is a
+     * plain on/off. Persists via the PLAIN pref (no recreate); the label dims when off.
      */
     private fun buildTintPage(launcher: Launcher, list: AresHomeListView): List<Pill> {
         val ctx: Context = launcher
@@ -364,43 +358,28 @@ object AresEditCarousel {
 
         val prefs = PreferenceManager2.getInstance(ctx)
         var enabled = prefs.aresIconTintEnabled.firstBlocking()
-        var strength = prefs.aresIconTintStrength.firstBlocking().coerceIn(TINT_MIN, TINT_MAX)
 
-        val label = pillLabel(ctx, tonal)
-        lateinit var minusBtn: ImageView
-        lateinit var plusBtn: ImageView
+        val label = pillLabel(ctx, tonal).apply { text = "Themed icons" }
         lateinit var toggleSwitch: Switch
-        // Guards programmatic toggle updates so syncing the switch to `enabled` (e.g. when stepping
-        // below the floor turns the tint off) does not re-fire the checked listener.
+        // Guards programmatic toggle updates so syncing the switch to `enabled` on a page refresh
+        // does not re-fire the checked listener.
         var syncing = false
 
-        fun labelText(): CharSequence = if (enabled) "Tint $strength%" else "Tint off"
-
-        // Controls only -- alpha, +/- enablement, and the toggle's checked state. It deliberately
-        // does NOT touch label.text: the label is set by `setLabelNow()` (immediate: toggle/off) or
-        // by `animateCount()` (the roll on a strength change), so the roll goes old->new not new->new
-        // (nightly review F4).
         val updateControls = {
             label.alpha = if (enabled) 1f else DISABLED_ALPHA
-            // Minus stays live at the floor so a further press can turn the tint off.
-            setBtnEnabled(minusBtn, enabled)
-            setBtnEnabled(plusBtn, enabled && strength < TINT_MAX)
             if (toggleSwitch.isChecked != enabled) {
                 syncing = true; toggleSwitch.isChecked = enabled; syncing = false
             }
         }
-        fun setLabelNow() { label.text = labelText() }
 
         fun persist() {
-            // onSet on both prefs runs reloadHelper.reloadIcons() -- the live re-tint (icon reload,
-            // not a recreate; edit mode retained).
+            // onSet runs reloadHelper.reloadIcons() -- the live re-theme (icon reload, not a
+            // recreate; edit mode retained).
             (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
                 prefs.aresIconTintEnabled.set(enabled)
-                prefs.aresIconTintStrength.set(strength)
             }
         }
 
-        // ---- toggle pill: droplet + switch ----
         val droplet = ImageView(ctx).apply {
             setImageResource(R.drawable.ic_ares_tint)
             imageTintList = ColorStateList.valueOf(tonal)
@@ -423,55 +402,18 @@ object AresEditCarousel {
             setOnCheckedChangeListener { _, checked ->
                 if (syncing) return@setOnCheckedChangeListener
                 enabled = checked
-                // Turning on from a floored/zeroed state starts at the minimum.
-                if (enabled && strength < TINT_MIN) strength = TINT_MIN
                 updateControls()
-                setLabelNow()
                 persist()
             }
         }
         val togglePill = pillRow(ctx, surface).apply {
             addView(droplet, LinearLayout.LayoutParams(dpOf(ctx, 34f), dpOf(ctx, 46f)))
+            addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(toggleSwitch, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dpOf(ctx, 46f)))
         }
 
-        // ---- amount pill: - Tint N% + ----
-        minusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_remove, tonal, onTonal) { disc ->
-            bounce(disc)
-            if (!enabled) return@tonalIconButton
-            if (strength > TINT_MIN) {
-                strength -= TINT_STEP
-                updateControls()
-                animateCount(label, labelText(), up = false)
-                persist()
-            } else {
-                // At the floor: a further step down turns the tint off (owner 2026-08-27).
-                enabled = false
-                updateControls()
-                setLabelNow()
-                persist()
-            }
-        }
-        plusBtn = tonalIconButton(ctx, R.drawable.ic_ares_stepper_add, tonal, onTonal) { disc ->
-            bounce(disc)
-            if (!enabled || strength >= TINT_MAX) return@tonalIconButton
-            strength += TINT_STEP
-            updateControls()
-            animateCount(label, labelText(), up = true)
-            persist()
-        }
-        val amountPill = pillRow(ctx, surface).apply {
-            addView(minusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
-            addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            addView(plusBtn, LinearLayout.LayoutParams(dpOf(ctx, 46f), dpOf(ctx, 46f)))
-        }
-
         updateControls()
-        setLabelNow()
-        return listOf(
-            Pill(togglePill) {},
-            Pill(amountPill) { updateControls(); setLabelNow() },
-        )
+        return listOf(Pill(togglePill) { updateControls() })
     }
 
     // ---- pill 3: icon shape ------------------------------------------------------------------

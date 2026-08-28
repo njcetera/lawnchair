@@ -1,81 +1,110 @@
 package app.lawnchair.areslauncher
 
+import android.content.Context
+import android.graphics.BlendMode
+import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
+import android.util.Log
 import app.lawnchair.preferences2.PreferenceManager2
+import com.android.launcher3.LauncherAppState
+import com.android.launcher3.icons.MonochromeIconFactory
 import com.patrykmichalik.opto.core.firstBlocking
 
 /**
- * Applies the edit-mode **icon tint** personalization (owner 2026-08-26/27): a unified-intensity
- * Material You wash that cross-fades every icon from its normal look (0%) toward a themed,
- * accent-monochrome look (100%), across the home grid, the app list, and folder contents.
+ * Applies the edit-mode **icon theming** personalization (owner 2026-08-26/27): a single on/off
+ * Material You theming toggle that renders every app icon as an accent-tinted monochrome, matching
+ * Pixel "Themed icons", across the home grid, the app list, and folder contents.
  *
- * **Option B / hybrid (owner 2026-08-27).** An app that ships a themed (monochrome) layer already
- * follows Material You theming naturally, so [app.lawnchair.icons.LawnchairIconProvider.getIcon]
- * renders its NATIVE themed icon when the tint is on. Only apps WITHOUT a themed icon get the
- * [wash] here: for strength `s` in 0..1 the icon is rendered through a [ColorMatrix] that linearly
- * interpolates identity with an accent duotone (map luminance onto the Material You accent), exactly
- * `out = (1-s)*original + s*duotone(original)`. `s=0` is untouched; `s=1` is an accent monochrome
- * matching the themed icons. The strength governs the wash intensity for the non-themed apps.
+ * **Full theming (owner 2026-08-27).** Earlier revisions did a hybrid: apps that ship a native
+ * monochrome layer got the real themed icon, and everything else got a graduated colour "wash" whose
+ * intensity a strength stepper controlled. The owner asked to theme *everything* like Android 16
+ * QPR2, so [app.lawnchair.icons.LawnchairIconProvider.getIcon] now, when theming is on:
+ *   1. uses the app's OWN monochrome layer (`AdaptiveIconDrawable.getMonochrome()`) if present, else
+ *   2. an icon pack's themed layer via `ThemedIconCompat`, else
+ *   3. [generateMono] synthesizes a monochrome from the regular adaptive icon (Lawnchair's
+ *      [MonochromeIconFactory], the same generator Android 16's auto-theming uses).
+ * Because every adaptive app now themes, there is nothing left to partially wash, so the strength
+ * stepper is gone and theming is a plain on/off. The [wash] path survives only as a fallback for the
+ * rare NON-adaptive icon (no layers to monochrome), rendered at full accent.
  *
- * The wash is applied as a plain `colorFilter` on the final icon [Drawable]; the icon factory bakes
- * it into the cached bitmap. A tint change is folded into `LawnchairThemeManager`'s icon state, so
- * every icon regenerates in place (`onThemeChanged`) -- an icon reload, NOT a recreate, so edit mode
- * is retained (same live path the shape pill uses).
+ * A theming change is folded into `LawnchairThemeManager`'s icon state, so every icon regenerates in
+ * place (`onThemeChanged`) -- an icon reload, NOT a recreate, so edit mode is retained (same live
+ * path the shape pill uses).
  */
 object AresIconTint {
 
-    // Luminance weights (Rec. 601), used to fold colour onto the accent.
+    private const val TAG = "AresIconTint"
+
+    // Luminance weights (Rec. 601), used to fold colour onto the accent for the non-adaptive fallback.
     private const val LR = 0.299f
     private const val LG = 0.587f
     private const val LB = 0.114f
 
-    // Bump when the tint RENDERING changes so cached icons invalidate and regenerate even though the
-    // app's versionCode is fixed across debug builds (otherwise a code-only change keeps serving the
-    // old bitmaps while the tint setting is unchanged). 1=uniform wash, 2=hybrid, 3=hybrid+system
-    // mono, 4=system mono applied outside the icon-pack gate (the fix that actually themes apps).
-    private const val RENDER_VERSION = 4
+    // Bump when the theming RENDERING changes so cached icons invalidate and regenerate even though
+    // the app's versionCode is fixed across debug builds. 1=uniform wash, 2=hybrid, 3=hybrid+system
+    // mono, 4=system mono outside the icon-pack gate, 5=full theming (synth mono for every app; % dropped).
+    private const val RENDER_VERSION = 5
 
-    /** True when a tint should be baked into generated icons. */
+    /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
-        prefs.aresIconTintEnabled.firstBlocking() && prefs.aresIconTintStrength.firstBlocking() > 0
+        prefs.aresIconTintEnabled.firstBlocking()
 
     /**
-     * The wash colour filter for [strength] (0..100) toward [accent], or `null` for a no-op
-     * (`strength <= 0`), so callers can skip work entirely at zero.
+     * Synthesize an accent-tinted monochrome from [adaptive] for an app that ships no monochrome
+     * layer (step 3 above), using [MonochromeIconFactory] -- the same generator Android 16 uses to
+     * auto-theme mono-less apps. Returns null below API 33 or on any failure (caller falls back).
+     * Runs on the icon-loading worker thread (getIcon), as [MonochromeIconFactory.wrap] requires.
      */
-    fun washFilter(strength: Int, accent: Int): ColorFilter? {
-        val s = (strength.coerceIn(0, 100)) / 100f
-        if (s <= 0f) return null
+    fun generateMono(context: Context, adaptive: AdaptiveIconDrawable, accent: Int): Drawable? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
+        return try {
+            val size = LauncherAppState.getIDP(context).iconBitmapSize.coerceAtLeast(1)
+            // MonochromeIconFactory doesn't honour setTint (it paints white), so colour it with a
+            // SRC_IN blend filter, which InsetDrawable/ClippedMonoDrawable forwards to the generator.
+            MonochromeIconFactory(size).wrap(adaptive, adaptive.iconMask).apply {
+                colorFilter = BlendModeColorFilter(accent, BlendMode.SRC_IN)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "monochrome synthesis failed", t)
+            null
+        }
+    }
+
+    /**
+     * Full-accent duotone colour filter toward [accent], or `null` for a no-op. Used only for the
+     * non-adaptive fallback in [wash].
+     */
+    private fun fullWashFilter(accent: Int): ColorFilter {
         val ar = Color.red(accent) / 255f
         val ag = Color.green(accent) / 255f
         val ab = Color.blue(accent) / 255f
-        // M = (1-s)*I + s*D, D = luminance -> accent duotone. Alpha row is identity (preserve shape).
         val m = floatArrayOf(
-            (1 - s) + s * ar * LR, s * ar * LG, s * ar * LB, 0f, 0f,
-            s * ag * LR, (1 - s) + s * ag * LG, s * ag * LB, 0f, 0f,
-            s * ab * LR, s * ab * LG, (1 - s) + s * ab * LB, 0f, 0f,
+            ar * LR, ar * LG, ar * LB, 0f, 0f,
+            ag * LR, ag * LG, ag * LB, 0f, 0f,
+            ab * LR, ab * LG, ab * LB, 0f, 0f,
             0f, 0f, 0f, 1f, 0f,
         )
         return ColorMatrixColorFilter(ColorMatrix(m))
     }
 
     /**
-     * If the tint is active, set the wash [ColorFilter] on [icon] (in place) and return it; else
-     * return [icon] untouched. [accent] is the Material You accent to fold toward.
+     * Fallback for a NON-adaptive icon (no layers to monochrome): if theming is active, fold the
+     * icon toward the [accent] at full intensity (in place) and return it; else return it untouched.
      */
     fun wash(icon: Drawable, prefs: PreferenceManager2, accent: Int): Drawable {
         if (!prefs.aresIconTintEnabled.firstBlocking()) return icon
-        val filter = washFilter(prefs.aresIconTintStrength.firstBlocking(), accent) ?: return icon
-        icon.colorFilter = filter
+        icon.colorFilter = fullWashFilter(accent)
         return icon
     }
 
-    /** State fragment for the icon cache key so a tint change (or render-version bump) invalidates
+    /** State fragment for the icon cache key so a theming change (or render-version bump) invalidates
      *  cached bitmaps. Including [RENDER_VERSION] forces a one-time regen when the rendering changes. */
     fun stateFragment(prefs: PreferenceManager2): String =
-        "tint=v$RENDER_VERSION:${prefs.aresIconTintEnabled.firstBlocking()}:${prefs.aresIconTintStrength.firstBlocking()}"
+        "tint=v$RENDER_VERSION:${prefs.aresIconTintEnabled.firstBlocking()}"
 }
