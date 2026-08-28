@@ -291,6 +291,24 @@ public class FloatingIconView extends FrameLayout implements
      * @param btvIcon The drawable of the BubbleTextView. May be null if original view is not a BTV
      * @param outIconLoadResult We store the icon results into this object.
      */
+    /**
+     * Clone {@code drawable} via its {@link Drawable.ConstantState} when it has one, otherwise
+     * return the drawable itself. Some THEMED {@link android.graphics.drawable.AdaptiveIconDrawable}s
+     * (produced by the icon theme controller for the full-res floating icon) have a NULL
+     * ConstantState; {@code requireNonNull}-cloning them (dfde0a31c5) crashed the launcher-loader
+     * thread in a restart loop on the owner's device (2026-08-28) whenever such a themed floating
+     * icon was preloaded. Falling back to the original drawable is safe here -- the floating icon is
+     * a transient, single-use snapshot, so skipping the defensive clone only forgoes an optimisation.
+     */
+    @Nullable
+    private static Drawable cloneOrSelf(@Nullable Drawable drawable) {
+        if (drawable == null) {
+            return null;
+        }
+        Drawable.ConstantState cs = drawable.getConstantState();
+        return cs != null ? cs.newDrawable() : drawable;
+    }
+
     @WorkerThread
     @SuppressWarnings("WrongThread")
     private static void getIconResult(Launcher l, View originalView, ItemInfo info, RectF pos,
@@ -332,12 +350,11 @@ public class FloatingIconView extends FrameLayout implements
             }
         }
 
-        drawable = drawable == null ? null : Objects.requireNonNull(drawable.getConstantState()).newDrawable();
+        drawable = cloneOrSelf(drawable);
         int iconOffset = getOffsetForIconBounds(l, drawable, pos);
         // Clone right away as we are on the background thread instead of blocking the
         // main thread later
-        Drawable btvClone = btvIcon == null ? null : Objects.requireNonNull(
-            btvIcon.getConstantState()).newDrawable();
+        Drawable btvClone = cloneOrSelf(btvIcon);
         synchronized (outIconLoadResult) {
             outIconLoadResult.btvDrawable = () -> btvClone;
             outIconLoadResult.drawable = drawable;
@@ -571,7 +588,7 @@ public class FloatingIconView extends FrameLayout implements
             } else {
                 btvIcon = btv.getIcon();
                 // Clone when needed
-                btvDrawableSupplier = () -> btvIcon.getConstantState().newDrawable();
+                btvDrawableSupplier = () -> cloneOrSelf(btvIcon);
             }
         } else {
             btvIcon = null;
