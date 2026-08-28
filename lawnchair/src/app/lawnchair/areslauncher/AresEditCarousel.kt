@@ -403,6 +403,8 @@ object AresEditCarousel {
                 if (syncing) return@setOnCheckedChangeListener
                 enabled = checked
                 updateControls()
+                // Dissolve old icons into the newly (un)themed ones instead of a one-frame pop.
+                AresIconTransition.crossFade(launcher)
                 persist()
             }
         }
@@ -484,6 +486,8 @@ object AresEditCarousel {
             cells[i].isChosen = true
             bounce(cells[i])
             strip.centerOn(i)
+            // Dissolve old-shape icons into the new shape instead of a one-frame pop.
+            AresIconTransition.crossFade(launcher)
             (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
                 // Folders follow the icon shape (owner 2026-08-27): a circle folder in a grid of
                 // squircles looks out of place, and the folder's preview grid already distinguishes
