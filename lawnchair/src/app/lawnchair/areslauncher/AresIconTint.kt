@@ -1,6 +1,7 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -115,12 +116,25 @@ object AresIconTint {
      */
     fun wash(icon: Drawable, prefs: PreferenceManager2, accent: Int): Drawable {
         if (!prefs.aresIconTintEnabled.firstBlocking()) return icon
-        icon.colorFilter = fullWashFilter(accent)
-        return icon
+        // mutate() first so the wash never bleeds through a shared ConstantState to other users of
+        // the same drawable (nightly 2026-08-28, finding 7).
+        return icon.mutate().apply { colorFilter = fullWashFilter(accent) }
     }
 
-    /** State fragment for the icon cache key so a theming change (or render-version bump) invalidates
-     *  cached bitmaps. Including [RENDER_VERSION] forces a one-time regen when the rendering changes. */
-    fun stateFragment(prefs: PreferenceManager2): String =
-        "tint=v$RENDER_VERSION:${prefs.aresIconTintEnabled.firstBlocking()}"
+    /**
+     * State fragment for the icon cache key so a theming change invalidates cached bitmaps. When
+     * theming is OFF the fragment is constant (icons are untinted). When ON it folds in, besides
+     * [RENDER_VERSION]: the current NIGHT state and the RESOLVED accent pair -- because the theming
+     * colours are wallpaper-derived and have light/dark variants, so a dark-mode switch or a Material
+     * You palette change must regenerate the icons. Without this they kept their old-mode/old-accent
+     * colours until a manual toggle or a version bump (nightly 2026-08-28, finding 1). A night switch
+     * recreate()s the launcher (uiMode is not in the activity's configChanges) and a palette change
+     * likewise reloads, so the differing key is re-read and stale icons regenerate.
+     */
+    fun stateFragment(context: Context, prefs: PreferenceManager2): String {
+        if (!prefs.aresIconTintEnabled.firstBlocking()) return "tint=v$RENDER_VERSION:off"
+        val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val c = themedColors(context)
+        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}"
+    }
 }

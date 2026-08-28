@@ -66,8 +66,9 @@ constructor(
             prefs2.customFolderShape.get(),
             // Ares icon tint folds into the icon state so a tint change triggers the SAME complete
             // icon regeneration the shape prefs get (onThemeChanged), not the partial reloadIcons().
+            // Only the on/off pref is observed -- the strength pref is retired (nightly 2026-08-28,
+            // finding 9): the pill no longer writes it and it is absent from the cache key.
             prefs2.aresIconTintEnabled.get(),
-            prefs2.aresIconTintStrength.get(),
         ).onEach { verifyIconState() }
             .launchIn(scope)
 
@@ -109,7 +110,7 @@ constructor(
         val folderShapeKey = currentFolderShape.getHashString() + currentPrefs1State
         // Fold the Ares icon-tint state into the icon identity key so toggling/adjusting the tint
         // changes iconState and forces every icon to regenerate through getIcon() (with the wash).
-        val tintKey = AresIconTint.stateFragment(prefs2)
+        val tintKey = AresIconTint.stateFragment(context, prefs2)
         val combinedKey = "$appShapeKey:$folderShapeKey:$tintKey"
 
         val appShape =

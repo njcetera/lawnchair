@@ -280,7 +280,7 @@ class LawnchairIconProvider @Inject constructor(
             "dti=${prefs.drawerThemedIcons.get()}," +
             "fm=${prefs.forceIconMonochrome.get()}," +
             "tb=${prefs.tintIconPackBackgrounds.get()}," +
-            "${AresIconTint.stateFragment(prefs2)}," +
+            "${AresIconTint.stateFragment(context, prefs2)}," +
             "ov=$overrideState"
     }
 
