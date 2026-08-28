@@ -33,6 +33,11 @@ object AresIconTint {
     private const val LG = 0.587f
     private const val LB = 0.114f
 
+    // Bump when the tint RENDERING changes so cached icons invalidate and regenerate even though the
+    // app's versionCode is fixed across debug builds (otherwise a code-only change keeps serving the
+    // old bitmaps while the tint setting is unchanged). 1=uniform wash, 2=hybrid, 3=hybrid+system mono.
+    private const val RENDER_VERSION = 3
+
     /** True when a tint should be baked into generated icons. */
     fun isActive(prefs: PreferenceManager2): Boolean =
         prefs.aresIconTintEnabled.firstBlocking() && prefs.aresIconTintStrength.firstBlocking() > 0
@@ -68,7 +73,8 @@ object AresIconTint {
         return icon
     }
 
-    /** State fragment for the icon cache key so a tint change invalidates cached bitmaps. */
+    /** State fragment for the icon cache key so a tint change (or render-version bump) invalidates
+     *  cached bitmaps. Including [RENDER_VERSION] forces a one-time regen when the rendering changes. */
     fun stateFragment(prefs: PreferenceManager2): String =
-        "tint=${prefs.aresIconTintEnabled.firstBlocking()}:${prefs.aresIconTintStrength.firstBlocking()}"
+        "tint=v$RENDER_VERSION:${prefs.aresIconTintEnabled.firstBlocking()}:${prefs.aresIconTintStrength.firstBlocking()}"
 }
