@@ -629,23 +629,28 @@ class AresMasonryLayoutManager(
             // AppWidgetHostView re-runs its RemoteViews layout, which is the scroll stutter and the
             // "repeated rendering" of widgets on a long list. Views entering via getViewForPosition
             // never land in `attached`, so a real layout pass still measures everything.
-            if (existing == null || view.isLayoutRequested ||
+            // A child that is already attached, correctly sized, and not asking for layout was put in
+            // its right place by offsetChildrenVertical during a scroll (see scrollVerticallyBy), and
+            // is untouched during a layout pass (every view is freshly scrapped there, so
+            // existing == null and this is always true). Only then do we measure AND lay it out --
+            // laying a stable child out every frame fired its onLayout (and an AppWidgetHostView's
+            // RemoteViews relayout), which was the scroll stutter (owner 2026-08-28).
+            val needsLayout = existing == null || view.isLayoutRequested ||
                 view.measuredWidth != w || view.measuredHeight != h
-            ) {
+            if (needsLayout) {
                 view.measure(
                     View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
                 )
+                val left = paddingLeft + cell.x * cw
+                layoutDecoratedWithMargins(
+                    view,
+                    left,
+                    paddingTop + top - scrollOffset,
+                    left + span.w.coerceIn(1, columns) * cw,
+                    paddingTop + bottom - scrollOffset,
+                )
             }
-
-            val left = paddingLeft + cell.x * cw
-            layoutDecoratedWithMargins(
-                view,
-                left,
-                paddingTop + top - scrollOffset,
-                left + span.w.coerceIn(1, columns) * cw,
-                paddingTop + bottom - scrollOffset,
-            )
         }
     }
 
@@ -661,6 +666,14 @@ class AresMasonryLayoutManager(
         val consumed = target - scrollOffset
         if (consumed == 0) return 0
         scrollOffset = target
+        // Move every attached child by the scroll delta with offsetChildrenVertical -- a plain
+        // View.offsetTopAndBottom on each, which repositions WITHOUT firing layout/onLayout. The
+        // stable children are then already in their new spot, so [fill] only has to lay out the
+        // handful entering at the leading edge and recycle the ones leaving at the trailing edge --
+        // exactly how LinearLayoutManager scrolls. Re-laying out every visible child each frame (the
+        // old behaviour) fired each child's onLayout, and for an AppWidgetHostView re-ran its
+        // RemoteViews layout, which was the home-scroll stutter on a tall grid (owner 2026-08-28).
+        offsetChildrenVertical(-consumed)
         // ⛔ Never call detachAndScrapAttachedViews here. It is a *layout-pass* primitive: the views
         // it detaches go into Recycler.mAttachedScrap, and the only thing that ever drains that is
         // LayoutManager.removeAndRecycleScrapInt, which RecyclerView runs at the end of
