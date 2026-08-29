@@ -683,7 +683,19 @@ class LawnchairLauncher : QuickstepLauncher() {
                                         app.lawnchair.areslauncher.AresHomeReveal
                                             .maybePlayOnHomeAppear(this@LawnchairLauncher)
                                     } finally {
-                                        list.alpha = 1f
+                                        // Restore on the NEXT frame, not synchronously: when a WP
+                                        // folder was left expanded, play() defers its off-screen
+                                        // tile-bunching to its OWN list.post (collapseWpFolderImmediate),
+                                        // so a synchronous alpha=1 here would show one frame of the
+                                        // settled/collapsed top-of-grid before the reveal starts -- the
+                                        // jump this whole branch exists to hide (nightly review
+                                        // 2026-08-29, finding 1). This post is queued AFTER the reveal's
+                                        // deferred playInner post, so alpha is restored once the tiles
+                                        // are already off-screen. On the non-folder path playInner ran
+                                        // synchronously, so the tiles are bunched before this fires too.
+                                        // Still unconditional, so a disabled/empty/throwing reveal can
+                                        // never leave the grid blank.
+                                        list.post { list.alpha = 1f }
                                     }
                                 }
                             } else {
