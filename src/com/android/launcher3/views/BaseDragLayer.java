@@ -196,7 +196,7 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
      *
      * <p>Filter with {@code adb logcat -s AresTouchProbe}. Flip to false to silence it.
      */
-    public static final boolean ARES_TOUCH_PROBE = true;
+    public static final boolean ARES_TOUCH_PROBE = false;
     private static final String ARES_PROBE_TAG = "AresTouchProbe";
 
     private TouchController findControllerToHandleTouch(MotionEvent ev) {
