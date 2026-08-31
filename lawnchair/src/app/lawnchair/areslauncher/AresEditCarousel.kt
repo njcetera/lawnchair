@@ -66,8 +66,31 @@ object AresEditCarousel {
     /** M3 disabled-content opacity. */
     private const val DISABLED_ALPHA = 0.38f
 
+    // Quiet period after the last icon-pack tap before the reload fires, so clicking through packs
+    // coalesces into one apply. Small relative to the multi-second reload, so a single pick still
+    // feels immediate.
+    private const val ICON_PACK_APPLY_DEBOUNCE_MS = 500L
+
     private var view: View? = null
     private var pills: List<Pill> = emptyList()
+
+    // Debounced icon-pack apply. Each apply is a full model reload that stopLoader+startLoaders the
+    // previous one, so clicking THROUGH packs thrashes the loader and the grid settles long after
+    // (owner 2026-08-31). The pill selection updates instantly; the actual pref write is held until
+    // the user settles, so rapid switching fires one reload, not one per tap. Flushed on edit-mode
+    // exit so leaving quickly still commits the settled choice.
+    private var pendingIconPackApply: (() -> Unit)? = null
+    private var pendingIconPackView: View? = null
+    private var pendingIconPackRunnable: Runnable? = null
+
+    private fun flushPendingIconPack() {
+        pendingIconPackRunnable?.let { pendingIconPackView?.removeCallbacks(it) }
+        pendingIconPackRunnable = null
+        pendingIconPackView = null
+        val commit = pendingIconPackApply ?: return
+        pendingIconPackApply = null
+        commit()
+    }
 
     /** One personalization pill: its control view plus a hook to re-evaluate enabled/disabled state. */
     private class Pill(val view: View, val refreshEnabled: () -> Unit)
@@ -189,6 +212,12 @@ object AresEditCarousel {
 
     /** Synchronously drop the carousel with no exit animation, releasing captured references. */
     private fun clearStale() {
+        // Drop (do NOT commit) any pending icon-pack apply: this is destroyed-activity teardown, so
+        // firing a reload here is pointless and its callback would run on a detached view.
+        pendingIconPackRunnable?.let { pendingIconPackView?.removeCallbacks(it) }
+        pendingIconPackRunnable = null
+        pendingIconPackView = null
+        pendingIconPackApply = null
         AresIconTransition.cancel()
         view?.let {
             it.animate().cancel()
@@ -199,6 +228,10 @@ object AresEditCarousel {
     }
 
     fun detach() {
+        // Commit a debounced icon-pack pick before tearing down, so leaving edit mode right after a
+        // tap still applies it (this runs the plain pref write, no freeze -- there is no grid to
+        // reveal on the way out).
+        flushPendingIconPack()
         AresIconTransition.cancel()
         val v = view ?: return
         view = null
@@ -581,13 +614,24 @@ object AresEditCarousel {
             cells[i].isChosen = true
             bounce(cells[i])
             strip.centerOn(i)
-            // Unlike shape/tint (which apply on the next draw), an icon-pack change is an ASYNC model
-            // reload: the new icons stream in over ~1-2s for a large pack. So FREEZE the current grid
-            // now and let LawnchairLauncher.finishBindingItems wipe to the finished new grid once the
-            // reload binds -- hiding the piecemeal swap-in and timing the reveal to the actual change
-            // (owner 2026-08-31: "partially did... there was a delay").
-            AresIconTransition.freeze(launcher, list)
-            prefs.iconPackPackage.set(choices[i].packageName)
+            // Update the pill instantly, but DEBOUNCE the apply (see [pendingIconPackApply]): each
+            // apply is a full model reload that cancels+restarts the previous, so clicking through
+            // packs must not fire one reload per tap. commit() writes the pref (a no-op-safe flush on
+            // edit-mode exit runs the same lambda). The debounce timer additionally FREEZES the grid
+            // first: unlike shape/tint (which apply on the next draw) a pack change is an async
+            // reload, so LawnchairLauncher.finishBindingItems wipes to the finished new grid.
+            val pkg = choices[i].packageName
+            pendingIconPackApply = { prefs.iconPackPackage.set(pkg) }
+            pendingIconPackView = strip
+            pendingIconPackRunnable?.let { strip.removeCallbacks(it) }
+            pendingIconPackRunnable = Runnable {
+                pendingIconPackRunnable = null
+                pendingIconPackView = null
+                val commit = pendingIconPackApply ?: return@Runnable
+                pendingIconPackApply = null
+                AresIconTransition.freeze(launcher, list)
+                commit()
+            }.also { strip.postDelayed(it, ICON_PACK_APPLY_DEBOUNCE_MS) }
         }
         cells = choices.mapIndexed { i, choice ->
             IconPackCell(ctx, choice.icon, tonal).apply {
