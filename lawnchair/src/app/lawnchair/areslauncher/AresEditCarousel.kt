@@ -1,12 +1,15 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
@@ -32,7 +35,9 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.icons.shape.IconShape
+import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
+import app.lawnchair.ui.preferences.iconPackIntents
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.views.BaseDragLayer
@@ -77,6 +82,7 @@ object AresEditCarousel {
         ::buildColumnPage,
         ::buildTintPage,
         ::buildShapePage,
+        ::buildIconPackPage,
     )
 
     /** Re-evaluate every pill's enabled/disabled state (folder open, bounds, etc.). No-op if detached. */
@@ -519,6 +525,144 @@ object AresEditCarousel {
         // Open with the current shape centred (no animation on first layout).
         strip.post { strip.centerOn(selectedIdx, smooth = false) }
         return listOf(Pill(pill) {})
+    }
+
+    // ---- pill 4: icon pack ------------------------------------------------------------------
+
+    /** One choice in the icon-pack strip: a pack package (empty == System / no pack) + its swatch. */
+    private class PackChoice(val packageName: String, val icon: Drawable?)
+
+    /**
+     * Icon-pack selector: a direct-select strip (same chrome as the shape pill) of the installed
+     * icon packs, each shown by its own launcher icon, with a leading "System" swatch (empty
+     * package = stock adaptive icons, no pack). Tapping sets `iconPackPackage`, whose change hook
+     * clears the icon cache and reloads the model off the MODEL_EXECUTOR, so the whole grid
+     * re-icons. Coexists with the shape pill (shape masks whatever the pack produces) and with the
+     * tint/theming pill (when theming is on, the provider derives the accent monochrome FROM the
+     * pack's icon, so the pack still shows through -- owner 2026-08-31).
+     */
+    private fun buildIconPackPage(launcher: Launcher, list: AresHomeListView): List<Pill> {
+        val ctx: Context = launcher
+        fun color(res: Int) = ContextCompat.getColor(ctx, res)
+        val surface = color(R.color.materialColorSurfaceContainerHigh)
+        val tonal = color(R.color.materialColorPrimary)
+
+        val prefs = PreferenceManager.getInstance(ctx)
+        val pm = ctx.packageManager
+
+        // Installed icon packs (Nova/ADW/Atom/Apex intents), deduped by package, sorted by label,
+        // with a leading System choice. Built once when the pill is created (edit-mode entry): a
+        // few PM queries plus one loadIcon per pack, off any hot path. queryIntentActivities and
+        // loadIcon are guarded so a flaky pack can't crash edit mode.
+        val systemIcon: Drawable? = runCatching { pm.getApplicationIcon(ctx.packageName) }.getOrNull()
+        val choices: List<PackChoice> = buildList {
+            add(PackChoice("", systemIcon))
+            iconPackIntents
+                .flatMap { runCatching { pm.queryIntentActivities(it, 0) }.getOrDefault(emptyList()) }
+                .associateBy { it.activityInfo.packageName }
+                .values
+                .sortedBy { it.loadLabel(pm).toString().lowercase() }
+                .forEach {
+                    add(PackChoice(it.activityInfo.packageName, runCatching { it.loadIcon(pm) }.getOrNull()))
+                }
+        }
+
+        // Select the saved pack if it is still installed; otherwise show System selected without
+        // rewriting the pref (an uninstalled pack simply resolves to default in the provider).
+        val currentPkg = prefs.iconPackPackage.get()
+        var selectedIdx = choices.indexOfFirst { it.packageName == currentPkg }.coerceAtLeast(0)
+
+        val strip = ShapeStrip(ctx)
+        lateinit var cells: List<IconPackCell>
+        fun select(i: Int) {
+            if (i == selectedIdx) return
+            cells[selectedIdx].isChosen = false
+            selectedIdx = i
+            cells[i].isChosen = true
+            bounce(cells[i])
+            strip.centerOn(i)
+            // Dissolve the old icons into the new pack's icons instead of a one-frame pop, mirroring
+            // the shape pill. The reload is async, so the cross-fade covers the swap-in.
+            AresIconTransition.reveal(launcher, list)
+            prefs.iconPackPackage.set(choices[i].packageName)
+        }
+        cells = choices.mapIndexed { i, choice ->
+            IconPackCell(ctx, choice.icon, tonal).apply {
+                isChosen = i == selectedIdx
+                setOnClickListener { select(i) }
+                strip.row.addView(
+                    this,
+                    LinearLayout.LayoutParams(dpOf(ctx, SHAPE_CELL_DP), dpOf(ctx, SHAPE_CELL_DP))
+                        .apply { marginStart = if (i == 0) 0 else dpOf(ctx, 2f) },
+                )
+            }
+        }
+
+        val pill = pillRow(ctx, surface).apply {
+            addView(strip, LinearLayout.LayoutParams(dpOf(ctx, SHAPE_STRIP_DP), dpOf(ctx, SHAPE_CELL_DP)))
+        }
+        strip.post { strip.centerOn(selectedIdx, smooth = false) }
+        return listOf(Pill(pill) {})
+    }
+
+    /**
+     * One icon-pack swatch: the pack's own launcher icon clipped to a circle (so a row of mixed
+     * pack art reads uniformly), with an accent ring when chosen. A null icon (System with no
+     * resolvable launcher icon) falls back to a filled accent disc.
+     */
+    private class IconPackCell(
+        context: Context,
+        icon: Drawable?,
+        private val accent: Int,
+    ) : View(context) {
+        // Clone so setting bounds here never fights the PackageManager's shared drawable instance.
+        private val icon: Drawable? = icon?.constantState?.newDrawable()?.mutate() ?: icon
+        private val clip = Path()
+        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = accent
+        }
+        private val discPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = accent
+        }
+        private val iconBounds = Rect()
+
+        var isChosen = false
+            set(value) { if (field != value) { field = value; invalidate() } }
+
+        init {
+            isClickable = true
+            isFocusable = true
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val cx = width / 2f
+            val cy = height / 2f
+            // Shrink a touch when chosen to leave room for the ring.
+            val r = minOf(width, height) / 2f * (if (isChosen) 0.78f else 0.90f)
+            if (r <= 0f) return
+            clip.reset()
+            clip.addCircle(cx, cy, r, Path.Direction.CW)
+            val save = canvas.save()
+            canvas.clipPath(clip)
+            val d = icon
+            if (d != null) {
+                val size = (r * 2f).toInt()
+                val left = (cx - r).toInt()
+                val top = (cy - r).toInt()
+                iconBounds.set(left, top, left + size, top + size)
+                d.bounds = iconBounds
+                d.draw(canvas)
+            } else {
+                canvas.drawCircle(cx, cy, r, discPaint)
+            }
+            canvas.restoreToCount(save)
+            if (isChosen) {
+                ringPaint.strokeWidth = minOf(width, height) * 0.06f
+                canvas.drawCircle(cx, cy, r + ringPaint.strokeWidth, ringPaint)
+            }
+        }
     }
 
     /** Draws an [IconShape]'s mask (its 0..100 path) scaled and centred, filled with a colour. */
