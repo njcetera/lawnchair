@@ -34,6 +34,7 @@ import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
+import app.lawnchair.areslauncher.AresIconTransition
 import app.lawnchair.compat.LawnchairQuickstepCompat
 import app.lawnchair.data.AppDatabase
 import app.lawnchair.data.wallpaper.service.WallpaperService
@@ -490,6 +491,13 @@ class LawnchairLauncher : QuickstepLauncher() {
             )
         }.toList()
         bindInflatedItems(inflatedItems, if (forceAnimateIcons) AnimatorSet() else null)
+    }
+
+    override fun finishBindingItems(pagesBoundFirst: com.android.launcher3.util.IntSet?) {
+        super.finishBindingItems(pagesBoundFirst)
+        // Bind-complete = the reloaded icons are on the grid. If an icon-pack pick froze the old grid
+        // (AresEditCarousel), wipe to the finished new one now; a no-op otherwise.
+        AresIconTransition.playFrozen(this, workspace?.aresHomeList)
     }
 
     override fun handleGestureContract(intent: Intent) {

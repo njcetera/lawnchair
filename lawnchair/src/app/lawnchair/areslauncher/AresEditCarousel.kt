@@ -581,9 +581,12 @@ object AresEditCarousel {
             cells[i].isChosen = true
             bounce(cells[i])
             strip.centerOn(i)
-            // Dissolve the old icons into the new pack's icons instead of a one-frame pop, mirroring
-            // the shape pill. The reload is async, so the cross-fade covers the swap-in.
-            AresIconTransition.reveal(launcher, list)
+            // Unlike shape/tint (which apply on the next draw), an icon-pack change is an ASYNC model
+            // reload: the new icons stream in over ~1-2s for a large pack. So FREEZE the current grid
+            // now and let LawnchairLauncher.finishBindingItems wipe to the finished new grid once the
+            // reload binds -- hiding the piecemeal swap-in and timing the reveal to the actual change
+            // (owner 2026-08-31: "partially did... there was a delay").
+            AresIconTransition.freeze(launcher, list)
             prefs.iconPackPackage.set(choices[i].packageName)
         }
         cells = choices.mapIndexed { i, choice ->

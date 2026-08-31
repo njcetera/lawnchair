@@ -39,17 +39,30 @@ object AresIconTransition {
     // Half-res snapshot: a quarter of the pixels and draw cost of a full-grid capture.
     private const val SNAP_SCALE = 0.5f
 
+    // Safety cap: if a frozen overlay's bind-complete signal never arrives, wipe it anyway so the
+    // grid can never stay covered. Generous, because an icon-pack reload of a large pack is slow.
+    private const val FREEZE_TIMEOUT_MS = 6000L
+
     // The in-flight overlay, if any. Only one launcher is active at a time, so a single reference is
     // enough to drop a stale overlay from a rapid re-toggle before starting the next.
     private var active: RevealOverlay? = null
 
+    // A pinned, not-yet-wiped snapshot from [freeze], waiting for [playFrozen] (bind-complete) or its
+    // safety timeout. Held separately from [active] because it is static (holeRadius stays 0) until
+    // played, and can be replaced by a rapid re-pick before it ever animates.
+    private var frozen: RevealOverlay? = null
+    private var frozenTimeout: Runnable? = null
+    private var frozenTarget: View? = null
+
     /**
-     * Cancel any in-flight reveal and release its overlay + snapshot. Called on activity destroy (and
-     * on edit-mode exit) so a reveal that is still animating never pins a destroyed activity via the
-     * static [active] field -- the same leak class the carousel guards as F2 (nightly 2026-08-28,
-     * finding 5). Safe to call when nothing is animating. Main thread.
+     * Cancel any in-flight reveal AND any pinned [freeze] overlay, releasing their bitmaps. Called on
+     * activity destroy (and on edit-mode exit) so a reveal still animating -- or a freeze still
+     * waiting for a bind that will never come -- never pins a destroyed activity via a static field
+     * (the same leak class the carousel guards as F2, nightly 2026-08-28 finding 5). Safe when nothing
+     * is pending. Main thread.
      */
     fun cancel() {
+        clearFrozen()
         val o = active ?: return
         active = null
         // anim.cancel() fires onAnimationCancel -> the doOnEnd cleanup (remove view + recycle bmp).
@@ -59,18 +72,69 @@ object AresIconTransition {
 
     /** Play the radial reveal over [target] (the home grid). No-op if it has no size yet. */
     fun reveal(launcher: Launcher, target: View) {
-        val dragLayer: BaseDragLayer<*> = launcher.dragLayer ?: return
+        val overlay = addSnapshotOverlay(launcher, target) ?: return
+        startWipe(overlay)
+    }
+
+    /**
+     * Pin the CURRENT grid look under a static snapshot, to be uncovered later by [playFrozen]. For an
+     * ASYNC icon change (icon pack): the new icons stream in over a model reload, so revealing at tap
+     * time (like [reveal]) wipes to the OLD icons and the swap pops in afterwards -- and mid-reload the
+     * grid shows a piecemeal half-swapped state. Freezing the old frame hides that churn; [playFrozen]
+     * at bind-complete then wipes to the finished new grid. A safety timeout wipes anyway if the
+     * bind-complete signal never arrives, so the grid can never stay covered.
+     */
+    fun freeze(launcher: Launcher, target: View) {
+        clearFrozen()
+        val overlay = addSnapshotOverlay(launcher, target) ?: return
+        frozen = overlay
+        frozenTarget = target
+        frozenTimeout = Runnable { playFrozen(launcher, target) }.also {
+            target.postDelayed(it, FREEZE_TIMEOUT_MS)
+        }
+    }
+
+    /**
+     * Uncover a [freeze] overlay with the radial wipe. Called from the launcher's bind-complete hook
+     * once the reloaded icons are on the grid. No-op if nothing is frozen (so an unrelated bind, or a
+     * second bind pass, does nothing).
+     */
+    fun playFrozen(launcher: Launcher, target: View?) {
+        val overlay = frozen ?: return
+        frozen = null
+        frozenTimeout?.let { frozenTarget?.removeCallbacks(it) }
+        frozenTimeout = null
+        frozenTarget = null
+        // A rapid re-pick could have started another reveal in the meantime; drop it so they never
+        // stack, then wipe this frozen frame.
+        active?.takeIf { it !== overlay }?.let {
+            it.anim?.cancel()
+            (it.parent as? ViewGroup)?.removeView(it)
+        }
+        startWipe(overlay)
+    }
+
+    private fun clearFrozen() {
+        val o = frozen ?: return
+        frozen = null
+        frozenTimeout?.let { frozenTarget?.removeCallbacks(it) }
+        frozenTimeout = null
+        frozenTarget = null
+        (o.parent as? ViewGroup)?.removeView(o)
+        o.bmp?.let { if (!it.isRecycled) it.recycle() }
+    }
+
+    /**
+     * Snapshots [target] into a half-res bitmap and adds a static [RevealOverlay] (hole closed) over it
+     * in the drag layer, pixel-aligned to the grid. Returns the overlay, or null if the grid has no
+     * size yet or anything throws -- a reveal must never break the change that triggered it.
+     */
+    private fun addSnapshotOverlay(launcher: Launcher, target: View): RevealOverlay? {
+        val dragLayer: BaseDragLayer<*> = launcher.dragLayer ?: return null
         val tw = target.width
         val th = target.height
-        if (tw <= 0 || th <= 0) return
-        try {
-            // Drop any in-flight overlay from a rapid re-toggle so they never stack.
-            active?.let {
-                it.anim?.cancel()
-                (it.parent as? ViewGroup)?.removeView(it)
-            }
-            active = null
-
+        if (tw <= 0 || th <= 0) return null
+        return try {
             val bw = (tw * SNAP_SCALE).toInt().coerceAtLeast(1)
             val bh = (th * SNAP_SCALE).toInt().coerceAtLeast(1)
             val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
@@ -82,37 +146,48 @@ object AresIconTransition {
 
             val overlay = RevealOverlay(launcher).apply {
                 setImageBitmap(bmp)
+                this.bmp = bmp
                 scaleType = ImageView.ScaleType.FIT_XY
                 isClickable = false
                 isFocusable = false
                 cx = tw / 2f
                 cy = th / 2f
             }
-            active = overlay
             val lp = BaseDragLayer.LayoutParams(tw, th).apply {
                 customPosition = true
                 x = xy[0]
                 y = xy[1]
             }
             dragLayer.addView(overlay, lp)
-
-            val maxRadius = hypot(tw / 2f, th / 2f)
-            overlay.anim = ValueAnimator.ofFloat(0f, maxRadius).apply {
-                duration = REVEAL_MS
-                interpolator = DecelerateInterpolator(1.5f)
-                addUpdateListener {
-                    overlay.holeRadius = it.animatedValue as Float
-                    overlay.invalidate()
-                }
-                doOnEnd {
-                    if (active === overlay) active = null
-                    (overlay.parent as? ViewGroup)?.removeView(overlay)
-                    if (!bmp.isRecycled) bmp.recycle()
-                }
-                start()
-            }
+            overlay
         } catch (t: Throwable) {
-            Log.w(TAG, "icon reveal failed", t)
+            Log.w(TAG, "icon reveal snapshot failed", t)
+            null
+        }
+    }
+
+    /** Opens the hole on an already-added [overlay], revealing the live grid, then cleans up. */
+    private fun startWipe(overlay: RevealOverlay) {
+        // Drop any in-flight overlay so they never stack.
+        active?.takeIf { it !== overlay }?.let {
+            it.anim?.cancel()
+            (it.parent as? ViewGroup)?.removeView(it)
+        }
+        active = overlay
+        val maxRadius = hypot(overlay.cx, overlay.cy)
+        overlay.anim = ValueAnimator.ofFloat(0f, maxRadius).apply {
+            duration = REVEAL_MS
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener {
+                overlay.holeRadius = it.animatedValue as Float
+                overlay.invalidate()
+            }
+            doOnEnd {
+                if (active === overlay) active = null
+                (overlay.parent as? ViewGroup)?.removeView(overlay)
+                overlay.bmp?.let { if (!it.isRecycled) it.recycle() }
+            }
+            start()
         }
     }
 
@@ -139,6 +214,9 @@ object AresIconTransition {
         var cx = 0f
         var cy = 0f
         var anim: ValueAnimator? = null
+        // The snapshot this overlay shows; held so cleanup can recycle it on either the reveal or the
+        // freeze->play path.
+        var bmp: Bitmap? = null
         private val holePath = Path()
 
         override fun draw(canvas: Canvas) {
