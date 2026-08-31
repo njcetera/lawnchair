@@ -97,6 +97,9 @@ class AresMasonryLayoutManager(
     private var layout: AresPacker.Layout? = null
     private var scrollOffset = 0
 
+    // Scratch for fill()'s kept-widget position check; reused to avoid per-child allocation.
+    private val decorBounds = android.graphics.Rect()
+
     /** Read-only view of [scrollOffset], for the test channel. The §4 grid-jump defect (ledger
      * row 27) is an absolute jump of this value mid-drag, which layout bounds cannot show. */
     internal fun currentScrollOffset(): Int = scrollOffset
@@ -276,7 +279,18 @@ class AresMasonryLayoutManager(
 
         val l = ensureLayout(state)
         scrollOffset = scrollOffset.coerceIn(0, maxScroll(l))
-        detachAndScrapAttachedViews(recycler)
+        // Selective scrap, NOT detachAndScrapAttachedViews. Recyclable children (icons, folders)
+        // go to scrap and are re-requested from it by fill(); non-recyclable widget holders
+        // (setIsRecyclable(false)) are left ATTACHED so fill()'s recycle loop keeps them exactly as
+        // the scroll path does. A scrapped non-recyclable holder that fill() does not re-request
+        // cannot be pooled, so the old scrap-everything DESTROYED every off-screen widget on every
+        // layout pass and re-inflated it on scroll-back -- the widget FLICKER (owner 2026-08-31;
+        // measured 5 host re-creations + 5 applyContent in a single scroll). Backwards, because
+        // detachAndScrapView shifts every later child index down.
+        for (i in childCount - 1 downTo 0) {
+            val child = getChildAt(i) ?: continue
+            if (mayRecycle(child)) detachAndScrapView(child, recycler)
+        }
         fill(recycler, l)
 
         if (animateNextLayout) {
@@ -635,18 +649,34 @@ class AresMasonryLayoutManager(
             // existing == null and this is always true). Only then do we measure AND lay it out --
             // laying a stable child out every frame fired its onLayout (and an AppWidgetHostView's
             // RemoteViews relayout), which was the scroll stutter (owner 2026-08-28).
+            val left = paddingLeft + cell.x * cw
+            val targetTop = paddingTop + top - scrollOffset
+            // A KEPT widget (existing != null on the layout path, now that non-recyclable holders
+            // stay attached across the pass) is only re-laid-out when it actually MOVED. The size
+            // terms above miss a pure cell move (same footprint, new x/y -- e.g. a column change or a
+            // row spliced in above it), which without this term would leave the widget drawn at its
+            // stale spot. Compare in DECORATED-with-margins space (the exact inverse of
+            // layoutDecoratedWithMargins' args) so the check stays correct if a widget ever gains a
+            // margin or a getItemOffsets decoration -- a raw view.top/left compare would then be off
+            // by that inset on EVERY pass and re-run the RemoteViews relayout every frame, the very
+            // stutter the needsLayout gate exists to prevent (owner 2026-08-28). On a no-op pass
+            // offsetChildrenVertical kept the widget's decorated top == targetTop exactly, so this is
+            // false and the widget is neither re-measured nor re-laid-out.
+            val moved = existing != null && run {
+                getDecoratedBoundsWithMargins(view, decorBounds)
+                decorBounds.left != left || decorBounds.top != targetTop
+            }
             val needsLayout = existing == null || view.isLayoutRequested ||
-                view.measuredWidth != w || view.measuredHeight != h
+                view.measuredWidth != w || view.measuredHeight != h || moved
             if (needsLayout) {
                 view.measure(
                     View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
                 )
-                val left = paddingLeft + cell.x * cw
                 layoutDecoratedWithMargins(
                     view,
                     left,
-                    paddingTop + top - scrollOffset,
+                    targetTop,
                     left + span.w.coerceIn(1, columns) * cw,
                     paddingTop + bottom - scrollOffset,
                 )

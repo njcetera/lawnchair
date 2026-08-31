@@ -1256,17 +1256,41 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (getItemViewType(position) == TYPE_WIDGET && holder.isRecyclable) {
             holder.setIsRecyclable(false)
         }
-        holder.container.removeAllViews()
 
-        // The §C4 drop slot renders NOTHING. It exists so the packer allocates a cell and the
-        // tiles after it move aside while the item is still held; an empty container is the whole
-        // implementation. Returning here also skips the long-press listener, the affordance sync
-        // and the arrival animation below, none of which have anything to act on.
-        if (info === dropSlot) return
+        // Widget host REUSE (owner 2026-08-31): re-inflating an AppWidgetHostView is expensive and
+        // SELF-PERPETUATING. A fresh host's setAppWidget/updateAppWidget calls requestLayout, which
+        // forces a full onLayoutChildren (detachAndScrapAttachedViews), which rebinds every visible
+        // widget -- and if each rebind re-inflates, each new host requestLayouts again: a per-frame
+        // re-inflation loop for the whole scroll that reads as WIDGET FLICKER (measured on the Pixel:
+        // 27 layout passes + 30 host re-creations in a single scroll). Scrapping detaches the holder's
+        // container from the list but leaves the container's own child -- the live host view -- in
+        // place, so when a holder is rebound to the SAME widget id it already hosts, keep that host
+        // view and skip the destroy + re-inflate. That makes the rebind cheap and stops the host from
+        // requestLayout-ing, which breaks the loop. A DIFFERENT id (or a non-widget) falls through to
+        // a normal fresh inflate.
+        val reuseHost = (holder.container.getChildAt(0) as? AppWidgetHostView)
+            ?.takeIf {
+                // isWidgetIdAllocated guards the unbound/pending case: two not-yet-bound widgets both
+                // carry appWidgetId = -1 (see the duplicate-widget note above), so match on a REAL id.
+                info is LauncherAppWidgetInfo && info.isWidgetIdAllocated &&
+                    it.appWidgetId == info.appWidgetId
+            }
+        val itemView: android.view.View
+        if (reuseHost != null) {
+            itemView = reuseHost
+        } else {
+            holder.container.removeAllViews()
 
-        // inflateItem() uses attachToRoot=false, so the view is ours to add. It returns null when
-        // the model decides an item should be dropped (e.g. a widget pending deletion).
-        val itemView = launcher.itemInflater.inflateItem(info, holder.container) ?: return
+            // The §C4 drop slot renders NOTHING. It exists so the packer allocates a cell and the
+            // tiles after it move aside while the item is still held; an empty container is the whole
+            // implementation. Returning here also skips the long-press listener, the affordance sync
+            // and the arrival animation below, none of which have anything to act on.
+            if (info === dropSlot) return
+
+            // inflateItem() uses attachToRoot=false, so the view is ours to add. It returns null when
+            // the model decides an item should be dropped (e.g. a widget pending deletion).
+            itemView = launcher.itemInflater.inflateItem(info, holder.container) ?: return
+        }
 
         if (itemView is BubbleTextView) {
             applyGridStyle(itemView)
@@ -1365,13 +1389,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
             0
         }
         holder.container.setPadding(widgetInset, widgetInset, widgetInset, widgetInset)
-        holder.container.addView(
-            itemView,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
+        // A reused host view is already this container's child (we never removed it); re-adding a
+        // view that still has a parent throws. Only add a freshly inflated one.
+        if (reuseHost == null) {
+            holder.container.addView(
+                itemView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
 
         if (itemView is AppWidgetHostView) {
             pendingWidgetSizeReports[itemView] = info
@@ -1417,6 +1445,10 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private val pendingWidgetSizeReports = mutableMapOf<AppWidgetHostView, ItemInfo>()
 
+    // The last box (packed as widthDp<<32 | heightDp) reported to each host's provider, so an
+    // UNCHANGED box is never re-reported. See reportBoxSizeToProvider for why that matters.
+    private val lastReportedWidgetDp = java.util.IdentityHashMap<AppWidgetHostView, Long>()
+
     /**
      * Reports each newly-bound widget's real on-screen box to its provider.
      *
@@ -1456,6 +1488,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val widthDp = (hostView.width / density).toInt()
         val heightDp = (hostView.height / density).toInt()
         if (widthDp <= 0 || heightDp <= 0) return
+
+        // Report only when the box ACTUALLY changed. reportPendingWidgetSizes runs from onLayout, and
+        // updateAppWidgetSize prompts the provider to (re)push RemoteViews, whose updateAppWidget calls
+        // requestLayout -> another onLayoutChildren -> the widgets rebind (repopulating the pending
+        // map) -> onLayout -> report again: a per-frame loop for the whole scroll that re-inflated the
+        // widgets and read as FLICKER (owner 2026-08-31; measured 60+ layout passes in one scroll).
+        // Re-reporting an unchanged size is also just wasted work. A first report (nothing stored), a
+        // real resize, or a fold (both change the box) still fire; a scroll does not.
+        val key = (widthDp.toLong() shl 32) or (heightDp.toLong() and 0xffffffffL)
+        if (lastReportedWidgetDp[hostView] == key) return
+        lastReportedWidgetDp[hostView] = key
 
         // A fresh Bundle, never Bundle.EMPTY: updateAppWidgetSize writes the computed size keys
         // into the bundle it is handed, and Bundle.EMPTY is immutable -- passing it throws
