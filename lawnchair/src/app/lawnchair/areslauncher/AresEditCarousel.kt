@@ -96,6 +96,32 @@ object AresEditCarousel {
         commit()
     }
 
+    // Debounced icon-shape apply -- same rationale as the pack pill: each shape write is a reloadIcons
+    // that stopLoader+startLoaders the previous, so rapid tapping is coalesced to one reload on settle.
+    private var pendingShapeApply: (() -> Unit)? = null
+    private var pendingShapeView: View? = null
+    private var pendingShapeRunnable: Runnable? = null
+
+    private fun flushPendingShape() {
+        pendingShapeRunnable?.let { pendingShapeView?.removeCallbacks(it) }
+        pendingShapeRunnable = null
+        pendingShapeView = null
+        val commit = pendingShapeApply ?: return
+        pendingShapeApply = null
+        commit()
+    }
+
+    /**
+     * Show the sparkle veil over the home, then lift the settings pill back ABOVE it so the control the
+     * user just touched stays visible on top of the animation (owner 2026-08-31). The veil and the
+     * carousel are both children of the drag layer and the veil is added last, so without this it
+     * would cover the pill.
+     */
+    private fun coverHome(launcher: Launcher, list: AresHomeListView) {
+        AresIconTransition.freeze(launcher, list)
+        view?.bringToFront()
+    }
+
     /**
      * Applies an icon pack: invalidate the STALE disk-cache icons for the apps shown on home, then
      * write the pack pref (whose change hook clears the memory cache + reloads the model).
@@ -257,6 +283,10 @@ object AresEditCarousel {
         pendingIconPackRunnable = null
         pendingIconPackView = null
         pendingIconPackApply = null
+        pendingShapeRunnable?.let { pendingShapeView?.removeCallbacks(it) }
+        pendingShapeRunnable = null
+        pendingShapeView = null
+        pendingShapeApply = null
         AresIconTransition.cancel()
         view?.let {
             it.animate().cancel()
@@ -271,6 +301,7 @@ object AresEditCarousel {
         // tap still applies it (this runs the plain pref write, no freeze -- there is no grid to
         // reveal on the way out).
         flushPendingIconPack()
+        flushPendingShape()
         AresIconTransition.cancel()
         val v = view ?: return
         view = null
@@ -486,8 +517,10 @@ object AresEditCarousel {
                 if (syncing) return@setOnCheckedChangeListener
                 enabled = checked
                 updateControls()
-                // Dissolve old icons into the newly (un)themed ones instead of a one-frame pop.
-                AresIconTransition.reveal(launcher, list)
+                // Cover the home with the sparkle veil, then dissolve it only once the re-themed icons
+                // have actually bound (a theme toggle is a reloadIcons -> finishBindingItems ->
+                // playFrozen, same async path as shape/pack).
+                coverHome(launcher, list)
                 persist()
             }
         }
@@ -569,15 +602,32 @@ object AresEditCarousel {
             cells[i].isChosen = true
             bounce(cells[i])
             strip.centerOn(i)
-            // Dissolve old-shape icons into the new shape instead of a one-frame pop.
-            AresIconTransition.reveal(launcher, list)
-            (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
+            // Cover the home with the sparkle veil IMMEDIATELY (freeze is a no-op if one is already
+            // up, so tapping through shapes keeps the single veil). DEBOUNCE the pref write like the
+            // pack pill: each write is a reloadIcons that stopLoader+startLoaders the previous, so
+            // rapid tapping would otherwise thrash the loader and could dissolve the veil on an
+            // intermediate reload. One reload fires when the user settles; its bind-complete
+            // (finishBindingItems -> playFrozen) dissolves the veil over the finished new shape.
+            coverHome(launcher, list)
+            val chosen = choices[i].shape
+            pendingShapeApply = {
                 // Folders follow the icon shape (owner 2026-08-27): a circle folder in a grid of
                 // squircles looks out of place, and the folder's preview grid already distinguishes
                 // it from an app. Set both so picking a shape reshapes icons AND folders.
-                prefs.iconShape.set(choices[i].shape)
-                prefs.folderShape.set(choices[i].shape)
+                (launcher as? LawnchairLauncher)?.lifecycleScope?.launch {
+                    prefs.iconShape.set(chosen)
+                    prefs.folderShape.set(chosen)
+                }
             }
+            pendingShapeView = strip
+            pendingShapeRunnable?.let { strip.removeCallbacks(it) }
+            pendingShapeRunnable = Runnable {
+                pendingShapeRunnable = null
+                pendingShapeView = null
+                val commit = pendingShapeApply ?: return@Runnable
+                pendingShapeApply = null
+                commit()
+            }.also { strip.postDelayed(it, ICON_PACK_APPLY_DEBOUNCE_MS) }
         }
         cells = choices.mapIndexed { i, choice ->
             ShapeCell(ctx, choice.shape, tonal, onTonal).apply {
@@ -653,12 +703,15 @@ object AresEditCarousel {
             cells[i].isChosen = true
             bounce(cells[i])
             strip.centerOn(i)
-            // Update the pill instantly, but DEBOUNCE the apply (see [pendingIconPackApply]): each
-            // apply is a full model reload that cancels+restarts the previous, so clicking through
+            // Show the sparkle cover IMMEDIATELY on tap (owner 2026-08-31: it must start on the click,
+            // not after the debounce) -- freeze() is a no-op if a cover is already up, so clicking
+            // through packs keeps the one veil. Then DEBOUNCE the apply (see [pendingIconPackApply]):
+            // each apply is a full model reload that cancels+restarts the previous, so clicking through
             // packs must not fire one reload per tap. commit() writes the pref (a no-op-safe flush on
-            // edit-mode exit runs the same lambda). The debounce timer additionally FREEZES the grid
-            // first: unlike shape/tint (which apply on the next draw) a pack change is an async
-            // reload, so LawnchairLauncher.finishBindingItems wipes to the finished new grid.
+            // edit-mode exit runs the same lambda). Because a pack change is an async reload (unlike
+            // shape/tint, which apply on the next draw), the cover holds until
+            // LawnchairLauncher.finishBindingItems (playFrozen) dissolves it over the finished new grid.
+            coverHome(launcher, list)
             val pkg = choices[i].packageName
             pendingIconPackApply = { commitIconPack(ctx, list, prefs, pkg) }
             pendingIconPackView = strip
@@ -668,7 +721,6 @@ object AresEditCarousel {
                 pendingIconPackView = null
                 val commit = pendingIconPackApply ?: return@Runnable
                 pendingIconPackApply = null
-                AresIconTransition.freeze(launcher, list)
                 commit()
             }.also { strip.postDelayed(it, ICON_PACK_APPLY_DEBOUNCE_MS) }
         }
