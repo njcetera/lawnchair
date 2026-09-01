@@ -58,4 +58,8 @@
         <item quantity="other"><xliff:g id="count" example="4">%1$d</xliff:g> columns</item>
     </plurals>
 
+    <!-- Edit-mode carousel action pill that opens the widget picker (owner 2026-08-31). Same action
+         as the "Widgets" button in the empty-space long-press menu; labelled for the action it does. -->
+    <string name="ares_add_widget_pill">Add Widget</string>
+
 </resources>

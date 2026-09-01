@@ -43,8 +43,10 @@ import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
 import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.popup.SystemShortcut
 import com.android.launcher3.util.Executors
 import com.android.launcher3.views.BaseDragLayer
+import com.android.launcher3.views.OptionsPopupView
 import com.patrykmichalik.opto.core.firstBlocking
 import kotlin.math.abs
 import kotlinx.coroutines.launch
@@ -167,6 +169,7 @@ object AresEditCarousel {
      * page.
      */
     private val pageBuilders: List<(Launcher, AresHomeListView) -> List<Pill>> = listOf(
+        ::buildActionsPage,
         ::buildColumnPage,
         ::buildTintPage,
         ::buildShapePage,
@@ -352,7 +355,9 @@ object AresEditCarousel {
                     LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { marginStart = if (i == 0) 0 else dpOf(ctx, 8f) },
+                        // Small gap so a multi-pill page (the wallpaper + widget action pair) reads as
+                        // a connected group squished toward the middle, not two separate pills.
+                    ).apply { marginStart = if (i == 0) 0 else dpOf(ctx, 4f) },
                 )
             }
         }
@@ -449,6 +454,94 @@ object AresEditCarousel {
         }
         refreshFn()
         return Pill(row, refreshFn)
+    }
+
+    // ---- action pills: wallpaper & style + add widget (one shared page) -----------------------
+    // Two shortcut pills that fire the SAME handlers as the "Wallpaper & style" and "Widgets"
+    // buttons in the empty-space long-press menu (owner 2026-08-31), so edit mode reaches both
+    // without leaving it for the long-press menu. They share ONE carousel page (side by side, one
+    // dot) rather than a page each (owner).
+
+    /** Which end of an action pill keeps the full pill radius; the other end is flattened to connect. */
+    private enum class PillEnd { START, END }
+
+    private fun buildActionsPage(launcher: Launcher, list: AresHomeListView): List<Pill> =
+        listOf(
+            buildActionPill(
+                launcher,
+                R.drawable.ic_palette,
+                R.string.styles_wallpaper_button_text,
+                PillEnd.START,
+            ) { v -> OptionsPopupView.startWallpaperPicker(v) },
+            buildActionPill(
+                launcher,
+                SystemShortcut.Widgets.getDrawableId(),
+                R.string.ares_add_widget_pill,
+                PillEnd.END,
+            ) { v -> OptionsPopupView.onWidgetsClicked(v) },
+        )
+
+    /**
+     * A single-tap action pill: an icon + label on the pill surface, the whole pill clickable. The
+     * pill mirrors a long-press-menu button, so tapping it just runs that button's handler; there is
+     * no state to reflect, so its refresh is a no-op.
+     *
+     * [roundedSide] shapes it as one half of a connected pair (M3 connected-button-group look, like
+     * the grouped search results): the named end keeps the full pill radius, the facing inner end is
+     * flattened so the two pills read as squished together toward the middle.
+     */
+    private fun buildActionPill(
+        launcher: Launcher,
+        iconRes: Int,
+        labelRes: Int,
+        roundedSide: PillEnd,
+        onClick: (View) -> Unit,
+    ): Pill {
+        val ctx: Context = launcher
+        fun color(res: Int) = ContextCompat.getColor(ctx, res)
+        val surface = color(R.color.materialColorSurfaceContainerHigh)
+        val tonal = color(R.color.materialColorPrimary)
+
+        val icon = ImageView(ctx).apply {
+            setImageResource(iconRes)
+            imageTintList = ColorStateList.valueOf(tonal)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+        }
+        // Hug the text (drop pillLabel's 104dp min-width) so two labelled pills fit on one page.
+        val label = pillLabel(ctx, tonal).apply {
+            text = ctx.getString(labelRes)
+            minWidth = 0
+        }
+        val row = pillRow(ctx, surface).apply {
+            // Asymmetric corners for the connected pair: full radius on the outer end, a small radius
+            // on the inner (facing) end. cornerRadii order is TL, TR, BR, BL (x/y pairs). LTR layout.
+            (background as? GradientDrawable)?.let { bg ->
+                val big = dpOf(ctx, 32f).toFloat()
+                val small = dpOf(ctx, 8f).toFloat()
+                bg.cornerRadii = if (roundedSide == PillEnd.START) {
+                    floatArrayOf(big, big, small, small, small, small, big, big) // round left, flat right
+                } else {
+                    floatArrayOf(small, small, big, big, big, big, small, small) // flat left, round right
+                }
+            }
+            addView(
+                icon,
+                // 46dp-tall box (the same height the other pills' controls use) so this pill matches
+                // their height; CENTER_INSIDE keeps the glyph itself at ~28dp, centred (owner 2026-09-01).
+                LinearLayout.LayoutParams(dpOf(ctx, 28f), dpOf(ctx, 46f)).apply {
+                    marginStart = dpOf(ctx, 6f)
+                },
+            )
+            addView(
+                label,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            setOnClickListener { onClick(it) }
+        }
+        return Pill(row) { }
     }
 
     // ---- pill 2: icon theming (Material You) --------------------------------------------------

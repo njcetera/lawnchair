@@ -233,7 +233,9 @@ public class OptionsPopupView<T extends Context & ActivityContext> extends Arrow
         return true;
     }
 
-    private static boolean onWidgetsClicked(View view) {
+    // AresLauncher: public so the edit-mode carousel's "Add Widget" pill can trigger the exact same
+    // action as the long-press menu's Widgets button (owner 2026-08-31).
+    public static boolean onWidgetsClicked(View view) {
         return Launcher.getLauncher(view.getContext()).openWidgetPicker();
     }
 
@@ -251,7 +253,9 @@ public class OptionsPopupView<T extends Context & ActivityContext> extends Arrow
      * Event handler for the wallpaper picker button that appears after a long press
      * on the home screen.
      */
-    private static boolean startWallpaperPicker(View v) {
+    // AresLauncher: public so the edit-mode carousel's "Wallpaper & style" pill can trigger the exact
+    // same action as the long-press menu's wallpaper button (owner 2026-08-31).
+    public static boolean startWallpaperPicker(View v) {
         Launcher launcher = Launcher.getLauncher(v.getContext());
         if (!Utilities.isWallpaperAllowed(launcher)) {
             String message = launcher.getStringCache() != null
