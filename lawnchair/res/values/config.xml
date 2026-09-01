@@ -173,7 +173,9 @@
          of the page. The offset logic is deliberately kept (it reads the pinned item's bounds and
          returns 0 when absent), so re-enabling this in settings still lays out correctly. -->
     <bool name="config_default_enable_smartspace">false</bool>
-    <bool name="config_default_enable_feed">false</bool>
+    <!-- AresLauncher 2026-09-01: default the Google Discover "-1" feed ON to test whether the Google
+         app's DrawerOverlayService binds + renders for our caller package (design/discover-feed-investigation.md). -->
+    <bool name="config_default_enable_feed">true</bool>
     <bool name="config_default_enable_icon_selection">false</bool>
     <bool name="config_default_show_component_names">false</bool>
     <bool name="config_default_smartspace_show_date">true</bool>
