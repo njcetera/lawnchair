@@ -275,6 +275,29 @@ public class LauncherClient {
         }
     }
 
+    /**
+     * Force GSB to rebuild its overlay window at the current display size, on the LIVE binder.
+     *
+     * A plain redraw()/exchangeConfig() re-sends windowAttached2 on the same token, which GSB ignores
+     * for an already-attached window whose geometry it has latched (confirmed on a Pixel Fold: after a
+     * display switch the overlay window keeps the previous display's size, and neither a same-token
+     * redraw nor an open/close visibility bounce shakes it loose). An explicit windowDetached() first
+     * makes the following windowAttached2() a genuine re-attach, so GSB tears the window down and
+     * rebuilds it for the size exchangeConfig() reads NOW. Unlike setLayoutParams(null) this does NOT
+     * null mOverlay, so the re-attach happens synchronously on the same binder; unlike reconnect() there
+     * is no unbind, no RESUMED gate, and no service-rebind churn. Call this once the launcher has
+     * actually settled at the new display size (see OverlayCallbackImpl's fold size-watcher).
+     */
+    public final void reattach() {
+        if (mOverlay != null && mLayoutParams != null) {
+            try {
+                mOverlay.windowDetached(mActivity.isChangingConfigurations());
+            } catch (RemoteException ignored) {
+            }
+            exchangeConfig();
+        }
+    }
+
     public final void exchangeConfig() {
         if (mOverlay != null) {
             try {
