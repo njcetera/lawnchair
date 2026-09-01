@@ -833,8 +833,9 @@ class LawnchairLauncher : QuickstepLauncher() {
         private const val FLAG_RECREATE = 1 shl 0
         private const val FLAG_RESTART = 1 shl 1
 
-        // §9 app-list wallpaper dim fade timings (owner: long, gentle 2s fade both ways).
-        private const val APP_LIST_DIM_FADE_IN_MS = 2000L
+        // §9 app-list wallpaper dim fade timings. Fade-in shortened to darken slightly faster on
+        // arrival (owner 2026-08-31); fade-out kept at the original gentle 2s.
+        private const val APP_LIST_DIM_FADE_IN_MS = 1500L
         private const val APP_LIST_DIM_FADE_OUT_MS = 2000L
 
         // How long the launcher must have been backgrounded for a return to reset the home list to
