@@ -18,13 +18,20 @@
 
      Stroke, no fill, no backdrop: a filled shape here would be the button we are getting away from.
      In edit mode this always sits on the frost box, which is what it reads against.
+
+     Coloured to MATCH the remove badge's X mark (owner 2026-08-31): the same
+     @color/ares_edit_badge_icon (materialColorOnPrimaryContainer) the close cross is drawn in, so
+     the hook reads as the same themed "ink" as the X. It is a stroke like the X, so it takes the
+     GLYPH colour, not the darker container the badge circle is filled with (that read too dark).
+     Using the badge's own resource, rather than a separately resolved Material You colour, keeps
+     them identical.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="22dp"
     android:height="22dp"
     android:viewportWidth="22"
     android:viewportHeight="22"
-    android:tint="?android:attr/textColorPrimary">
+    android:tint="@color/ares_edit_badge_icon">
 
     <path
         android:pathData="M10,19 H13 A6,6 0 0 0 19,13 V10"
