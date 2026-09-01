@@ -1042,12 +1042,21 @@ object AresEditCarousel {
             val from = pages[currentIdx]
             val toIdx = wrap(currentIdx + dir)
             val to = pages[toIdx]
-            val w = (if (width > 0) width else from.width).toFloat().coerceAtLeast(1f)
+            // Travel far enough to clear the actual SCREEN edge, not just the pager's own bounds. The
+            // pager is WRAP_CONTENT and centred on screen, so translating by `width` (~one pill wide)
+            // stopped the outgoing pill at the pager edge and flipped it INVISIBLE there -- but with
+            // clipChildren=false it was still on screen in the space beside the pager, so it "stopped
+            // early and derendered" instead of sliding off the edge (owner 2026-08-31). Clear the near
+            // edge: half the screen (pill sits centred) + half the pill + a small margin.
+            val screenW = rootView?.width?.takeIf { it > 0 }?.toFloat()
+                ?: resources.displayMetrics.widthPixels.toFloat()
+            val pageW = (if (from.width > 0) from.width else width).toFloat().coerceAtLeast(1f)
+            val travel = screenW / 2f + pageW / 2f + 8f * resources.displayMetrics.density
             // Incoming enters from the side the finger is heading toward.
             to.visibility = View.VISIBLE
-            to.translationX = dir * w
-            to.animate().translationX(0f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
-            from.animate().translationX(-dir * w).setDuration(220).setInterpolator(DecelerateInterpolator())
+            to.translationX = dir * travel
+            to.animate().translationX(0f).setDuration(260).setInterpolator(DecelerateInterpolator()).start()
+            from.animate().translationX(-dir * travel).setDuration(260).setInterpolator(DecelerateInterpolator())
                 .withEndAction {
                     from.visibility = View.INVISIBLE
                     from.translationX = 0f
