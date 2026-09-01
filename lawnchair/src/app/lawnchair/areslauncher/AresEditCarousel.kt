@@ -39,7 +39,11 @@ import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.ui.preferences.iconPackIntents
 import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
+import com.android.launcher3.model.data.FolderInfo
+import com.android.launcher3.model.data.ItemInfo
+import com.android.launcher3.util.Executors
 import com.android.launcher3.views.BaseDragLayer
 import com.patrykmichalik.opto.core.firstBlocking
 import kotlin.math.abs
@@ -90,6 +94,41 @@ object AresEditCarousel {
         val commit = pendingIconPackApply ?: return
         pendingIconPackApply = null
         commit()
+    }
+
+    /**
+     * Applies an icon pack: invalidate the STALE disk-cache icons for the apps shown on home, then
+     * write the pack pref (whose change hook clears the memory cache + reloads the model).
+     *
+     * Why the invalidation. A pack change otherwise binds home in ~0.4s but with the OLD icons --
+     * `loadWorkspace` serves them from the disk cache, which `reloadIcons` does NOT clear (memory
+     * only) -- and the new pack icons reach the grid only via a lazy background revalidation
+     * dispatched ~12s later (measured on the Pixel, owner 2026-08-31: the same tiles re-bind twice,
+     * old bitmap then new ~12s on). Deleting the home apps' disk entries first forces `loadWorkspace`
+     * to regenerate those icons fresh from the new pack, so home shows the new look on the first
+     * bind. Scoped to the home apps (and folder children); the drawer keeps the lazy path.
+     *
+     * On MODEL_EXECUTOR (the serial "launcher-loader" thread): it lands BEFORE the reload task the
+     * pref write enqueues on that same executor, and keeps the DB deletes off the main thread.
+     */
+    private fun commitIconPack(
+        ctx: Context,
+        list: AresHomeListView,
+        prefs: PreferenceManager,
+        pkg: String,
+    ) {
+        val iconCache = LauncherAppState.INSTANCE.get(ctx).iconCache
+        val keys = LinkedHashSet<Pair<String, android.os.UserHandle>>()
+        fun add(info: ItemInfo) {
+            info.targetComponent?.packageName?.let { keys.add(it to info.user) }
+        }
+        for (info in list.aresAdapter.snapshot()) {
+            if (info is FolderInfo) info.getContents().forEach(::add) else add(info)
+        }
+        Executors.MODEL_EXECUTOR.execute {
+            keys.forEach { (p, u) -> iconCache.removeIconsForPkg(p, u) }
+        }
+        prefs.iconPackPackage.set(pkg)
     }
 
     /** One personalization pill: its control view plus a hook to re-evaluate enabled/disabled state. */
@@ -621,7 +660,7 @@ object AresEditCarousel {
             // first: unlike shape/tint (which apply on the next draw) a pack change is an async
             // reload, so LawnchairLauncher.finishBindingItems wipes to the finished new grid.
             val pkg = choices[i].packageName
-            pendingIconPackApply = { prefs.iconPackPackage.set(pkg) }
+            pendingIconPackApply = { commitIconPack(ctx, list, prefs, pkg) }
             pendingIconPackView = strip
             pendingIconPackRunnable?.let { strip.removeCallbacks(it) }
             pendingIconPackRunnable = Runnable {
