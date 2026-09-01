@@ -141,6 +141,12 @@ object LauncherOptionsPopup {
             .filter {
                 (it.isEnabled && it.identifier != "carousel")
             }
+            // AresLauncher: never show "Home settings" in the empty-space long-press menu. It opens
+            // the stock Lawnchair home-settings screen, which conflicts with Ares' own launcher
+            // settings and reads as confusing (owner 2026-08-31). Filtered here (the single chokepoint
+            // both the carousel and default menu paths funnel through) so it is hidden regardless of
+            // what the stored launcherPopupOrder preference says.
+            .filter { it.identifier != "home_settings" }
             .filter {
                 if (lockHomeScreen) {
                     it.identifier != "edit_mode" && it.identifier != "widgets"
