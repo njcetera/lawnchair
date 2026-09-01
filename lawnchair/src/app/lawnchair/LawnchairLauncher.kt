@@ -23,6 +23,7 @@ import android.content.Intent
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Pair
 import android.view.Display
 import android.view.View
@@ -741,6 +742,15 @@ class LawnchairLauncher : QuickstepLauncher() {
         super.onStop()
         aresWasStopped = true
         aresStoppedAt = android.os.SystemClock.elapsedRealtime()
+        // Leave edit mode when the SCREEN turns off / device locks (owner 2026-08-31) -- so the
+        // launcher doesn't come back into edit mode after unlock. Gated on !isInteractive so this
+        // fires for a screen-off/lock but NOT for merely switching to another app or recents (where
+        // the screen stays on and leaving edit mode would be surprising). exitEditMode is a no-op
+        // when not editing.
+        val interactive = getSystemService(PowerManager::class.java)?.isInteractive ?: true
+        if (!interactive) {
+            workspace?.aresHomeList?.exitEditMode()
+        }
     }
 
     override fun onStateSetEnd(state: LauncherState) {
