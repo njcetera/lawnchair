@@ -499,6 +499,10 @@ class LawnchairLauncher : QuickstepLauncher() {
         // Bind-complete = the reloaded icons are on the grid. If an icon-pack pick froze the old grid
         // (AresEditCarousel), wipe to the finished new one now; a no-op otherwise.
         AresIconTransition.playFrozen(this, workspace?.aresHomeList)
+        // §22 dual-pane: setInsets posts the dual-pane sync during an unfold's rebind, so prune bails
+        // on isWorkspaceLoading and the widget-bearing (visually empty) screens survive as blank pages
+        // to the right unfolded. Re-run the idempotent sync now that binding is done (owner 2026-09-01).
+        workspace?.aresResyncDualPaneAfterBind()
     }
 
     override fun handleGestureContract(intent: Intent) {

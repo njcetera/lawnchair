@@ -451,6 +451,20 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * AresLauncher (owner 2026-09-01): re-run the dual-pane sync after a BIND completes.
+     *
+     * <p>An unfold triggers a rebind, and {@link #setInsets(Rect)} posts {@link #syncAresDualPane()}
+     * while that load is still in flight -- so {@link #pruneAresStrayPages()} hits its
+     * {@code isWorkspaceLoading()} guard and bails, and nothing re-prunes once the load finishes.
+     * The widget-bearing screens (whose content Strategy D flattens into the home list, leaving the
+     * page itself empty) therefore survive as blank pages to the right unfolded. Re-posting the
+     * idempotent sync here, from {@code finishBindingItems}, runs prune on the settled grid.
+     */
+    public void aresResyncDualPaneAfterBind() {
+        postSyncAresDualPane();
+    }
+
+    /**
      * AresLauncher §22: the complete unfolded dual-pane invariant, re-asserted from scratch.
      *
      * <p>Three things must hold together, and asserting only some of them is what left the user
