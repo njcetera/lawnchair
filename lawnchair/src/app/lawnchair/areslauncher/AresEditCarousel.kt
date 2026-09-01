@@ -250,7 +250,16 @@ object AresEditCarousel {
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            bottomMargin = dp(2f) + launcher.deviceProfile.insets.bottom
+            // Clear the home gesture bar. deviceProfile.insets.bottom is reduced/zero on the unfolded
+            // panel under the edge-to-edge home (§21), which dropped the pills onto the gesture handle
+            // (owner 2026-09-01, unfolded). Take the LIVE navigation/gesture inset from the window and
+            // use the larger of the two, so the folded case (where the profile inset was already right)
+            // is unchanged while the unfolded case is lifted above the handle.
+            val navInset = launcher.dragLayer.rootWindowInsets?.getInsets(
+                android.view.WindowInsets.Type.navigationBars() or
+                    android.view.WindowInsets.Type.mandatorySystemGestures(),
+            )?.bottom ?: 0
+            bottomMargin = dp(2f) + maxOf(launcher.deviceProfile.insets.bottom, navInset)
         }
         launcher.dragLayer.addView(container, lp)
         view = container
