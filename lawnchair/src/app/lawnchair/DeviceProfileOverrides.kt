@@ -58,12 +58,14 @@ class DeviceProfileOverrides @Inject constructor(
     fun getOverrides(
         defaultGrid: InvariantDeviceProfile.GridOption,
         deviceType: Int,
+        isFoldable: Boolean = false,
         previewOverrides: PreviewOverrides? = null,
     ) = Options(
         prefs = prefs,
         prefs2 = preferenceManager2,
         defaultGrid = defaultGrid,
         deviceType = deviceType,
+        isFoldable = isFoldable,
         previewOverrides = previewOverrides ?: PreviewOverrides(),
     )
 
@@ -115,6 +117,7 @@ class DeviceProfileOverrides @Inject constructor(
             prefs2: PreferenceManager2,
             defaultGrid: InvariantDeviceProfile.GridOption,
             deviceType: Int,
+            isFoldable: Boolean,
             previewOverrides: PreviewOverrides,
         ) : this(
             numAllAppsColumns = prefs2.drawerColumns.firstCached(gridOption = defaultGrid),
@@ -142,12 +145,12 @@ class DeviceProfileOverrides @Inject constructor(
             } else {
                 -1
             },
-            foldableDatabaseHotseatIcons = if (deviceType == InvariantDeviceProfile.TYPE_MULTI_DISPLAY) {
+            foldableDatabaseHotseatIcons = if (isFoldableDevice(deviceType, isFoldable)) {
                 previewOverrides.foldableDatabaseHotseatIcons ?: prefs.hotseatColumnsUnfolded.get()
             } else {
                 -1
             },
-            foldableDatabaseAllAppsColumns = if (deviceType == InvariantDeviceProfile.TYPE_MULTI_DISPLAY) {
+            foldableDatabaseAllAppsColumns = if (isFoldableDevice(deviceType, isFoldable)) {
                 val folded = prefs2.drawerColumns.firstCached(gridOption = defaultGrid)
                 val unfolded = prefs2.drawerColumnsUnfolded.firstCached(gridOption = defaultGrid)
                 folded.coerceAtLeast(unfolded)
@@ -233,3 +236,20 @@ class DeviceProfileOverrides @Inject constructor(
         val INSTANCE = DaggerSingletonObject(LauncherAppComponent::getDPO)
     }
 }
+
+/**
+ * Whether the foldable hotseat / drawer-column overrides should apply.
+ *
+ * `deviceType` describes the CURRENT posture: on a fold it is TYPE_MULTI_DISPLAY while open and
+ * TYPE_PHONE while closed. Gating the overrides on it meant they silently stopped applying when
+ * folded, so `numDatabaseHotseatIcons` and `numDatabaseAllAppsColumns` changed on every posture
+ * change (measured 6->4 and back, 2026-09-01). Launcher3 treats a change in either as a grid change
+ * and answers with `forceReload()` -- a full database reload whose bind lands ~1.7s later and tears
+ * the workspace down a second time, which is what the owner saw as a late app-list flicker.
+ *
+ * The override values are themselves posture-independent (a min, a max, and the unfolded pref), so
+ * they were always meant to be constant; only the gate was posture-dependent. `isFoldable` comes
+ * from the hinge-angle system feature and does not change with posture.
+ */
+private fun isFoldableDevice(deviceType: Int, isFoldable: Boolean): Boolean =
+    deviceType == InvariantDeviceProfile.TYPE_MULTI_DISPLAY || isFoldable

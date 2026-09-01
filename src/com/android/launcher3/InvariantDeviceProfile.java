@@ -449,7 +449,8 @@ public class InvariantDeviceProfile {
         mLocale = context.getResources().getConfiguration().locale.toString();
 
          DeviceProfileOverrides.Options overrideOptions = DeviceProfileOverrides.INSTANCE.get(context)
-                 .getOverrides(displayOption.grid, displayInfo.getDeviceType(), previewOverrides);
+                 .getOverrides(displayOption.grid, displayInfo.getDeviceType(),
+                         displayInfo.isFoldable(), previewOverrides);
         DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         GridOption closestProfile = displayOption.grid;
         numRows = dbGridInfo.getNumRows();

@@ -727,6 +727,20 @@ public class DisplayController implements DesktopVisibilityListener {
             return mStableDensityScaleFactor;
         }
 
+        /**
+         * Whether this device is a foldable, independent of its CURRENT posture.
+         *
+         * <p>{@link #getDeviceType()} answers "what does the screen look like right now", which on a
+         * foldable flips between TYPE_PHONE and TYPE_MULTI_DISPLAY as it is opened and closed. Code
+         * that must stay stable across a fold needs this instead -- see DeviceProfileOverrides, where
+         * gating the foldable hotseat/drawer column overrides on the posture-dependent answer made two
+         * model properties change on every fold, which Launcher3 reads as a grid change and answers
+         * with a full database reload.
+         */
+        public boolean isFoldable() {
+            return mIsFoldable;
+        }
+
         public @DeviceType int getDeviceType() {
             if (mIsDesktopFormFactor) {
                 Log.d("LC-DisplayController", "Device has desktop profile (Desktop)");
