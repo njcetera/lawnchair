@@ -561,21 +561,46 @@ class AresMasonryLayoutManager(
     private fun mayRecycle(child: View): Boolean =
         host?.getChildViewHolder(child)?.isRecyclable ?: true
 
-    /** True when the cell at [position] is on **screen** at the current [scrollOffset]. */
+    /**
+     * True when the cell at [position] should be laid out at the current [scrollOffset].
+     *
+     * This is deliberately NOT a tight viewport test. An [overscanPx] band above and below the
+     * screen is included so off-page tiles are laid out -- and therefore MEASURED -- before they
+     * scroll into view. A widget's RemoteViews layout only runs the first time its host view is
+     * measured, and when that first measure happened as the widget entered the viewport it showed as
+     * the "widgets loading in as I scroll" flicker on the first scroll after returning home (owner
+     * 2026-08-31). Pre-measuring off-page moves that work off the scroll: [scrollVerticallyBy] then
+     * only OFFSETS these already-measured children (see [fill]'s `moved`/`needsLayout` gate), so no
+     * tile renders in mid-scroll.
+     */
     private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int): Boolean {
         if (position !in l.cells.indices) return false
         val pad = expandedPad(position)
         val top = l.cells[position].y * ch + pad
         val bottom = top + spanProvider.getSpan(position).h.coerceAtLeast(1) * ch
-        // Judge against the FULL screen [0, height], not the padding-inset content box: with
-        // clipToPadding=false the top/bottom padding is real on-screen scroll space, so a cell moving
-        // through it must stay laid out rather than be recycled at the content edge. Recycling at the
-        // content edge is what made tiles "de-render" scrolling into a large top/bottom padding
-        // (owner) -- they should render across the whole page. A cell is drawn at screen
-        // y = paddingTop + cellTop - scrollOffset, so it is on screen when that range overlaps [0, height].
-        return paddingTop + bottom - scrollOffset > 0 &&
-            paddingTop + top - scrollOffset < height
+        // Judge against the FULL screen [0, height] grown by the overscan band, not the padding-inset
+        // content box: with clipToPadding=false the top/bottom padding is real on-screen scroll space,
+        // so a cell moving through it must stay laid out rather than be recycled at the content edge.
+        // Recycling at the content edge is what made tiles "de-render" scrolling into a large top/
+        // bottom padding (owner) -- they should render across the whole page. A cell is drawn at screen
+        // y = paddingTop + cellTop - scrollOffset, so it is laid out when that range overlaps
+        // [-overscan, height + overscan].
+        val over = overscanPx(l)
+        return paddingTop + bottom - scrollOffset > -over &&
+            paddingTop + top - scrollOffset < height + over
     }
+
+    /**
+     * Height of the off-screen pre-render band on each side of the viewport, in px.
+     *
+     * Sized to the whole scrollable content ([contentHeight]) so the ENTIRE grid is pre-rendered
+     * off-page -- the owner's ask (render everything so nothing renders in mid-scroll). It is bounded
+     * by the real content height, so it can never lay out more than the grid actually holds; a scroll
+     * on the fully-laid-out grid is then pure offsetting with no re-measures. Kept as one knob so the
+     * band can be dialled back to a few screens if a very tall grid ever makes the up-front layout
+     * (which runs behind the home-return reveal) too heavy.
+     */
+    private fun overscanPx(l: AresPacker.Layout): Int = contentHeight(l).coerceAtLeast(0)
 
     /**
      * Attaches, measures and positions every item whose cell rect intersects the viewport, and
