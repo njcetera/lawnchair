@@ -143,9 +143,6 @@ class PreferenceManager2 @Inject constructor(
                 ?: IconShapeManager.getSystemIconShape(context)
         },
         save = { it.toString() },
-        onSet = {
-            reloadHelper.reloadIcons()
-        },
     )
 
     val folderShape = preference(
@@ -159,9 +156,6 @@ class PreferenceManager2 @Inject constructor(
                 ?: IconShapeManager.getSystemIconShape(context)
         },
         save = { it.toString() },
-        onSet = {
-            reloadHelper.reloadIcons()
-        },
     )
 
     val customIconShape = preference(
@@ -399,17 +393,18 @@ class PreferenceManager2 @Inject constructor(
      * tint is on, and its strength 20..100 (unified intensity: cross-fades every icon from normal ->
      * accent-monochrome; see [app.lawnchair.areslauncher.AresIconTint]).
      *
-     * `onSet` runs `reloadHelper.reloadIcons()` -- the SAME icon-cache clear + `reloadIfActive` the
-     * `iconShape` pref uses. That is an **icon reload, NOT a recreate**: it re-renders icons in place
-     * and keeps the user in edit mode (proven by the shape pill). The thing that must never happen
-     * on a mid-edit pref write is a `recreate()` (that dropped the user out of edit mode -- see
-     * defect-ledger 2026-08-26 / the distinctUntilChanged-before-drop fix); `reloadIcons()` is not
-     * one, so it is safe here.
+     * Deliberately has NO `onSet`. [app.lawnchair.icons.LawnchairThemeManager] already observes this
+     * pref and fires `onThemeChanged` -> `ModelInitializer.refreshAndReloadLauncher` ->
+     * `forceReload()`, which clears the icon memory cache AND the icon DB (`updateIconParams`) --
+     * strictly more than `reloadIcons()`'s memory-only clear. Adding `onSet = { reloadIcons() }` on top
+     * raised a SECOND `forceReload()` ~33ms later that cancelled the first mid-flight and re-bound
+     * the app list twice; that was the app-list flicker on a theme change (measured 2026-09-01).
+     * Still an **icon reload, NOT a recreate**, so the user stays in edit mode -- the thing that must
+     * never happen on a mid-edit pref write is a `recreate()` (defect-ledger 2026-08-26).
      */
     val aresIconTintEnabled = preference(
         key = booleanPreferencesKey(name = "ares_icon_tint_enabled"),
         defaultValue = false,
-        onSet = { reloadHelper.reloadIcons() },
     )
 
     val aresIconTintStrength = preference(
@@ -928,10 +923,14 @@ class PreferenceManager2 @Inject constructor(
         iconShape.get()
             .distinctUntilChanged()
             .drop(1)
+            // No reloadIfActive() here: LawnchairThemeManager observes iconShape too and its
+            // onThemeChanged -> refreshAndReloadLauncher already does a stronger forceReload
+            // (icon memory cache AND icon DB). Reloading here as well raised a duplicate load that
+            // was cancelled mid-flight -- measured 2026-09-01. initializeIconShape() is the real
+            // work this collector exists for and stays.
             .onEach { shape ->
                 initializeIconShape(shape)
                 L3ThemeManager.INSTANCE.get(context)
-                LauncherAppState.getInstance(context).model.reloadIfActive()
             }
             .launchIn(scope)
 
