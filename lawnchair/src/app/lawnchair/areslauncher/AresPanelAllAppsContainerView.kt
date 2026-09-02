@@ -112,14 +112,32 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         )
     }
 
+    /**
+     * Whether the base class's window registrations (the device-profile change listener and the
+     * cross-window blur listener) are currently live for this pane.
+     *
+     * `Workspace.removeAllWorkspaceScreens` lifts this pane out with `detachViewFromParent`, which
+     * nulls the parent WITHOUT dispatching `onDetachedFromWindow`, and the unfold then re-adds it
+     * with a real `addView` that DOES dispatch `onAttachedToWindow`. So the registrations were made
+     * once per unfold and released never: measured 2026-09-01 on emulator-5554, three fold cycles
+     * produced 3 `PANE ATTACHED` and 0 `PANE DETACHED`, i.e. one extra registration per fold, each
+     * capturing the Launcher through the blur lambda. Adversarial review 2026-09-01, finding 1.
+     */
+    private var windowRegistered = false
+
     override fun onAttachedToWindow() {
-        android.util.Log.i("AresAttach", "PANE ATTACHED w=" + width)
+        android.util.Log.i("AresAttach", "PANE ATTACHED w=" + width + " dpListeners=" + paneListenerCount())
+        // Balance any registrations still live from the previous attach. Without this they
+        // accumulate one per fold cycle (see [windowRegistered]).
+        releaseWindowRegistrations()
         // The base class adds mSearchContainer to the DragLayer when the search bar is floating,
         // and onDetachedFromWindow never removes it. This pane is detached and re-attached on every
         // fold cycle, so on the second attach that add would throw ("child already has a parent").
         // Drop it first and let the base class re-add it.
         (searchView?.parent as? ViewGroup)?.removeView(searchView)
         super.onAttachedToWindow()
+        windowRegistered = true
+        android.util.Log.i("AresAttach", "PANE REGISTERED dpListeners=" + paneListenerCount())
         // Each container constructs its own AllAppsStore, so this one starts empty and would stay
         // empty until the next model bind. Seed it from the launcher's already-populated store on
         // attach; ModelCallbacks.bindAllApplications keeps both in step from then on.
@@ -161,8 +179,9 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * orphaned pill belonging to a pane that no longer exists.
      */
     override fun onDetachedFromWindow() {
-        android.util.Log.i("AresAttach", "PANE DETACHED w=" + width)
+        android.util.Log.i("AresAttach", "PANE DETACHED w=" + width + " dpListeners=" + paneListenerCount())
         super.onDetachedFromWindow()
+        windowRegistered = false
         releaseSearchPill()
     }
 
@@ -181,6 +200,34 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     fun releaseSearchPill() {
         (searchView?.parent as? ViewGroup)?.removeView(searchView)
     }
+
+    /**
+     * Releases the base class's window-scoped registrations (the device-profile change listener and
+     * the cross-window blur listener) for the same reason [releaseSearchPill] exists: on a fold the
+     * pane is lifted out with `detachViewFromParent`, so `onDetachedFromWindow` never runs and the
+     * registrations made by the previous attach are never taken back.
+     *
+     * Measured on emulator-5554 2026-09-01: three fold cycles produced 3 `PANE ATTACHED` and 0
+     * `PANE DETACHED`, i.e. three live registration sets for one pane, each holding the Launcher
+     * through the blur listener's lambda. Idempotent -- the listener-list removal is a no-op when
+     * absent and the blur listener is null-guarded -- so both the genuine-detach path and the
+     * folded-drop path may call it. Adversarial review 2026-09-01, finding 1.
+     */
+    fun releaseWindowRegistrations() {
+        if (!windowRegistered) return
+        windowRegistered = false
+        aresReleaseWindowRegistrations()
+        android.util.Log.i("AresAttach", "PANE REGISTRATIONS RELEASED dpListeners=" + paneListenerCount())
+    }
+
+    /**
+     * How many device-profile change listeners the activity currently holds for a pane of this
+     * class. The leak this guards against is invisible in `meminfo` (it counts Views and Activities,
+     * not registrations), so this is the number to watch: it must stay at most 1 across any number
+     * of fold cycles.
+     */
+    private fun paneListenerCount(): Int =
+        mActivityContext.onDeviceProfileChangeListeners.count { it is AresPanelAllAppsContainerView }
 
     /**
      * The apps view is created during `Launcher.setupViews()` and can legitimately be absent while

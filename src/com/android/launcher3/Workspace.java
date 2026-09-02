@@ -1610,6 +1610,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 // the folded home on top of the folded container's own pill (owner 2026-09-01).
                 // Do that teardown explicitly; it is idempotent when the real callback did run.
                 mAresAppList.releaseSearchPill();
+                // Same reason, second symptom: the base ActivityAllAppsContainerView registers a
+                // device-profile change listener and a cross-window blur listener in
+                // onAttachedToWindow and releases them in onDetachedFromWindow. Skipping the detach
+                // callback leaked one live registration set per fold cycle, each holding the
+                // Launcher through the blur lambda (measured emulator-5554 2026-09-01: 3 PANE
+                // ATTACHED, 0 PANE DETACHED over three folds). Idempotent, same as above.
+                mAresAppList.releaseWindowRegistrations();
                 mAresAppListTempDetached = false;
             }
             updateAresSearchOwnership(false);

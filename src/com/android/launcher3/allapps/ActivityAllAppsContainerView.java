@@ -405,6 +405,21 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        aresReleaseWindowRegistrations();
+    }
+
+    /**
+     * LC-Ares: the window-scoped registrations made by {@link #onAttachedToWindow()}, released as
+     * an idempotent unit.
+     *
+     * <p>Extracted so a container that can be lifted out of its parent WITHOUT an
+     * {@code onDetachedFromWindow} dispatch -- {@code detachViewFromParent} does exactly that, and
+     * {@code Workspace.removeAllWorkspaceScreens} uses it on the Ares app-list pane on every fold
+     * -- can release them explicitly instead of leaking one registration set per fold cycle.
+     * Safe to call when nothing is registered: the listener-list removal is a no-op and the blur
+     * listener is null-guarded. Adversarial review 2026-09-01.
+     */
+    protected void aresReleaseWindowRegistrations() {
         mActivityContext.removeOnDeviceProfileChangeListener(this);
         if (mCrossWindowBlurListener != null) {
             java.util.function.Consumer<Boolean> listener = mCrossWindowBlurListener;
