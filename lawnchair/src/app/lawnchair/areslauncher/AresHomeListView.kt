@@ -94,6 +94,18 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * positioned from this view's coordinate space. See [beginInlineFolderRename].
      */
     private var inlineRenameEditor: android.widget.EditText? = null
+
+    /**
+     * Full-DragLayer catcher sitting UNDER the rename editor, so a tap anywhere that is not the text
+     * field commits and closes the rename (owner 2026-09-02).
+     *
+     * A scrim rather than relying on focus loss: nothing else on this surface takes focus in touch
+     * mode, so tapping the wallpaper or a tile never moved focus off the EditText and the editor just
+     * sat there. It is also the only thing that still gets those taps -- the rename deliberately pins
+     * the list and blocks both Workspace touch paths, so a tap on empty space otherwise reaches
+     * nothing at all. The keyboard is a separate window and is unaffected.
+     */
+    private var inlineRenameScrim: android.view.View? = null
     private val tmpBandRect = RectF()
 
     init {
@@ -1162,6 +1174,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         editorH: Int,
     ) {
         val gap = resources.getDimensionPixelSize(R.dimen.ares_search_ime_gap)
+        // Latched once the keyboard has actually been up, so the very first onEnd -- which can land
+        // before the IME has shown -- cannot be read as "the keyboard just closed".
+        var imeWasUp = false
         val apply = { imeBottom: Int ->
             val shift = if (imeBottom <= 0) {
                 0f
@@ -1188,9 +1203,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 }
 
                 override fun onEnd(animation: androidx.core.view.WindowInsetsAnimationCompat) {
-                    // Settle on the resting inset; onProgress' last frame can be mid-slide.
+                    // Settle on the resting inset; onProgress. last frame can be mid-slide.
                     val ins = androidx.core.view.ViewCompat.getRootWindowInsets(editor)
-                    apply(ins?.getInsets(imeType)?.bottom ?: 0)
+                    val imeBottom = ins?.getInsets(imeType)?.bottom ?: 0
+                    apply(imeBottom)
+                    if (imeBottom > 0) {
+                        imeWasUp = true
+                    } else if (imeWasUp) {
+                        // The keyboard going away ends the rename (owner 2026-09-02: "swiping back
+                        // from the edge should close editing the folder name"). Keyed off the IME
+                        // hiding rather than a back-key listener because predictive back on gesture
+                        // nav bypasses onKeyPreIme entirely -- the same reason AresSearchContainerView
+                        // does it this way. Commits, matching the tap-outside and focus-loss paths;
+                        // typed text is never silently discarded.
+                        dismissInlineFolderRename(commit = true)
+                    }
                 }
             },
         )
@@ -1262,6 +1289,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             this.x = x
             this.y = y
         }
+        // Added BEFORE the editor so the editor sits above it: taps on the field reach the field,
+        // taps anywhere else land here and close the rename.
+        val scrim = android.view.View(context).apply {
+            setOnTouchListener { _, ev ->
+                if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                    dismissInlineFolderRename(commit = true)
+                }
+                true
+            }
+        }
+        dl.addView(
+            scrim,
+            com.android.launcher3.views.BaseDragLayer.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        inlineRenameScrim = scrim
         dl.addView(editor, lp)
         inlineRenameEditor = editor
         // Pin the list for the duration. The editor sits in the DragLayer at an absolute position
@@ -1313,6 +1358,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             as? android.view.inputmethod.InputMethodManager
         imm?.hideSoftInputFromWindow(editor.windowToken, 0)
         (editor.parent as? ViewGroup)?.removeView(editor)
+        inlineRenameScrim?.let { s -> (s.parent as? ViewGroup)?.removeView(s) }
+        inlineRenameScrim = null
         folderBounds.suppressTitle = false
         // Release the scroll pin taken in beginInlineFolderRename. Unconditional and idempotent:
         // this method is the single teardown path (IME done, focus loss, folder collapsing), so the
