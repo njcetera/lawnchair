@@ -39,11 +39,14 @@ import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.util.MultiSafeCloseable
 import app.lawnchair.util.isPackageInstalled
 import app.lawnchair.util.requireSystemService
+import app.lawnchair.icons.ExtendedBitmapDrawable.Companion.isFromIconPack
+import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
 import com.android.launcher3.dagger.ApplicationContext
 import com.android.launcher3.dagger.LauncherAppSingleton
 import com.android.launcher3.graphics.ThemeManager
 import com.android.launcher3.icons.ClockDrawableWrapper
+import com.android.launcher3.icons.IconNormalizer
 import com.android.launcher3.icons.LauncherIconProvider
 import com.android.launcher3.icons.mono.ThemedIconDrawable
 import com.android.launcher3.util.ComponentKey
@@ -260,19 +263,34 @@ class LawnchairIconProvider @Inject constructor(
                     return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
-            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash. Wrap it in an
-            // adaptive drawable HERE with the theme background. Otherwise BaseIconFactory's legacy
-            // path wraps it downstream (normalizeAndWrapToAdaptiveIcon) with
-            // getWrapperBackgroundColor(), which takes a Palette dominant colour off the RAW bitmap
-            // -- our colour filter is not applied, drawableToBitmap() hands back BitmapDrawable.bitmap
-            // as-is -- and then forces HSL lightness to pref_coloredBackgroundLightness, default 1f,
-            // i.e. pure WHITE. Measured 2026-09-01: 23andMe and AdGuard rendered #FFFFFF tiles while
-            // every correctly themed icon is #610033. Returning an AdaptiveIconDrawable makes that
-            // legacy branch take its `icon instanceof AdaptiveIconDrawable` early return instead.
-            return CustomAdaptiveIconDrawable(
-                ares[0].toDrawable(),
-                AresIconTint.wash(result, prefs2, ares[0]),
-            )
+            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash.
+            val washed = AresIconTint.wash(result, prefs2, ares[0])
+            // Take over ONLY the wrap that BaseIconFactory's legacy branch would have done:
+            // a non-adaptive icon that did NOT come from an icon pack
+            // (normalizeAndWrapToAdaptiveIcon shrinks only when `!isFromIconPack &&
+            // shouldWrapAdaptive(context)`, and early-returns for an AdaptiveIconDrawable).
+            // Wrapping anything else DOUBLE wraps -- an already-adaptive icon reaches here
+            // whenever generateMono() returns null (below API 33, or on any failure) and would
+            // get a second background painted across a 1.5x layer rect, and a pack icon, which
+            // that branch deliberately never wrapped, would gain a background it never had.
+            // Adversarial review 2026-09-01.
+            if (result is AdaptiveIconDrawable || result.isFromIconPack ||
+                !shouldWrapAdaptive(context)
+            ) {
+                return washed
+            }
+            // Reproduce that branch's GEOMETRY, not just its background colour. It wraps the
+            // icon in a FixedScaleDrawable at IconNormalizer's scale -- and setScale() itself
+            // multiplies by LEGACY_ICON_SCALE (~0.467). Handing the raw drawable straight in as
+            // an adaptive foreground instead let CustomAdaptiveIconDrawable stretch it to the
+            // 1.5x layer rect: ~2.1x too large, corners cut off by the icon mask. The original
+            // fix here changed the background colour and silently changed the size with it;
+            // sampling pixel COLOURS could not see that. Adversarial review 2026-09-01.
+            val foreground = FixedScaleDrawable().apply {
+                setDrawable(washed)
+                setScale(IconNormalizer(LauncherAppState.getIDP(context).iconBitmapSize).getScale(result))
+            }
+            return CustomAdaptiveIconDrawable(ares[0].toDrawable(), foreground)
         }
         return result
     }
