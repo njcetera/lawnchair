@@ -577,7 +577,8 @@ object AresTestInfo {
             else -> return "bad-arg"
         }
         return "editor=" + list.isInlineRenameActive() +
-            "|scrollLocked=" + list.isScrollLockedForTest()
+            "|scrollLocked=" + list.isScrollLockedForTest() +
+            "|" + list.renameImeProbeForTest()
     }
 
     /** See [REQUEST_WP_ADD_CHILD]. Render-path check for adding into an OPEN folder (no gesture). */

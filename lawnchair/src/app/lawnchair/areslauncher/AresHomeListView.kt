@@ -1143,10 +1143,79 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * shared DragLayer and is never repositioned, so ANY movement of the surface underneath leaves it
      * floating (owner 2026-09-02).
      */
+    /**
+     * Lifts the folder AND its rename editor above the keyboard.
+     *
+     * The editor is absolutely positioned in the DragLayer and the list is pinned, so when the IME
+     * came up it simply covered both (owner 2026-09-02: "the keyboard is hiding the folder and text
+     * field being renamed"). Rides the insets ANIMATION rather than the settled inset, the same way
+     * [AresSearchContainerView] does, so the lift tracks the keyboard's slide instead of jumping.
+     *
+     * The list and the editor are translated by the SAME delta, which is the whole point: the editor
+     * has no idea where its folder went, so anything that moves one must move the other or the two
+     * come apart again -- the original bug in a different guise. Only ever lifts, never pushes down,
+     * and only as far as it takes to clear the keyboard by the shared search IME gap.
+     */
+    private fun installRenameImeFollower(
+        editor: android.widget.EditText,
+        editorY: Int,
+        editorH: Int,
+    ) {
+        val gap = resources.getDimensionPixelSize(R.dimen.ares_search_ime_gap)
+        val apply = { imeBottom: Int ->
+            val shift = if (imeBottom <= 0) {
+                0f
+            } else {
+                val keyboardTop = launcher.dragLayer.height - imeBottom
+                minOf(0f, (keyboardTop - gap - (editorY + editorH)).toFloat())
+            }
+            editor.translationY = shift
+            translationY = shift
+        }
+        androidx.core.view.ViewCompat.setWindowInsetsAnimationCallback(
+            editor,
+            object : androidx.core.view.WindowInsetsAnimationCompat.Callback(
+                DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+            ) {
+                private val imeType = androidx.core.view.WindowInsetsCompat.Type.ime()
+
+                override fun onProgress(
+                    insets: androidx.core.view.WindowInsetsCompat,
+                    running: MutableList<androidx.core.view.WindowInsetsAnimationCompat>,
+                ): androidx.core.view.WindowInsetsCompat {
+                    apply(insets.getInsets(imeType).bottom)
+                    return insets
+                }
+
+                override fun onEnd(animation: androidx.core.view.WindowInsetsAnimationCompat) {
+                    // Settle on the resting inset; onProgress' last frame can be mid-slide.
+                    val ins = androidx.core.view.ViewCompat.getRootWindowInsets(editor)
+                    apply(ins?.getInsets(imeType)?.bottom ?: 0)
+                }
+            },
+        )
+    }
+
     fun isInlineRenameActive(): Boolean = inlineRenameEditor != null
 
     /** Test-only: whether the list is pinned. See `REQUEST_WP_RENAME_INLINE`. */
     fun isScrollLockedForTest(): Boolean = masonry.aresScrollLocked
+
+    /**
+     * Test-only: the keyboard lift currently applied to the list AND the rename editor, plus the
+     * numbers it is derived from, so the assertion can be "the editor clears the keyboard" rather
+     * than a screenshot. See `REQUEST_WP_RENAME_INLINE`.
+     */
+    fun renameImeProbeForTest(): String {
+        val ed = inlineRenameEditor ?: return "shift=0|editorBottom=-1|keyboardTop=-1"
+        val imeBottom = androidx.core.view.ViewCompat.getRootWindowInsets(ed)
+            ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        val lp = ed.layoutParams as? com.android.launcher3.views.BaseDragLayer.LayoutParams
+        val bottom = (lp?.y ?: 0) + ed.height + ed.translationY.toInt()
+        return "shift=" + ed.translationY.toInt() +
+            "|editorBottom=" + bottom +
+            "|keyboardTop=" + (launcher.dragLayer.height - imeBottom)
+    }
 
     fun beginInlineFolderRename() {
         if (inlineRenameEditor != null) return
@@ -1217,6 +1286,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // inline rename is expected to behave -- typed text is not silently thrown away.
             if (!hasFocus) dismissInlineFolderRename(commit = true)
         }
+        installRenameImeFollower(editor, y, h)
         editor.requestFocus()
         editor.post {
             val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
@@ -1248,6 +1318,9 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // this method is the single teardown path (IME done, focus loss, folder collapsing), so the
         // list can never be left pinned by a rename that ended.
         masonry.aresScrollLocked = false
+        // Undo the keyboard lift applied by installRenameImeFollower.
+        androidx.core.view.ViewCompat.setWindowInsetsAnimationCallback(editor, null)
+        translationY = 0f
         invalidate()
     }
 

@@ -1964,6 +1964,14 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (isTrackpadMultiFingerSwipe(ev)) {
             return false;
         }
+        // Declining INTERCEPTION is not enough to stop paging while the inline folder rename is up:
+        // when no child consumes the gesture -- an edge swipe, or empty space -- the event still
+        // reaches this onTouchEvent and PagedView drags from here. That is how a rename could still
+        // be swiped off the edge onto the blank stray CellLayout (owner 2026-09-02). Same guard as
+        // onInterceptTouchEvent; both are needed.
+        if (mAresHomeList != null && mAresHomeList.isInlineRenameActive()) {
+            return false;
+        }
         return super.onTouchEvent(ev);
     }
 
