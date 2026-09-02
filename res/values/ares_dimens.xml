@@ -106,7 +106,14 @@
          added EQUALLY to both surfaces, so the §11c cross-pane icon alignment is preserved. Both lists
          already run clipToPadding=false, so this is real scroll room, not dead space. Tuned by feel. -->
     <dimen name="ares_list_ergo_top_padding">100dp</dimen>
-    <dimen name="ares_list_ergo_bottom_padding">100dp</dimen>
+    <!-- Bottom raised 100dp -> 140dp (owner 2026-09-01): in edit mode the personalization pills sit
+         in a band at the bottom of the screen and were slightly covering the last widget, making its
+         resize handle hard to grab. Measured on the folded Pixel: the band (dots + pills + gesture
+         bar clearance) runs from y=2045 to the 2364 bottom, ~131dp, against the 100dp reserved here.
+         clipToPadding=false means this is scroll room rather than dead space, but a list that is not
+         scrolled to its end still renders its last rows INTO that band, which is what the owner
+         saw. 140dp clears the band with a little margin. -->
+    <dimen name="ares_list_ergo_bottom_padding">140dp</dimen>
 
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->

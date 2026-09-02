@@ -1580,8 +1580,14 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         final int bottomPadding;
         if (AresAllApps.isAresAppListPane(mActivityContext)) {
             if (isAresWorkspacePanel()) {
+                // The extension (so content RESTS at the cell bottom) PLUS the same ergonomic band
+                // every other Ares list gets. The band was missing here, so the unfolded pane was the
+                // one surface with less bottom room than the rest -- the owner asked for it to be
+                // consistent across the app list, home list, edit home, folder and unfolded
+                // (2026-09-01). The four others already share this value; only this branch opted out.
                 DeviceProfile dp = mActivityContext.getDeviceProfile();
-                bottomPadding = dp.getInsets().bottom + dp.workspacePadding.bottom;
+                bottomPadding = dp.getInsets().bottom + dp.workspacePadding.bottom
+                        + AresAllApps.ergoBottomPaddingPx(getContext());
             } else {
                 bottomPadding = stockBottomPadding + AresAllApps.ergoBottomPaddingPx(getContext());
             }
