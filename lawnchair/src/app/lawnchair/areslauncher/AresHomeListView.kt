@@ -3349,4 +3349,41 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
          */
         const val CREATED_PENDING_MS = 1000L
     }
+
+    /**
+     * Replaces any widget row still showing a [PendingAppWidgetHostView] with a real host view.
+     *
+     * Stock Launcher3 heals these in `LauncherWidgetHolder.updateDeferredView()`, whose
+     * `PendingAppWidgetHostView.reInflate()` calls `launcher.removeItem` + `launcher.bindAppWidget`
+     * -- both Workspace-oriented, so under Strategy D, where widgets live in THIS list, the heal
+     * never reaches them and the empty state is permanent.
+     *
+     * How they get there: a cold start with the screen OFF pauses and stops the activity within
+     * ~126ms (measured emulator-5554 2026-09-02, `AresWidgetListen`), which stops the widget host
+     * listening; the model bind then inflates every widget INSIDE that stopped window, and each one
+     * becomes a placeholder. onResume restores listening correctly, but nothing re-inflates the
+     * views. That is exactly what an APK installed while the phone is asleep produces.
+     *
+     * Called from the widget holder once listening resumes. Cheap and self-limiting: it walks only
+     * ATTACHED children and rebinds only rows that are actually holding a placeholder, so on a
+     * healthy launcher it does nothing at all. Paired with [AresHomeAdapter]'s refusal to reuse a
+     * placeholder as a host view -- without that, the rebind would keep the placeholder and this
+     * would be a no-op. See defect-ledger rows 57 / 57a.
+     */
+    fun healPendingWidgetRows() {
+        var healed = 0
+        for (i in 0 until childCount) {
+            val holder = getChildViewHolder(getChildAt(i)) as? AresHomeAdapter.ViewHolder ?: continue
+            val hosted = (holder.container.getChildAt(0)
+                as? com.android.launcher3.widget.PendingAppWidgetHostView) ?: continue
+            if (!hosted.isDeferredWidget) continue
+            val position = holder.bindingAdapterPosition
+            if (position == NO_POSITION) continue
+            aresAdapter.notifyItemChanged(position)
+            healed++
+        }
+        if (healed > 0) {
+            android.util.Log.i("AresWidgetListen", "healed $healed pending widget row(s)")
+        }
+    }
 }

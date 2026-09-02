@@ -1369,6 +1369,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // a normal fresh inflate.
         val reuseHost = (holder.container.getChildAt(0) as? AppWidgetHostView)
             ?.takeIf {
+                // NEVER reuse a placeholder. `PendingAppWidgetHostView` IS an AppWidgetHostView and
+                // carries the real appWidgetId, so it used to satisfy the id match below and be kept
+                // forever -- a placeholder can never become a live widget, so reusing one makes the
+                // empty state PERMANENT. Measured on emulator-5554 2026-09-02: after a screen-off
+                // cold start (which binds the grid while the host is not listening), a full
+                // fold+unfold rebind left pending at 2, unchanged. See defect-ledger row 57a.
+                it !is com.android.launcher3.widget.PendingAppWidgetHostView &&
                 // isWidgetIdAllocated guards the unbound/pending case: two not-yet-bound widgets both
                 // carry appWidgetId = -1 (see the duplicate-widget note above), so match on a REAL id.
                 info is LauncherAppWidgetInfo && info.isWidgetIdAllocated &&

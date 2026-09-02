@@ -52,6 +52,7 @@ import com.android.launcher3.testing.shared.TestProtocol;
 import com.android.launcher3.util.ActivityOptionsWrapper;
 import com.android.launcher3.util.ResourceBasedOverride;
 import com.android.launcher3.util.SafeCloseable;
+import com.android.launcher3.Launcher;
 import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.widget.ListenableAppWidgetHost.ProviderChangedListener;
 import com.android.launcher3.widget.custom.CustomWidgetManager;
@@ -155,6 +156,7 @@ public class LauncherWidgetHolder {
 
     /** Update any views which have been deferred because the host was not listening */
     protected void updateDeferredView() {
+        aresHealPendingHomeListWidgets();
         // Update any views which have been deferred because the host was not listening.
         // We go in reverse order and inflate any deferred or cached widget
         for (int i = mViews.size() - 1; i >= 0; i--) {
@@ -162,6 +164,33 @@ public class LauncherWidgetHolder {
             if (view instanceof PendingAppWidgetHostView pv) {
                 pv.reInflate();
             }
+        }
+    }
+
+    /**
+     * LC-Ares: Strategy D counterpart to the loop above.
+     *
+     * <p>The loop only reaches views the holder itself tracks in { mViews}, and heals them via
+     * { reInflate()} -> { launcher.removeItem}/{ bindAppWidget}, which are
+     * Workspace-oriented. Ares widgets live in { AresHomeListView}, so neither half reaches
+     * them and a widget inflated while the host was not listening stays an empty placeholder
+     * forever. Defect-ledger rows 57 / 57a.
+     *
+     * <p>Hooked HERE rather than overridden in { LawnchairWidgetHolder} because that subclass
+     * is never instantiated at runtime -- every { AresWidgetListen} line reports
+     * { holder=LauncherWidgetHolder}, and { getClass()} is the runtime class. An override
+     * there is dead code.
+     */
+    private void aresHealPendingHomeListWidgets() {
+        Launcher launcher = null;
+        try {
+            launcher = ActivityContext.lookupContext(mContext);
+        } catch (Exception ignored) {
+            // Preview and test contexts are not a Launcher; nothing to heal.
+        }
+        if (launcher != null && launcher.getWorkspace() != null
+                && launcher.getWorkspace().getAresHomeList() != null) {
+            launcher.getWorkspace().getAresHomeList().healPendingWidgetRows();
         }
     }
 
