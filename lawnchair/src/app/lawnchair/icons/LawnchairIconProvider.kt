@@ -260,7 +260,19 @@ class LawnchairIconProvider @Inject constructor(
                     return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
-            return AresIconTint.wash(result, prefs2, ares[0])
+            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash. Wrap it in an
+            // adaptive drawable HERE with the theme background. Otherwise BaseIconFactory's legacy
+            // path wraps it downstream (normalizeAndWrapToAdaptiveIcon) with
+            // getWrapperBackgroundColor(), which takes a Palette dominant colour off the RAW bitmap
+            // -- our colour filter is not applied, drawableToBitmap() hands back BitmapDrawable.bitmap
+            // as-is -- and then forces HSL lightness to pref_coloredBackgroundLightness, default 1f,
+            // i.e. pure WHITE. Measured 2026-09-01: 23andMe and AdGuard rendered #FFFFFF tiles while
+            // every correctly themed icon is #610033. Returning an AdaptiveIconDrawable makes that
+            // legacy branch take its `icon instanceof AdaptiveIconDrawable` early return instead.
+            return CustomAdaptiveIconDrawable(
+                ares[0].toDrawable(),
+                AresIconTint.wash(result, prefs2, ares[0]),
+            )
         }
         return result
     }

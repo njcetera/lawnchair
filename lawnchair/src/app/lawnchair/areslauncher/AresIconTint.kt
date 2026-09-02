@@ -55,7 +55,9 @@ object AresIconTint {
     // % dropped), 6=vibrant M3 primary/on-primary colours, 7=colours flipped (light bg + vibrant glyph),
     // 8=synth mono centred (use MonochromeIconFactory directly, not its ClippedMonoDrawable wrapper,
     //   which cropped the synth glyph into the top-left corner).
-    private const val RENDER_VERSION = 8
+// 9=non-adaptive wash gets its own CustomAdaptiveIconDrawable theme background, so the legacy
+//   BaseIconFactory wrapper cannot paint a palette-derived WHITE background behind it.
+    private const val RENDER_VERSION = 9
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
