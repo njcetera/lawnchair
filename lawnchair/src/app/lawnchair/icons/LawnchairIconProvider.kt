@@ -263,8 +263,14 @@ class LawnchairIconProvider @Inject constructor(
                     return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
-            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash.
-            val washed = AresIconTint.wash(result, prefs2, ares[0])
+            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash -- toward
+            // ares[1], the GLYPH colour, exactly like the themed path tints its monochrome layer.
+            // It used to wash toward ares[0], which is the BACKGROUND colour this same call then
+            // paints behind it: dark-on-dark by construction. Measured on the owner Pixel
+            // 2026-09-02: themed icons render #FF88B4 glyph on #610033 (6.1:1), while a washed
+            // legacy icon was #610033 artwork on a #610033 tile. Owner reported it twice as "the
+            // glyph is a bit dark".
+            val washed = AresIconTint.wash(result, prefs2, ares[1])
             // Take over ONLY the wrap that BaseIconFactory's legacy branch would have done:
             // a non-adaptive icon that did NOT come from an icon pack
             // (normalizeAndWrapToAdaptiveIcon shrinks only when `!isFromIconPack &&

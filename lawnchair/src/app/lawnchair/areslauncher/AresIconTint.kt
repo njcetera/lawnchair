@@ -57,7 +57,7 @@ object AresIconTint {
     //   which cropped the synth glyph into the top-left corner).
 // 9=non-adaptive wash gets its own CustomAdaptiveIconDrawable theme background, so the legacy
 //   BaseIconFactory wrapper cannot paint a palette-derived WHITE background behind it.
-    private const val RENDER_VERSION = 9
+    private const val RENDER_VERSION = 10
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
