@@ -1232,6 +1232,7 @@ public class Launcher extends StatefulActivity<LauncherState>
     @Override
     public void onStateSetEnd(LauncherState state) {
         super.onStateSetEnd(state);
+        android.util.Log.i("AresWidgetListen", "onStateSetEnd state=" + state + " isNormal=" + (state == LauncherState.NORMAL));
         getAppWidgetHolder().setStateIsNormal(state == LauncherState.NORMAL);
         getWorkspace().setClipChildren(!state.hasFlag(FLAG_MULTI_PAGE));
 

@@ -560,6 +560,9 @@ public class LauncherWidgetHolder {
 
         final boolean listening = isListening();
         int currentFlag = mFlags.get();
+        android.util.Log.i("AresWidgetListen", "flag=" + flag + " on=" + on + " flags=0x"
+                + Integer.toHexString(currentFlag) + " listening=" + listening
+                + " shouldListen=" + shouldListen(currentFlag) + " holder=" + getClass().getSimpleName());
         if (!listening && shouldListen(currentFlag)) {
             // Postpone starting listening until all flags are on.
             startListening();
