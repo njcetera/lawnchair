@@ -1134,6 +1134,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * semantics (blank refused), fired on IME "done" or focus loss; either way the editor is removed
      * and the drawn title restored.
      */
+    /** Test-only: whether the inline rename editor is currently up. See `REQUEST_WP_RENAME_INLINE`. */
+    fun hasInlineRenameEditorForTest(): Boolean = inlineRenameEditor != null
+
+    /** Test-only: whether the list is pinned. See `REQUEST_WP_RENAME_INLINE`. */
+    fun isScrollLockedForTest(): Boolean = masonry.aresScrollLocked
+
     fun beginInlineFolderRename() {
         if (inlineRenameEditor != null) return
         val folder = aresAdapter.expandedWpFolderInfo() ?: return
@@ -1181,6 +1187,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
         dl.addView(editor, lp)
         inlineRenameEditor = editor
+        // Pin the list for the duration. The editor sits in the DragLayer at an absolute position
+        // computed from the title band ABOVE, and nothing recomputes it -- so a scroll would leave it
+        // floating in place while the grid moved behind it (owner 2026-09-02, normal and edit mode).
+        // stopScroll() first so a fling already in flight when the title was tapped cannot carry on.
+        stopScroll()
+        masonry.aresScrollLocked = true
         folderBounds.suppressTitle = true
         invalidate()
 
@@ -1224,6 +1236,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         imm?.hideSoftInputFromWindow(editor.windowToken, 0)
         (editor.parent as? ViewGroup)?.removeView(editor)
         folderBounds.suppressTitle = false
+        // Release the scroll pin taken in beginInlineFolderRename. Unconditional and idempotent:
+        // this method is the single teardown path (IME done, focus loss, folder collapsing), so the
+        // list can never be left pinned by a rename that ended.
+        masonry.aresScrollLocked = false
         invalidate()
     }
 

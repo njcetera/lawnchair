@@ -189,7 +189,21 @@ class AresMasonryLayoutManager(
             RecyclerView.LayoutParams.WRAP_CONTENT,
         )
 
-    override fun canScrollVertically(): Boolean = true
+    /**
+     * Set while the inline folder-rename editor is up.
+     *
+     * The editor is a real EditText living in the SHARED DragLayer at an absolute position computed
+     * ONCE from the folder title band (see `AresHomeListView.beginInlineFolderRename`). Nothing
+     * recomputes that position, so any scroll leaves the editor pinned in place while the grid moves
+     * behind it -- owner 2026-09-02, in both normal and edit mode. Scrolling during a rename is not
+     * wanted anyway ("I can scroll which shouldn`t happen"), so the list is pinned for the duration.
+     *
+     * Gating [canScrollVertically] rather than intercepting touches covers programmatic scrolls and
+     * in-flight flings too, not just the finger.
+     */
+    var aresScrollLocked: Boolean = false
+
+    override fun canScrollVertically(): Boolean = !aresScrollLocked
 
     override fun isAutoMeasureEnabled(): Boolean = false
 

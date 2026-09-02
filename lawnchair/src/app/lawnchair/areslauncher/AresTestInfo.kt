@@ -187,6 +187,17 @@ object AresTestInfo {
     const val REQUEST_WP_EXPAND = "ares-wp-expand"
 
     /**
+     * WP folders: raise or dismiss the INLINE RENAME editor on the currently expanded folder, with
+     * no gesture -- the editor is normally opened by tapping the canvas-drawn title band, which a
+     * test cannot hit without knowing where it was drawn. `arg` is "begin" or "end".
+     *
+     * Returns `editor=<bool>|scrollLocked=<bool>`, which is what the scroll-pin fix is asserted on
+     * (owner 2026-09-02: the list scrolled during a rename while the editor, absolutely positioned
+     * in the DragLayer, stayed put).
+     */
+    const val REQUEST_WP_RENAME_INLINE = "ares-wp-rename-inline"
+
+    /**
      * WP folders: move an existing grid app into a folder and (if the folder is OPEN) splice it into
      * the run, exercising the RENDER path [AresHomeAdapter.addChildToExpandedRun] without the flaky
      * dwell gesture (owner bug 2026-08-24: an app added to an already-open folder did not render).
@@ -351,6 +362,10 @@ object AresTestInfo {
         REQUEST_WP_EXPAND -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> wpExpand(launcher, arg) },
+        )
+        REQUEST_WP_RENAME_INLINE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> wpRenameInline(launcher, arg) },
         )
         REQUEST_WP_ADD_CHILD -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
@@ -551,6 +566,18 @@ object AresTestInfo {
         if (!folder.isAresWpFolder) return "not-wp"
         val expanded = list.aresAdapter.toggleWpFolder(folder)
         return "expanded=$expanded|contents=${folder.getContents().size}"
+    }
+
+    /** See [REQUEST_WP_RENAME_INLINE]. Raises/dismisses the inline rename editor without a gesture. */
+    private fun wpRenameInline(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        when (arg?.trim()) {
+            "begin" -> list.beginInlineFolderRename()
+            "end" -> list.dismissInlineFolderRename(false)
+            else -> return "bad-arg"
+        }
+        return "editor=" + list.hasInlineRenameEditorForTest() +
+            "|scrollLocked=" + list.isScrollLockedForTest()
     }
 
     /** See [REQUEST_WP_ADD_CHILD]. Render-path check for adding into an OPEN folder (no gesture). */
