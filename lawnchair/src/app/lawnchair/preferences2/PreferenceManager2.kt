@@ -397,8 +397,11 @@ class PreferenceManager2 @Inject constructor(
      * pref and fires `onThemeChanged` -> `ModelInitializer.refreshAndReloadLauncher` ->
      * `forceReload()`, which clears the icon memory cache AND the icon DB (`updateIconParams`) --
      * strictly more than `reloadIcons()`'s memory-only clear. Adding `onSet = { reloadIcons() }` on top
-     * raised a SECOND `forceReload()` ~33ms later that cancelled the first mid-flight and re-bound
-     * the app list twice; that was the app-list flicker on a theme change (measured 2026-09-01).
+     * raised a SECOND `forceReload()` ~33ms later that cancelled the first mid-flight, wasting
+     * ~270ms of workspace loading per toggle (measured 2026-09-01: 3967ms -> 3699ms end to end).
+     * NOTE: it did NOT double-bind the app list. `setApps` fires twice per reload BY DESIGN --
+     * `ModelCallbacks.bindAllApplications` feeds the launcher store and the unfolded dual-pane's
+     * own independent store -- and that count is identical before and after this change.
      * Still an **icon reload, NOT a recreate**, so the user stays in edit mode -- the thing that must
      * never happen on a mid-edit pref write is a `recreate()` (defect-ledger 2026-08-26).
      */
