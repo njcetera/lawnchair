@@ -795,11 +795,29 @@ class AresHomeAdapter(private val launcher: Launcher) :
         hardRebuild(pending)
     }
 
-    /** Identity comparison by row id and order -- what decides "nothing visually changed". */
+    /**
+     * Whether the incoming bind is the SAME rows we are already showing -- i.e. nothing to apply.
+     *
+     * Compares by **object identity**, deliberately, not by row id. Ids cannot tell the two kinds of
+     * rebind apart, and they need opposite answers (measured on the Pixel Fold 2026-09-01):
+     *
+     * - A FOLD re-binds through `mModel.rebindCallbacks()` with `mModelLoaded` still true, so the
+     *   loader re-emits the *same* `ItemInfo` instances out of the live `BgDataModel`. Nothing about
+     *   the rows changed, so skipping is right and is what keeps the grid from flickering.
+     *   Measured: `sameById=true sameByIdentity=true`.
+     * - An ICON RELOAD (themed icons, icon shape, icon pack) goes through `forceReload()`, which
+     *   clears `mModelLoaded`; `LoaderTask` then clears `BgDataModel` and constructs **brand-new**
+     *   `ItemInfo` instances carrying the freshly generated bitmaps. The DB ids are unchanged, so an
+     *   id comparison says "same" and the new icons are thrown away -- the user changes the setting
+     *   and nothing happens. Measured: `sameById=true sameByIdentity=false`.
+     *
+     * Identity separates them exactly: same instances means the model genuinely did not move, new
+     * instances mean there is something to apply.
+     */
     private fun sameRows(current: List<ItemInfo>, incoming: List<ItemInfo>): Boolean {
         if (current.size != incoming.size) return false
         for (i in current.indices) {
-            if (current[i].id != incoming[i].id) return false
+            if (current[i] !== incoming[i]) return false
         }
         return true
     }
