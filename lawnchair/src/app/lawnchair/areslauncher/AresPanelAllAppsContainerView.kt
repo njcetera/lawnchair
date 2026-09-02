@@ -5,6 +5,7 @@ import android.util.AttributeSet
 import android.view.ViewGroup
 import com.android.launcher3.DeviceProfile
 import com.android.launcher3.Launcher
+import com.android.launcher3.R
 import com.android.launcher3.allapps.ActivityAllAppsContainerView
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.uioverrides.QuickstepLauncher
@@ -33,6 +34,60 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
 ) : ActivityAllAppsContainerView<Launcher>(context, attrs, defStyleAttr) {
+
+    init {
+        // §9 readability dim, unfolded (owner 2026-09-02). Folded, the dim is painted full-screen by
+        // LauncherRootView while the launcher is in AllAppsState -- which folded IS the app list, so
+        // that shortcut was invisible. Unfolded the app list is a persistent pane and the launcher
+        // stays in NORMAL, so that path never fires, and painting it full-screen here would darken
+        // the HOME half too, which folded never does. So the dim lives on the pane instead, exactly
+        // as the §9 note always specified ("it travels in with the pane ... like a page of the
+        // canvas"). Same colour as folded so the two postures read identically.
+        //
+        // Safe as the container background: the base class paints its sheet through a separate
+        // mBottomSheetBackground VIEW, not this view's background, so nothing is being overwritten.
+        background = SeamDimDrawable()
+    }
+
+    /**
+     * The §9 dim, solid across the pane and fading out over the last
+     * [R.dimen.ares_app_list_dim_seam_falloff] at the SEAM -- the edge nearest the home panel -- so
+     * the open device does not show a hard vertical brightness step down its middle.
+     *
+     * Keyed off layout direction rather than a hard-coded left edge: the pane is the trailing panel,
+     * so its seam is on the left in LTR and on the right in RTL.
+     */
+    private inner class SeamDimDrawable : android.graphics.drawable.Drawable() {
+        private val paint = android.graphics.Paint()
+
+        override fun onBoundsChange(bounds: android.graphics.Rect) {
+            if (bounds.width() <= 0) return
+            val dim = AresAllApps.appListWallpaperDim(context)
+            val falloff = resources
+                .getDimensionPixelSize(R.dimen.ares_app_list_dim_seam_falloff)
+                .coerceIn(0, bounds.width())
+            val frac = falloff.toFloat() / bounds.width()
+            val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
+            paint.shader = android.graphics.LinearGradient(
+                bounds.left.toFloat(),
+                0f,
+                bounds.right.toFloat(),
+                0f,
+                if (rtl) intArrayOf(dim, dim, 0) else intArrayOf(0, dim, dim),
+                if (rtl) floatArrayOf(0f, 1f - frac, 1f) else floatArrayOf(0f, frac, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+
+        override fun draw(canvas: android.graphics.Canvas) {
+            if (paint.shader != null) canvas.drawRect(bounds, paint)
+        }
+
+        override fun setAlpha(alpha: Int) = Unit
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) = Unit
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    }
 
     /**
      * A persistent panel is always showing all apps -- there is no closed state to be in. Mirrors
