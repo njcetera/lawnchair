@@ -223,9 +223,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
     /**
      * AresLauncher foldable dual-pane: the persistent app list occupying panel 1 while unfolded.
-     * Null while folded. See {@link #syncAresAppListPane()} and design/foldable-dual-pane.md.
+     *
+     * <p>Inflated once and reused for the activity's lifetime -- it is DETACHED while folded, never
+     * nulled, so its own AllAppsStore can keep being fed and the next unfold is instant. See
+     * {@link #aresEnsureAppListPaneInflated()}, {@link #syncAresAppListPane()} and
+     * design/foldable-dual-pane.md.
      */
     private AresPanelAllAppsContainerView mAresAppList;
+
+    /** True while the pane is lifted out by a temporary detach; see removeAllWorkspaceScreens. */
+    private boolean mAresAppListTempDetached = false;
 
     @Thunk
     boolean mDeferRemoveExtraEmptyScreen = false;
@@ -939,6 +946,50 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             ((ViewGroup) mFirstPagePinnedItem.getParent()).removeView(mFirstPagePinnedItem);
         }
 
+        // AresLauncher (owner 2026-09-01): lift the home list out BEFORE the pages are destroyed.
+        //
+        // removeAllViews() recurses dispatchDetachedFromWindow() through every page's subtree, and
+        // Strategy D parents the home list inside page 0 -- so every rebind (a fold always triggers
+        // one) tore the list off the window and re-homed it. Measured on the Pixel Fold:
+        //     AresAttach: DETACHED kids=16 w=1018 / ATTACHED kids=16 w=1018   (10ms apart)
+        // The cost is not AppWidgetHostView re-inflating (it has no attach hooks at all) but the
+        // generic detach teardown: resetDisplayList() over the whole subtree, plus
+        // RecyclerView.onDetachedFromWindow ending animations, nulling the LayoutManager's host and
+        // releasing cached views, then a forced full layout on re-attach.
+        //
+        // A temporary detach avoids all of it while still letting the pages be rebuilt normally --
+        // which matters, because the page rebuild is what BUILDS the unfolded dual-pane split. Two
+        // earlier attempts RETAINED page 0 instead and broke the split both times (home rendered
+        // full-width with the app list overlapping it); stepping out of the rebuild's way is the fix,
+        // not fighting it. Re-attached below in this same synchronous block, per the platform contract.
+        // The app-list pane takes the same beating: it lives in page 1, which this teardown also
+        // destroys, so it was detached and re-attached on every rebind too (measured: PANE DETACHED
+        // w=1018 / PANE ATTACHED w=1018, twice per fold) -- the owner's remaining "app list does a
+        // short flicker". Lift it out the same way. It cannot be re-attached in this method (page 1 is
+        // recreated later in the bind), so syncAresAppListPane() completes the pairing once the panel
+        // exists.
+        // NOT gated on isTwoPanelEnabled(): during an unfold the DeviceProfile can still report the
+        // folded posture while the rebind is already running (measured race -- see
+        // AresHomeListView.onMeasure), so gating on it made this silently skip and the pane took a real
+        // detach anyway (measured: PANE DETACHED/ATTACHED 1.9s apart).
+        if (mAresAppList != null
+                && mAresAppList.getParent() instanceof ShortcutAndWidgetContainer) {
+            mAresAppListTempDetached = true;
+            ((ShortcutAndWidgetContainer) mAresAppList.getParent())
+                    .aresDetachChildTemporarily(mAresAppList);
+        }
+
+        ShortcutAndWidgetContainer aresListParent = null;
+        ViewGroup.LayoutParams aresListLp = null;
+        if (mAresHomeList != null
+                && mAresHomeList.getParent() instanceof ShortcutAndWidgetContainer) {
+            aresListParent = (ShortcutAndWidgetContainer) mAresHomeList.getParent();
+            aresListLp = mAresHomeList.getLayoutParams();
+            // onDetachedFromWindow will not run now, so do its one piece of real work explicitly.
+            mAresHomeList.cancelEmptySpaceLongPressForReparent();
+            aresListParent.aresDetachChildTemporarily(mAresHomeList);
+        }
+
         // Remove the pages and clear the screen models
         removeAllViews();
         mScreenOrder.clear();
@@ -955,6 +1006,26 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
         // Ensure there is always at least one page during bind lifecycle.
         bindAndInitFirstWorkspaceScreen();
+
+        // Re-attach the lifted home list into the freshly created page, in this SAME synchronous block
+        // (see the detach above). It must not be left to getOrCreateAresHomeList(), which runs lazily
+        // from addInScreen during item binding -- a later frame, which would leave the list parentless
+        // and undrawn for a frame: a guaranteed blank flash. getOrCreateAresHomeList's "re-home if the
+        // parent differs" check then becomes a no-op safety net.
+        if (aresListParent != null && mAresHomeList.getParent() == null) {
+            CellLayout firstPage = getChildCount() > 0 ? (CellLayout) getChildAt(0) : null;
+            ShortcutAndWidgetContainer target =
+                    firstPage != null ? firstPage.getShortcutsAndWidgets() : null;
+            if (target != null) {
+                target.aresAttachChildTemporarily(mAresHomeList, aresListLp);
+            } else {
+                // No page to land on: fall back to the ordinary path so the list can never be
+                // stranded parentless. This costs the old detach/attach, which is still better than
+                // a missing home grid.
+                Log.w(TAG, "Ares: no first page to re-attach the home list; using normal re-home");
+                getOrCreateAresHomeList();
+            }
+        }
 
         // Re-enable the layout transitions
         enableLayoutTransitions();
@@ -1477,6 +1548,31 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * Inflates the app-list pane if it does not exist yet, without attaching it, and returns it.
+     *
+     * <p>Called from the model feed so the pane is populated from the FIRST app bind rather than
+     * from whenever it is first shown. Measured on a folded cold start (2026-09-01): the pane was
+     * inflated lazily by the unfold itself, long after {@code bindAllApplications} had run, so the
+     * feed had nothing to feed and the pane landed with {@code storeApps=0} -- still empty 2.5s
+     * later, populated only at ~3.1s when the next bind arrived. That is the owner's "on the first
+     * unfold it takes a few seconds for the app list to render, then it is instant". Inflating here
+     * costs ~23ms once and makes the first unfold as warm as every later one.
+     *
+     * <p>Inflation is deliberately independent of posture: the pane holds its own AllAppsStore and
+     * is fed while detached (see {@link #getAresAppListPaneForModelFeed()}), so building it while
+     * folded is exactly what makes the first unfold instant.
+     */
+    public AresPanelAllAppsContainerView aresEnsureAppListPaneInflated() {
+        if (mAresAppList == null) {
+            // Inflated, not constructed: onFinishInflate() is where the container binds its
+            // adapters and initialises search, and it never runs for a programmatically built view.
+            mAresAppList = (AresPanelAllAppsContainerView) LayoutInflater.from(getContext())
+                    .inflate(R.layout.ares_panel_all_apps, this, false);
+        }
+        return mAresAppList;
+    }
+
+    /**
      * Per-posture ownership of the floating search affordance.
      *
      * Both the folded container and the unfolded pane are full
@@ -1498,20 +1594,30 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
     private void syncAresAppListPane() {
         if (!isTwoPanelEnabled() || getChildCount() < 2) {
-            if (mAresAppList != null && mAresAppList.getParent() instanceof ViewGroup oldParent) {
-                oldParent.removeView(mAresAppList);
+            // getChildCount() < 2 is TRANSIENT during a rebind: the pages have been torn down and
+            // panel 1 has not been recreated yet. Tearing the pane out on that transient is what made
+            // the app list flicker on unfold -- measured PANE DETACHED/ATTACHED 1.9s apart, which is a
+            // visibly missing pane, not a repaint. Only detach when two panels are genuinely gone
+            // (folded); otherwise leave the pane alone and let the re-anchor below run once panel 1
+            // exists.
+            if (!isTwoPanelEnabled() && mAresAppList != null) {
+                if (mAresAppList.getParent() instanceof ViewGroup oldParent) {
+                    oldParent.removeView(mAresAppList);
+                }
+                // The pane is out of service until the next unfold. If it was lifted out by a
+                // TEMPORARY detach (removeAllWorkspaceScreens), onDetachedFromWindow never ran, so it
+                // still owns its floating pill in the shared DragLayer -- which stayed stranded on
+                // the folded home on top of the folded container's own pill (owner 2026-09-01).
+                // Do that teardown explicitly; it is idempotent when the real callback did run.
+                mAresAppList.releaseSearchPill();
+                mAresAppListTempDetached = false;
             }
             updateAresSearchOwnership(false);
             return;
         }
         CellLayout panel = (CellLayout) getChildAt(1);
         ShortcutAndWidgetContainer target = panel.getShortcutsAndWidgets();
-        if (mAresAppList == null) {
-            // Inflated, not constructed: onFinishInflate() is where the container binds its
-            // adapters and initialises search, and it never runs for a programmatically built view.
-            mAresAppList = (AresPanelAllAppsContainerView) LayoutInflater.from(getContext())
-                    .inflate(R.layout.ares_panel_all_apps, target, false);
-        }
+        aresEnsureAppListPaneInflated();
         if (mAresAppList.getParent() != target) {
             if (mAresAppList.getParent() instanceof ViewGroup oldParent) {
                 oldParent.removeView(mAresAppList);
@@ -1524,7 +1630,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             lp.y = 0;
             lp.width = target.getMeasuredWidth();
             lp.height = target.getMeasuredHeight();
-            target.addView(mAresAppList, lp);
+            if (mAresAppListTempDetached && mAresAppList.getParent() == null) {
+                // Completes the temporary detach opened by removeAllWorkspaceScreens: re-attach
+                // WITHOUT the window lifecycle, so the pane keeps its inflated content and its
+                // AllApps state instead of tearing down and rebuilding (the flicker).
+                mAresAppListTempDetached = false;
+                target.aresAttachChildTemporarily(mAresAppList, lp);
+            } else {
+                target.addView(mAresAppList, lp);
+            }
         }
         updateAresSearchOwnership(true);
     }

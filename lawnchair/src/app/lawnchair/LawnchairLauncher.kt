@@ -503,6 +503,10 @@ class LawnchairLauncher : QuickstepLauncher() {
         // on isWorkspaceLoading and the widget-bearing (visually empty) screens survive as blank pages
         // to the right unfolded. Re-run the idempotent sync now that binding is done (owner 2026-09-01).
         workspace?.aresResyncDualPaneAfterBind()
+        // Apply the soft rebind now that the rows are final: a rebind whose row set is unchanged (a
+        // fold/unfold, which always triggers one) costs nothing and the grid never flickers; a rebind
+        // that genuinely changed falls back to the full rebuild. See AresHomeAdapter.finishSoftRebind.
+        workspace?.aresHomeList?.aresAdapter?.finishSoftRebind()
     }
 
     override fun handleGestureContract(intent: Intent) {

@@ -2663,6 +2663,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         postDelayed(armed, ViewConfiguration.getLongPressTimeout().toLong())
     }
 
+    /**
+     * A rebind now lifts this view out with a TEMPORARY detach (see
+     * `Workspace.removeAllWorkspaceScreens`), so [onDetachedFromWindow] no longer fires on that path
+     * and its pending-long-press cancel would be skipped -- leaving a timer armed across a fold, the
+     * exact case that cancel exists for. The reparent calls this explicitly instead.
+     */
+    fun cancelEmptySpaceLongPressForReparent() {
+        cancelEmptySpaceLongPress()
+        emptySpacePopupTook = false
+    }
+
     private fun cancelEmptySpaceLongPress() {
         emptySpaceLongPress?.let { removeCallbacks(it) }
         emptySpaceLongPress = null
@@ -2787,9 +2798,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * against a `Launcher` that is no longer the live one.
      */
     override fun onDetachedFromWindow() {
+        // Kept probe, not a leftover. A rebind lifts this list out with a TEMPORARY detach, which does
+        // NOT dispatch these callbacks -- so their presence or absence is the cheapest way to tell a
+        // healthy reparent from a real teardown. A same-frame DETACHED/ATTACHED pair is the temp
+        // detach; a lone DETACHED with a late ATTACHED is a genuine rebuild; NO line at all across a
+        // fold means the callback never ran, and anything living in it silently stopped happening
+        // (that is exactly how the stranded search fob got shipped, 2026-09-01).
+        android.util.Log.i("AresAttach", "DETACHED kids=$childCount w=$width")
         cancelEmptySpaceLongPress()
         emptySpacePopupTook = false
         super.onDetachedFromWindow()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        android.util.Log.i("AresAttach", "ATTACHED kids=$childCount w=$width")
     }
 
     /**
@@ -3011,7 +3034,33 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // sync the CellLayoutLayoutParams so layoutChild() -- which positions us from lp.x/y/
         // width/height rather than from our measured size -- places us full-bleed.
         val host = parent as? ViewGroup
-        val width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
+        var width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
+
+        // Unfold transient (owner 2026-09-01): on the way to the two-panel layout the host
+        // ShortcutAndWidgetContainer is briefly still the FULL window width, so a measure taken then
+        // lays this list out across both panes -- the home grid visibly stretched over the app-list
+        // pane before it snaps back (measured: w=2036 for ~700ms, then w=1018). The device profile is
+        // already updated at config-change time and knows the real panel count, so trust it over the
+        // host's transient width: when two panels are expected but the host still spans the whole
+        // window, lay out at one panel's width immediately. Settled passes are unaffected (the host is
+        // already a single panel then, so the guard does not fire).
+        // A posture change delivers the window resize and the DeviceProfile update as SEPARATE events,
+        // and a layout pass can land between them -- which is why the wide frame was intermittent
+        // (measured on the Pixel across two folds: one clean, one not). On the bad frame the profile
+        // still described the FOLDED display while the container had already grown:
+        //     twoPanels=false availW=1080 hostW=2036 myW=2036   <- rendered full-width
+        //     twoPanels=true  availW=2076 hostW=1018 myW=1018   <- settled, correct
+        // So gating only on isTwoPanels cannot work: it is still false on exactly the frame that needs
+        // the guard. Handle BOTH orderings of the race:
+        //   - profile already updated, container not yet split  -> isTwoPanels && host ~= full width
+        //   - container already grown, profile still stale      -> host much wider than the profile
+        //     says the whole display is, which is itself proof the profile has not caught up.
+        val props = launcher.deviceProfile.deviceProperties
+        val profileSaysTwoPanels = props.isTwoPanels && width >= props.availableWidthPx * 0.9f
+        val profileIsStale = width >= props.availableWidthPx * 1.5f
+        if (profileSaysTwoPanels || profileIsStale) {
+            width /= 2
+        }
         val hostHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
 
         // Keep the host ShortcutAndWidgetContainer from clipping our edge-to-edge overscan. Its

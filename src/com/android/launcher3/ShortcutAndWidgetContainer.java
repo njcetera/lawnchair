@@ -50,6 +50,44 @@ import app.lawnchair.preferences2.PreferenceManager2;
 public class ShortcutAndWidgetContainer extends ViewGroup implements FolderIcon.FolderIconParent {
     static final String TAG = "ShortcutAndWidgetContainer";
 
+    /**
+     * AresLauncher (owner 2026-09-01): temporarily lift a child out of this container WITHOUT the
+     * window detach.
+     *
+     * {@link ViewGroup#detachViewFromParent} only nulls the child's {@code mParent} and compacts the
+     * child array -- it never calls {@code dispatchDetachedFromWindow()}, so {@code mAttachInfo}
+     * survives, {@code onDetachedFromWindow()} never fires, and none of the teardown it triggers runs:
+     * no {@code resetDisplayList()} over the subtree, no {@code RecyclerView.onDetachedFromWindow}
+     * (which ends animations, stops scroll, nulls the LayoutManager's host and releases cached views),
+     * and every {@code AppWidgetHostView} keeps its inflated RemoteViews.
+     *
+     * This exists because a rebind destroys every CellLayout page, and Strategy D parents the home list
+     * inside one -- so the list was torn off the window on every fold (measured: DETACHED/ATTACHED 10ms
+     * apart). Lifting it out first lets the pages be rebuilt normally -- which is what BUILDS the
+     * unfolded dual-pane split -- while the list itself is never detached.
+     *
+     * Contract, per the platform javadoc: detachment must be TEMPORARY and the re-attach must happen in
+     * the same drawing cycle, so these two calls must be paired inside one synchronous block. Between
+     * them the view has no parent and is not drawn.
+     */
+    public void aresDetachChildTemporarily(View child) {
+        if (child != null && child.getParent() == this) {
+            detachViewFromParent(child);
+        }
+    }
+
+    /** Re-attach a child lifted by {@link #aresDetachChildTemporarily}. See that method's contract. */
+    public void aresAttachChildTemporarily(View child, LayoutParams params) {
+        if (child == null || child.getParent() != null) {
+            return;
+        }
+        attachViewToParent(child, -1, params);
+        // attachViewToParent is deliberately lightweight and assumes nothing about redraw, so the
+        // caller owns these (platform javadoc).
+        child.requestLayout();
+        child.invalidate();
+    }
+
     // These are temporary variables to prevent having to allocate a new object just
     // to
     // return an (x, y) value from helper functions. Do NOT use them to maintain

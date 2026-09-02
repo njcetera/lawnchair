@@ -192,12 +192,16 @@ class ModelCallbacks(private var launcher: Launcher) : BgDataModel.Callbacks {
         // ActivityAllAppsContainerView, and each container constructs its own AllAppsStore. Feed it
         // from here, where the full app set, model flags and uid map are in scope -- the store's
         // flags and map have no accessors, so mirroring from the launcher's store elsewhere could
-        // not be faithful. No-op while folded, when the pane does not exist.
-        // Feed the pane's independent store whether or not it is attached (getAresAppListPane is
-        // null while folded, which used to let an install landing while folded skip the pane and
-        // leave the unfolded list stale/empty). Pre-inflate only when the pane is on screen; while
-        // detached, just update the data -- it renders on the next attach.
-        launcher.workspace?.aresAppListPaneForModelFeed?.let { pane ->
+        // not be faithful.
+        //
+        // Feed it whether or not it is ATTACHED (it is detached while folded, which used to let an
+        // install landing while folded leave the unfolded list stale), and inflate it here if it does
+        // not exist YET rather than skipping the feed. Measured on a folded cold start (2026-09-01):
+        // the pane was inflated lazily by the unfold itself, long after this ran, so the feed found
+        // nothing and the first unfold showed an empty list for ~3.1s. Inflating costs ~23ms once.
+        // Pre-inflate the row views only when the pane is actually on screen; while detached, just
+        // update the data -- it renders on the next attach.
+        launcher.workspace?.aresEnsureAppListPaneInflated()?.let { pane ->
             pane.appsStore.setApps(apps, flags, packageUserKeytoUidMap, pane.isAttachedToWindow)
         }
         PopupContainerWithArrow.dismissInvalidPopup(launcher)

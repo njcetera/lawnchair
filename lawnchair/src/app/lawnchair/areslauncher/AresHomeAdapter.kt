@@ -621,6 +621,22 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * collision heals as soon as the user rearranges anything.
      */
     fun addItem(info: ItemInfo) {
+        // During a soft rebind the live list must not change: collect into the buffer, in the same
+        // rank order the normal path would have produced, and let finishSoftRebind decide.
+        val pending = softRebuild
+        if (pending != null) {
+            if (pending.any { it.id == info.id }) return
+            var at = pending.size
+            for (i in pending.indices) {
+                if (sortsAfter(pending[i], info)) {
+                    at = i
+                    break
+                }
+            }
+            pending.add(at, info)
+            return
+        }
+
         if (dropDuplicateWidgetRow(info)) return
 
         var index = items.size
@@ -729,7 +745,72 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private fun isPlaceholder(info: LauncherAppWidgetInfo): Boolean =
         info.restoreStatus != LauncherAppWidgetInfo.RESTORE_COMPLETED
 
+    /**
+     * Rows collected by a **soft rebind** in progress, or null when binding normally.
+     *
+     * A fold/unfold is a config change, and `Launcher.onHandleConfigurationChanged` always ends in
+     * `mModel.rebindCallbacks()` -- a FULL rebind that reaches [clear] and then re-adds every row.
+     * The model data is IDENTICAL across a posture change (only geometry moved), so that teardown is
+     * pure waste: measured on the owner's Pixel, the grid drained to zero and refilled in chunks
+     * (0 -> 6 -> 8 -> 16), each step a layout pass, with widget hosts re-inflated -- the "everything
+     * flickers like it's rendering again" the owner reported. Apps fold smoothly precisely because
+     * they re-LAY OUT rather than rebuild.
+     *
+     * So a rebind no longer destroys anything up front. [clear] opens this buffer, incoming rows
+     * accumulate into it while the live list keeps rendering untouched, and [finishSoftRebind]
+     * compares: an identical row set costs NOTHING (no notify, no view churn, widgets keep their
+     * host views), and a genuinely changed one falls back to the original full teardown.
+     */
+    private var softRebuild: MutableList<ItemInfo>? = null
+
     fun clear() {
+        // Open a soft rebind instead of wiping. Everything the hard teardown does -- releasing views,
+        // tearing down folder wash, resetting the expanded folder -- is DEFERRED to finishSoftRebind
+        // so it only happens if the rows actually changed. Returning here leaves `items` and every
+        // bound view exactly as they are, which is what makes a posture change visually free.
+        softRebuild = ArrayList(items.size)
+        // Safety: binding normally ends in finishBindingItems, but if a bind is ever abandoned the
+        // buffer would stay open and silently swallow every later row (a new install would never
+        // appear). Flush it if bind-complete does not arrive.
+        val list = launcher.workspace?.aresHomeList
+        list?.removeCallbacks(softRebuildFlush)
+        list?.postDelayed(softRebuildFlush, SOFT_REBIND_FLUSH_MS)
+    }
+
+    private val softRebuildFlush = Runnable {
+        if (softRebuild != null) {
+            android.util.Log.w("AresHomeAdapter", "soft rebind never completed; flushing")
+            finishSoftRebind()
+        }
+    }
+
+    /**
+     * Bind-complete. Apply the soft rebind: nothing at all when the rows are unchanged (the posture
+     * -change case), otherwise the original full teardown-and-rebuild.
+     */
+    fun finishSoftRebind() {
+        val pending = softRebuild ?: return
+        softRebuild = null
+        if (sameRows(items, pending)) return
+        hardRebuild(pending)
+    }
+
+    /** Identity comparison by row id and order -- what decides "nothing visually changed". */
+    private fun sameRows(current: List<ItemInfo>, incoming: List<ItemInfo>): Boolean {
+        if (current.size != incoming.size) return false
+        for (i in current.indices) {
+            if (current[i].id != incoming[i].id) return false
+        }
+        return true
+    }
+
+    /** The original clear()+rebind behaviour, for a rebind whose rows genuinely differ. */
+    private fun hardRebuild(pending: MutableList<ItemInfo>) {
+        hardClear()
+        for (info in pending) addItem(info)
+    }
+
+    private fun hardClear() {
         // A rebind can land during a deferred close; drop the posted structural removal so it can't
         // fire against the fresh list. (finishCollapse also guards on the id, but leave nothing posted.)
         pendingCollapse?.let { launcher.workspace?.aresHomeList?.removeCallbacks(it) }
@@ -1552,6 +1633,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
     class ViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
 
     private companion object {
+        /** Safety flush if a soft rebind is opened by clear() and bind-complete never arrives. */
+        private const val SOFT_REBIND_FLUSH_MS = 5000L
         const val TYPE_ICON = 0
         const val TYPE_WIDGET = 1
 

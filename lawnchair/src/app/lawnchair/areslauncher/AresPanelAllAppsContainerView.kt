@@ -113,6 +113,7 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     }
 
     override fun onAttachedToWindow() {
+        android.util.Log.i("AresAttach", "PANE ATTACHED w=" + width)
         // The base class adds mSearchContainer to the DragLayer when the search bar is floating,
         // and onDetachedFromWindow never removes it. This pane is detached and re-attached on every
         // fold cycle, so on the second attach that add would throw ("child already has a parent").
@@ -160,7 +161,24 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * orphaned pill belonging to a pane that no longer exists.
      */
     override fun onDetachedFromWindow() {
+        android.util.Log.i("AresAttach", "PANE DETACHED w=" + width)
         super.onDetachedFromWindow()
+        releaseSearchPill()
+    }
+
+    /**
+     * Takes this pane's floating pill back out of the shared DragLayer, for the case where
+     * [onDetachedFromWindow] will never run.
+     *
+     * `Workspace.removeAllWorkspaceScreens` lifts the pane out with `detachViewFromParent` so a
+     * rebind does not destroy its laid-out content. That skips the window-attach callbacks entirely,
+     * so when the launcher then turns out to be FOLDED -- the pane is not coming back and is quietly
+     * dropped rather than re-attached -- [onDetachedFromWindow] never fires and the pill was left
+     * stranded on the folded home screen, on top of the folded container's own (owner 2026-09-01;
+     * measured as zero PANE DETACHED lines across a fold). Idempotent: removing a view whose parent
+     * is already null is a no-op, so the genuine-detach path calling it too is harmless.
+     */
+    fun releaseSearchPill() {
         (searchView?.parent as? ViewGroup)?.removeView(searchView)
     }
 
