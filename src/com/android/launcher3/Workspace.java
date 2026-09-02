@@ -1858,6 +1858,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (isAresEditMode()) {
             return false;
         }
+        // Same reason the list pins its own vertical scroll while the inline folder-rename editor is
+        // up: the editor is a real EditText at an absolute DragLayer position computed ONCE, so any
+        // movement of the surface underneath leaves it floating (owner 2026-09-02). This is the
+        // belt-and-braces half -- AresPaneSwipeController normally claims horizontal drags on home
+        // before the PagedView sees them, but it stands down in edit mode, which is exactly where
+        // this interception would otherwise take over.
+        if (mAresHomeList != null && mAresHomeList.isInlineRenameActive()) {
+            return false;
+        }
         return super.onInterceptTouchEvent(ev);
     }
 

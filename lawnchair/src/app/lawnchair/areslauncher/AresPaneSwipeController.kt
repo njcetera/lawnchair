@@ -111,6 +111,15 @@ class AresPaneSwipeController(launcher: Launcher) :
         if (AresFolderDrop.isLiveArming()) {
             return false
         }
+        // The inline folder-rename editor is a real EditText pinned at an absolute DragLayer
+        // position computed once from the title band. Paging to the app list slides the whole
+        // surface out from under it while it stays put (owner 2026-09-02: "I can still scroll
+        // horizontally"). The list already pins its own vertical scroll for the same reason; this is
+        // the horizontal half, and it has to live HERE because touch controllers run before any
+        // child view sees the event.
+        if (workspace?.aresHomeList?.isInlineRenameActive() == true) {
+            return false
+        }
         // Both directions work from anywhere on the pane. Opening was originally scoped to a
         // trailing-edge band, but that made the gesture feel fussy -- the user asked for any
         // horizontal drag on the home screen to pull the app list in, matching how closing already

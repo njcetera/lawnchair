@@ -576,7 +576,7 @@ object AresTestInfo {
             "end" -> list.dismissInlineFolderRename(false)
             else -> return "bad-arg"
         }
-        return "editor=" + list.hasInlineRenameEditorForTest() +
+        return "editor=" + list.isInlineRenameActive() +
             "|scrollLocked=" + list.isScrollLockedForTest()
     }
 

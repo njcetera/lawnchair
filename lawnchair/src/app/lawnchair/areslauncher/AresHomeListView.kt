@@ -1134,8 +1134,16 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * semantics (blank refused), fired on IME "done" or focus loss; either way the editor is removed
      * and the drawn title restored.
      */
-    /** Test-only: whether the inline rename editor is currently up. See `REQUEST_WP_RENAME_INLINE`. */
-    fun hasInlineRenameEditorForTest(): Boolean = inlineRenameEditor != null
+    /**
+     * Whether the inline folder-rename editor is currently up.
+     *
+     * Read by every gesture owner that must stand down for the duration: the list pins its own
+     * vertical scroll, and both horizontal paths -- `AresPaneSwipeController` and the PagedView
+     * interception in `Workspace` -- decline the gesture. The editor is absolutely positioned in the
+     * shared DragLayer and is never repositioned, so ANY movement of the surface underneath leaves it
+     * floating (owner 2026-09-02).
+     */
+    fun isInlineRenameActive(): Boolean = inlineRenameEditor != null
 
     /** Test-only: whether the list is pinned. See `REQUEST_WP_RENAME_INLINE`. */
     fun isScrollLockedForTest(): Boolean = masonry.aresScrollLocked
