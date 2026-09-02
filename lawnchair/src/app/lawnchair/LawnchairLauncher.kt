@@ -496,6 +496,18 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun finishBindingItems(pagesBoundFirst: com.android.launcher3.util.IntSet?) {
         super.finishBindingItems(pagesBoundFirst)
+        // Apply the soft rebind FIRST: it is what makes the grid final. A rebind whose row set is
+        // unchanged (a fold/unfold, which always triggers one) costs nothing and the grid never
+        // flickers; one that genuinely changed falls back to the full rebuild, which tears every tile
+        // down and re-adds it. See AresHomeAdapter.finishSoftRebind.
+        //
+        // ORDER MATTERS, and getting it wrong is what broke the edit-mode icon transition
+        // (owner 2026-09-01, "the tile animation moves off the tile midway"). AresIconTransition's
+        // contract is "bind-complete = the reloaded icons are on the grid", and it resolves its
+        // per-tile covers on that signal. With the soft rebind the grid is NOT final until the buffer
+        // is applied, so calling playFrozen first told the transition to start resolving and only then
+        // rebuilt the tiles underneath it.
+        workspace?.aresHomeList?.aresAdapter?.finishSoftRebind()
         // Bind-complete = the reloaded icons are on the grid. If an icon-pack pick froze the old grid
         // (AresEditCarousel), wipe to the finished new one now; a no-op otherwise.
         AresIconTransition.playFrozen(this, workspace?.aresHomeList)
@@ -503,10 +515,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         // on isWorkspaceLoading and the widget-bearing (visually empty) screens survive as blank pages
         // to the right unfolded. Re-run the idempotent sync now that binding is done (owner 2026-09-01).
         workspace?.aresResyncDualPaneAfterBind()
-        // Apply the soft rebind now that the rows are final: a rebind whose row set is unchanged (a
-        // fold/unfold, which always triggers one) costs nothing and the grid never flickers; a rebind
-        // that genuinely changed falls back to the full rebuild. See AresHomeAdapter.finishSoftRebind.
-        workspace?.aresHomeList?.aresAdapter?.finishSoftRebind()
     }
 
     override fun handleGestureContract(intent: Intent) {

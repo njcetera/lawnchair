@@ -297,6 +297,9 @@ object AresIconTransition {
         // per tile: cx, cy, halfX, halfY, scaleX, scaleY, rotation, particleCount, idBase.
         private var snap = FloatArray(0)
         private var snapCount = 0
+
+        /** Reused by [rebuildSnapshot] so the per-frame origin re-read allocates nothing. */
+        private val originScratch = IntArray(2)
         private var snapRefUnit = 0f
         private var wasHolding = false
         private var holdStartMs = 0L
@@ -329,6 +332,26 @@ object AresIconTransition {
          * holds the previous snapshot across a reload's momentary empty frame.
          */
         private fun rebuildSnapshot(list: ViewGroup, rv: RecyclerView?) {
+            // Re-read the list's drag-layer origin every snapshot rather than trusting the one cached
+            // in show(). Tile positions are mapped as origin + container.x/y, so a cached origin is
+            // only correct while the list stays put -- and a model reload now REPARENTS it (Workspace
+            // .removeAllWorkspaceScreens lifts it out of the page being destroyed and re-attaches it
+            // into the freshly built one). A stale origin shifts every cover by the same delta, which
+            // is the covers sliding off their tiles midway through the animation (owner 2026-09-01).
+            (context as? Launcher)?.dragLayer?.let { dl ->
+                // ZERO IT FIRST. getDescendantCoordRelativeToSelf takes `coord` as an IN/OUT point --
+                // "the coordinate that we want mapped" (Utilities.getDescendantCoordRelativeToAncestor)
+                // -- and transforms it in place rather than resetting it. show() gets away with a bare
+                // call because it passes a freshly allocated intArrayOf(0, 0) every time; a REUSED
+                // scratch array must be reset or each frame re-maps the previous result and the origin
+                // runs away unbounded (measured 2026-09-01: 20 -> 280 -> 820 -> 2020 over four frames,
+                // which is the covers sliding off the screen).
+                originScratch[0] = 0
+                originScratch[1] = 0
+                dl.getDescendantCoordRelativeToSelf(list, originScratch)
+                originX = originScratch[0].toFloat()
+                originY = originScratch[1].toFloat()
+            }
             // One reference size for ALL particles, taken from a representative app tile.
             var refUnit = 0f
             var refArea = 0f
