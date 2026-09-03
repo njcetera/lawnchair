@@ -75,4 +75,13 @@ dependencies {
     implementation libs.androidx.test.runner
     implementation libs.androidx.test.rules
     implementation libs.google.truth
+    // ViewCapture anomaly detectors (restored from f3112aea02) analyse ExportedData/FrameData/ViewNode
+    // protos, which viewcapturelib generates under Gradle -- verified, not assumed:
+    // viewcapturelib/build/generated/java/generateDebugProto/.../ExportedData.java exists.
+    implementation project(":viewcapturelib")
+    // The proto RUNTIME does not leak transitively -- viewcapturelib declares javalite as
+    // `implementation`, so ExportedData resolves here but its GeneratedMessageLite superclass does
+    // not. Declared directly rather than widened to `api` over there, which would change that
+    // module for every consumer.
+    implementation libs.protobuf.javalite
 }
