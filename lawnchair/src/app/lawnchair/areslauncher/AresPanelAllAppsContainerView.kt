@@ -33,6 +33,85 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
 ) : ActivityAllAppsContainerView<Launcher>(context, attrs, defStyleAttr) {
+
+    /**
+     * A persistent panel is always showing all apps -- there is no closed state to be in. Mirrors
+     * `TaskbarAllAppsContainerView`, which returns a literal `true` for the same reason.
+     *
+     * The flag gates very little: fast-scroller touch interception and one `SearchTransitionController`
+     * check. Returning true is correct for a panel that is never dismissed.
+     */
+    override fun isInAllApps(): Boolean = true
+
+    /**
+     * No-op. The bottom-sheet background is chrome for a sheet that slides over the workspace; this
+     * pane *is* part of the workspace and sits directly on the wallpaper. `SecondaryLauncherAllAppsContainerView`
+     * no-ops this for the same reason.
+     */
+    override fun updateBackgroundVisibility(deviceProfile: DeviceProfile) {}
+
+    /**
+     * This *is* the workspace panel, so the §11c alignment padding it needs is the panel's, not the
+     * folded sheet's. See [AresAllApps.appListTopPaddingPx].
+     */
+    override fun isAresWorkspacePanel(): Boolean = true
+
+    /**
+     * Same delegate the folded container uses, so this pane gets the identical §17 collapsed
+     * bottom-right affordance rather than the stock top-anchored bar. Using a different delegate
+     * here would reintroduce exactly the divergence this class exists to remove.
+     */
+    override fun createSearchUiDelegate() = AresSearchUiDelegate(this)
+
+    /**
+     * No-op, for the same reason as [AresHomeListView.setPadding]: `ShortcutAndWidgetContainer`
+     * unconditionally calls `setPadding()` on every non-widget child each measure pass to centre an
+     * icon inside its grid cell. That is meaningless for a full-bleed pane and would clobber the
+     * container's own padding on every layout.
+     */
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+        // Intentionally empty.
+    }
+
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        // ShortcutAndWidgetContainer.onMeasure() calls setMeasuredDimension() before measuring its
+        // children, so the parent's dimensions are already resolved here. Size to them and sync the
+        // CellLayoutLayoutParams, since layoutChild() positions us from lp.x/y/width/height rather
+        // than from our measured size.
+        val host = parent as? ViewGroup
+        val width = host?.measuredWidth?.takeIf { it > 0 } ?: MeasureSpec.getSize(widthSpec)
+        val cellHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+
+        // Extend the pane PAST its workspace cell -- up behind the status bar and down behind the
+        // nav/hotseat -- so the app list reaches the physical screen edges and scrolled rows flow
+        // behind those bars, exactly the folded full-screen sheet's behaviour (owner 2026-08-25,
+        // "reach the top and bottom edge like when it's closed"). The whole ancestor chain
+        // (ShortcutAndWidgetContainer/CellLayout/Workspace) is clipChildren=false, and layoutChild
+        // positions us straight from lp.x/y, so a negative lp.y lifts the pane above the cell.
+        // Extensions equal the recycler's top/bottom padding (AresAllApps), so content RESTS in the
+        // cell area and only SCROLLS behind the bars. Use mActivityContext (the resolved Launcher),
+        // NOT getContext(), which can be a wrapper and silently yield 0 here.
+        val dp = mActivityContext.deviceProfile
+        val topExtend = dp.insets.top + dp.workspacePadding.top
+        val botExtend = dp.insets.bottom + dp.workspacePadding.bottom
+        val height = cellHeight + topExtend + botExtend
+
+        // Mutate the existing lp rather than calling setLayoutParams(), which would trigger a
+        // nested requestLayout() from inside a measure pass.
+        (layoutParams as? CellLayoutLayoutParams)?.let { lp ->
+            lp.isLockedToGrid = false
+            lp.x = 0
+            lp.y = -topExtend
+            lp.width = width
+            lp.height = height
+        }
+
+        super.onMeasure(
+            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+        )
+    }
+
     /**
      * Whether the base class's window registrations (the device-profile change listener and the
      * cross-window blur listener) are currently live for this pane.
