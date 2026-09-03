@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
@@ -273,17 +274,25 @@ class AresDeviceShapeTest {
         val tiles = driver.tiles()
         assumeTrue("no home tiles rendered", tiles.isNotEmpty())
 
-        // The LAUNCHER's own window width, from the same DeviceProfile dump this class already
-        // reads for isTwoPanels — not `device.displayWidth`, which an earlier version used and
-        // which is the nominal DEFAULT display. Those differ: the AresFold AVD has two displays and
-        // the 2076x2152 panel is powered off, so the default-display answer can describe a screen
-        // nobody is looking at. The KDoc above already states the rule this was breaking — "the
-        // reference must come from the same measurement as the subject" — and the subject here is
-        // a tile laid out inside the launcher's window.
-        val width = launcherWindowWidth() ?: device.displayWidth.toFloat()
+        // SUBJECT AND REFERENCE MUST BE IN THE SAME COORDINATE SPACE, and two earlier versions of
+        // this assertion were not. `tile.box` is the holder's layout box in the RECYCLERVIEW's own
+        // coordinates (see `AresLauncherDriver.Tile.box`), while both previous references were
+        // window/display-sized: on the unfolded AVD the list is ~1018px wide inside a 2076px
+        // window, so comparing the two carried ~1058px of dead slack and the check could not fail.
+        // Swapping `device.displayWidth` for the launcher's `widthPx` fixed the wrong half of the
+        // problem — it made the reference more correct while leaving it in the wrong space.
+        //
+        // `containerOnScreen` is `getLocationOnScreen`, i.e. real screen pixels including every
+        // transform, so it IS comparable to the window. That is the pairing used below.
+        val width = launcherWindowWidth()
+        assumeTrue("could not read the launcher's window width from its DeviceProfile dump", width != null)
         for (tile in tiles) {
-            assertThat(tile.box.left).isAtLeast(-1f)
-            assertThat(tile.box.right).isAtMost(width + 1f)
+            val left = tile.containerOnScreen.x
+            val right = left + tile.size.x * tile.scale
+            assertWithMessage("tile '${tile.title}' at screen x=$left..$right, window width=$width")
+                .that(left).isAtLeast(-1f)
+            assertWithMessage("tile '${tile.title}' at screen x=$left..$right, window width=$width")
+                .that(right).isAtMost(width!! + 1f)
         }
     }
 

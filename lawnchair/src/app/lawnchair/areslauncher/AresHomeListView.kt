@@ -3168,6 +3168,22 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private var measuredHostWindowTop = -1
     private val tmpLoc = IntArray(2)
 
+    /**
+     * Whether this device is a foldable, cached for the process.
+     *
+     * Read in [onMeasure], so it must not be a per-pass lookup. The value cannot change: it is
+     * `hasSystemFeature(FEATURE_SENSOR_HINGE_ANGLE)` (`DisplayController.java:589`), a
+     * PackageManager query, and the `Info` object is rebuilt on a config change but always
+     * recomputes the same answer.
+     *
+     * `DisplayController.INSTANCE.get()` is cheap (a Dagger `DoubleCheck` behind a volatile field,
+     * no IPC and no allocation) so this is a small win rather than a fix — but a measure pass is
+     * the wrong place to resolve a component for a constant.
+     */
+    private val isFoldableDevice: Boolean by lazy {
+        DisplayController.INSTANCE.get(context).info.isFoldable
+    }
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         // Re-read the grid metrics each measure: folding changes the device profile, and the
         // column count and cell height must follow it or the packing is computed against stale
@@ -3230,8 +3246,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // `isFoldable()` is the posture-independent accessor this project built for this exact class
         // of bug, and it still excludes the tablet-rotation and multi-window cases above: a tablet
         // is not a foldable.
-        val isFoldable = DisplayController.INSTANCE.get(context).info.isFoldable
-        val profileIsStale = isFoldable && width >= props.availableWidthPx * 1.5f
+        val profileIsStale = isFoldableDevice && width >= props.availableWidthPx * 1.5f
         if (profileIsStale) {
             // PROOF OF PATH. This branch fires only on a transient mid-fold frame, which no
             // at-rest test can observe -- running the shape suite folded and unfolded shows the
