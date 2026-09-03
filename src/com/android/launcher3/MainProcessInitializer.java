@@ -94,8 +94,13 @@ public class MainProcessInitializer implements ResourceBasedOverride {
         // call sites plus AppDatabase and WallpaperService `runBlocking` on Room, each now a
         // main-thread `detectDiskReads` violation with a captured stack. Penalties are `penaltyLog`
         // only -- no death, no dialog -- so it is log noise and stack-capture overhead, not a
-        // crash risk. Whether a diagnostic instrument should run on the owner's daily driver is
-        // THEIR call, so it is left armed and flagged rather than changed overnight.
+        // crash risk.
+        //
+        // OWNER DECISION 2026-09-03: KEEP ENABLED. `penaltyLog` writes only to logcat, which is a
+        // fixed-size in-memory ring buffer -- entries are evicted automatically and nothing
+        // accumulates on disk or in storage -- so there is no cleanup burden to weigh against the
+        // debugging value. It stays on for the debug build (i.e. the owner's Pixel), on purpose,
+        // as the diagnostic for the six leak rows in the ledger that `meminfo` could not see.
         //
         // penaltyDeath() REMOVED, and this is not a preference. It was on the VM policy, whose
         // penalties fire from the finalizer/GC thread at an arbitrary later moment, so it is a
