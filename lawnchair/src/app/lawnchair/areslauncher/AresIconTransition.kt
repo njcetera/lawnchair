@@ -103,6 +103,14 @@ object AresIconTransition {
     private var holdTimeout: Runnable? = null
     private var holdTarget: View? = null
 
+    /**
+     * True while a sparkle overlay is mounted on the drag layer (between [freeze] and its teardown).
+     * Read by the `ares-icon-transition` test channel to prove the overlay actually appears on the
+     * current device/posture, rather than silently failing to construct (null drag layer, zero-size,
+     * a color-resolve throw) — the "the animation isn't happening" class.
+     */
+    val isShowing: Boolean get() = active != null
+
     /** Cancel any in-flight sparkle overlay (activity destroy / edit-mode exit). Safe when idle. */
     fun cancel() {
         clearHoldTimeout()

@@ -408,6 +408,16 @@ object AresTestInfo {
     const val REQUEST_PANE_ALIGN = "ares-pane-align"
 
     /**
+     * Drives and reads the edit-mode icon sparkle ([AresIconTransition]) so a test can prove the
+     * overlay actually MOUNTS on the current device and posture, instead of silently failing to
+     * appear — the "the settings animation isn't happening" class (owner report 2026-09-03). This
+     * exercises the overlay MECHANISM (drag-layer add, color resolve, teardown), not the carousel
+     * tap wiring that fires it in real use. Sub-commands: `fire` (show the sparkle over the home
+     * grid), `cancel` (tear it down), `status` (is one up right now).
+     */
+    const val REQUEST_ICON_TRANSITION = "ares-icon-transition"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -538,7 +548,36 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_ICON_TRANSITION -> iconTransition(arg)
         else -> null
+    }
+
+    /** See [REQUEST_ICON_TRANSITION]. Every sub-command runs on the UI thread: freeze/cancel touch views. */
+    private fun iconTransition(arg: String?): Bundle? = when (arg) {
+        "fire" -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher ->
+                val list = launcher.workspace?.aresHomeList
+                if (list == null) {
+                    "no-home-list"
+                } else {
+                    AresIconTransition.freeze(launcher, list)
+                    "showing=${AresIconTransition.isShowing}"
+                }
+            },
+        )
+        "cancel" -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { _ ->
+                AresIconTransition.cancel()
+                "showing=${AresIconTransition.isShowing}"
+            },
+        )
+        null, "", "status" -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { _ -> "showing=${AresIconTransition.isShowing}" },
+        )
+        else -> respond("unknown-subcommand:$arg")
     }
 
     /** See [REQUEST_PANE_ALIGN]. */

@@ -487,6 +487,13 @@ class AresLauncherDriver {
         return true
     }
 
+    /**
+     * Drives/reads the edit-mode icon sparkle overlay (see AresTestInfo.REQUEST_ICON_TRANSITION).
+     * `sub` is one of `fire`, `cancel`, `status`. Returns the raw answer (`showing=<bool>` or
+     * `no-home-list`), or null when the channel could not answer.
+     */
+    fun iconSparkle(sub: String): String? = call("ares-icon-transition", sub)?.getString("response")
+
     /** True when BOTH app-list edge glows are finished (no held overscroll pull). */
     fun overscrollFinished(): Boolean {
         val p = (call("ares-overscroll-state")?.getString("response") ?: "true|true").split("|")
