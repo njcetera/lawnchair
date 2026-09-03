@@ -53,9 +53,12 @@ object AresIconTint {
     //   which cropped the synth glyph into the top-left corner).
 // 9=non-adaptive wash gets its own CustomAdaptiveIconDrawable theme background, so the legacy
 //   BaseIconFactory wrapper cannot paint a palette-derived WHITE background behind it.
-// 10=the wash gains a FLOOR (AresWashMath.DEFAULT_WASH_FLOOR), so dark legacy artwork no longer
-//   collapses into its own tile. The floor itself is also in the key -- see stateFragment.
-    private const val RENDER_VERSION = 10
+// 10=the wash gains a FLOOR, so dark legacy artwork no longer collapses into its own tile.
+// 11=the floor is REPLACED by a tile-aware pole: the wash ramps from the accent toward white on a
+//   dark tile and toward black on a light one, so its worst pixel equals the accent instead of a
+//   dimmed accent. Owner 2026-09-02: floor 0.80 was still "not enough contrast" beside the
+//   monochrome icons, which render at the accent. The span is also in the key -- see stateFragment.
+    private const val RENDER_VERSION = 11
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
@@ -106,55 +109,70 @@ object AresIconTint {
     }
 
     /**
-     * The wash floor actually in force, and the one-build A/B hook for it.
+     * The shading range actually in force, and the one-build A/B hooks around it.
      *
-     * Normally [AresWashMath.DEFAULT_WASH_FLOOR]. `setprop debug.ares.wash_floor 0` reproduces the
-     * PRE-FIX rendering from these exact bytes, which is what makes this fix's verification a real
-     * negative control rather than a before/after of two different builds. Any value in 0..1 works,
-     * so an intermediate floor can be measured without recompiling.
+     * Normally [AresWashMath.DEFAULT_WASH_SPAN]; `setprop debug.ares.wash_span 0.35` retunes it
+     * without a rebuild, which matters because "how much shading" is a taste question the owner has
+     * to answer by looking. `setprop debug.ares.wash_legacy 1` reproduces the ORIGINAL
+     * `accent * luminance` rendering from these exact bytes, so the fix can be verified against a
+     * real negative control rather than a before/after of two different builds.
      *
-     * Read ONCE per process, deliberately: the value is folded into the icon cache key
-     * ([stateFragment]), so changing it mid-process could only produce a mix of icons baked at two
-     * different floors. The A/B procedure is setprop -> force-stop -> relaunch, which re-reads it.
+     * Read ONCE per process, deliberately: both values are folded into the icon cache key
+     * ([stateFragment]), so changing one mid-process could only produce a mix of icons baked two
+     * different ways. The A/B procedure is setprop -> force-stop -> relaunch, which re-reads them.
      */
-    private val washFloorOverride: Float? by lazy {
-        Utilities.getSystemProperty("debug.ares.wash_floor", "")
+    private val washSpanOverride: Float? by lazy {
+        Utilities.getSystemProperty("debug.ares.wash_span", "")
             .toFloatOrNull()
             ?.takeIf { it in 0f..1f }
-            ?.also { Log.w(TAG, "wash floor OVERRIDDEN to $it via debug.ares.wash_floor") }
+            ?.also { Log.w(TAG, "wash span OVERRIDDEN to $it via debug.ares.wash_span") }
     }
 
-    private fun washFloor(): Float = washFloorOverride ?: AresWashMath.DEFAULT_WASH_FLOOR
+    private val washLegacy: Boolean by lazy {
+        (Utilities.getSystemProperty("debug.ares.wash_legacy", "") == "1")
+            .also { if (it) Log.w(TAG, "wash LEGACY (pre-fix) path via debug.ares.wash_legacy") }
+    }
+
+    private fun washSpan(): Float = washSpanOverride ?: AresWashMath.DEFAULT_WASH_SPAN
 
     /**
-     * Full-accent duotone colour filter toward [accent]. Used only for the non-adaptive fallback in
-     * [wash]. The arithmetic, the measurements behind the floor, and why a plain `SRC_IN` tint is
-     * the wrong fix here all live in [AresWashMath] -- an Android-free file so `:ares-geom-tests`
-     * can assert on the matrix the device actually uses rather than on a copy of it.
+     * Duotone colour filter for the non-adaptive fallback in [wash]: a band running from [accent]
+     * to whichever pole is furthest from [tile]. The arithmetic and the reasoning live in
+     * [AresWashMath] -- an Android-free file so `:ares-geom-tests` can assert on the matrix the
+     * device actually uses rather than on a copy of it.
      *
-     * Measured on device 2026-09-02 (emulator-5554, dynamic blue palette, DARK mode) after this
-     * landed: a dark-artwork legacy probe rendered #8FA3C0 on tile #304765 = **3.98:1**, where the
-     * same artwork at floor 0 models to 1.44:1. The rendered glyph came out at exactly
-     * `accent * 0.817`, against a predicted `0.80 + 0.20 * 0.085` -- so the matrix, offset-column
-     * units included, does on the device what the model says it does.
+     * [tile] is not decoration. The original formula ramped toward a FIXED black pole, which is
+     * away from a light tile (fine) and straight into a dark one (the bug). Passing the tile is
+     * what lets the ramp choose its direction.
      */
-    private fun fullWashFilter(accent: Int): ColorFilter = ColorMatrixColorFilter(
+    private fun fullWashFilter(accent: Int, tile: Int): ColorFilter = ColorMatrixColorFilter(
         ColorMatrix(
-            AresWashMath.washMatrix(
-                Color.red(accent), Color.green(accent), Color.blue(accent), washFloor(),
-            ),
+            if (washLegacy) {
+                AresWashMath.legacyWashMatrix(Color.red(accent), Color.green(accent), Color.blue(accent))
+            } else {
+                AresWashMath.washMatrix(
+                    Color.red(accent), Color.green(accent), Color.blue(accent),
+                    Color.red(tile), Color.green(tile), Color.blue(tile),
+                    washSpan(),
+                )
+            },
         ),
     )
 
     /**
      * Fallback for a NON-adaptive icon (no layers to monochrome): if theming is active, fold the
-     * icon toward the [accent] at full intensity (in place) and return it; else return it untouched.
+     * icon onto a readable band between [accent] and the pole away from [tile] (in place) and
+     * return it; else return it untouched.
+     *
+     * [tile] must be the colour this icon is actually painted on -- `ares[0]`, the same value the
+     * caller uses for the adaptive background. Pass the wrong one and the ramp picks the wrong
+     * direction, which is precisely the defect being fixed.
      */
-    fun wash(icon: Drawable, prefs: PreferenceManager2, accent: Int): Drawable {
+    fun wash(icon: Drawable, prefs: PreferenceManager2, accent: Int, tile: Int): Drawable {
         if (!prefs.aresIconTintEnabled.firstBlocking()) return icon
         // mutate() first so the wash never bleeds through a shared ConstantState to other users of
         // the same drawable (nightly 2026-08-28, finding 7).
-        return icon.mutate().apply { colorFilter = fullWashFilter(accent) }
+        return icon.mutate().apply { colorFilter = fullWashFilter(accent, tile) }
     }
 
     /**
@@ -171,11 +189,11 @@ object AresIconTint {
         if (!prefs.aresIconTintEnabled.firstBlocking()) return "tint=v$RENDER_VERSION:off"
         val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val c = themedColors(context)
-        // The floor is part of the KEY, not just the rendering. Without it a `setprop
-        // debug.ares.wash_floor` A/B would compare two runs that both served the same cached
+        // The span and the legacy flag are part of the KEY, not just the rendering. Without that a
+        // `setprop debug.ares.wash_*` A/B would compare two runs that both served the same cached
         // bitmaps and report no difference -- the same shape of silent false-green a stale Gradle
         // UP-TO-DATE produced here on 2026-09-02, where four negative controls "passed" without
         // ever running.
-        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}:f${washFloor()}"
+        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}:s${washSpan()}:l$washLegacy"
     }
 }

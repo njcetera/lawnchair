@@ -263,14 +263,18 @@ class LawnchairIconProvider @Inject constructor(
                     return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
-            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash -- toward
-            // ares[1], the GLYPH colour, exactly like the themed path tints its monochrome layer.
-            // It used to wash toward ares[0], which is the BACKGROUND colour this same call then
-            // paints behind it: dark-on-dark by construction. Measured on the owner Pixel
-            // 2026-09-02: themed icons render #FF88B4 glyph on #610033 (6.1:1), while a washed
-            // legacy icon was #610033 artwork on a #610033 tile. Owner reported it twice as "the
-            // glyph is a bit dark".
-            val washed = AresIconTint.wash(result, prefs2, ares[1])
+            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash. BOTH colours
+            // matter and they are not interchangeable: ares[1] is the GLYPH accent the band starts
+            // at, ares[0] is the TILE this same call then paints behind it, which is what decides
+            // whether the band ramps toward white or toward black.
+            //
+            // Two separate defects were fixed here, in that order. First the wash was aimed at
+            // ares[0] -- the tile's own colour -- so it was dark-on-dark by construction. Then,
+            // aimed correctly at ares[1], it still ramped toward a FIXED black pole, which is away
+            // from a light tile but straight into a dark one. Owner Pixel 2026-09-02, palette
+            // #FF88B4 on #610033: adaptive icons render at 6.06:1 on the monochrome path while a
+            // washed legacy icon managed 3.96:1 beside them, and the owner said so.
+            val washed = AresIconTint.wash(result, prefs2, ares[1], ares[0])
             // Take over ONLY the wrap that BaseIconFactory's legacy branch would have done:
             // a non-adaptive icon that did NOT come from an icon pack
             // (normalizeAndWrapToAdaptiveIcon shrinks only when `!isFromIconPack &&

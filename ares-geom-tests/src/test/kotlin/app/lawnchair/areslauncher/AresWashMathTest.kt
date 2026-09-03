@@ -5,12 +5,14 @@ import java.io.File
 import org.junit.Test
 
 /**
- * Regression cover for the non-adaptive icon wash (owner report, twice: "the glyph is a bit dark").
+ * Regression cover for the non-adaptive icon wash (owner report, three times).
  *
- * The defect was pure arithmetic -- `out = accent * luminance(src)`, a ceiling with no floor, so a
- * dark legacy icon washed to near-black and was then drawn on the dark themed tile at 1.44:1. It
- * survived for weeks because the only fixture anyone checked it against happened to be light
- * artwork, and even that one was readable only in its very brightest pixels.
+ * The defect was pure arithmetic. `out = accent * luminance(src)` is a ramp from a FIXED black
+ * pole; on a light tile black is the pole furthest from the tile so it was right by accident, and
+ * on a dark tile it drove the glyph into its own background. A floor was tried first and only
+ * patched the symptom -- it still ramped toward black, so its best case was a *dimmed* accent
+ * (3.96:1 on the owner's palette) sitting beside monochrome icons rendered at the accent itself
+ * (6.06:1). The owner saw both at once and said it still was not enough.
  *
  * Arithmetic is the one part of this launcher a JVM test can hold still, so this is where the
  * decision is pinned. Every test below is device-agnostic: it either drives the shipped matrix
@@ -21,74 +23,7 @@ class AresWashMathTest {
     private val repoRoot = File(System.getProperty("user.dir")).parentFile
 
     // ---------------------------------------------------------------------------------------
-    // The matrix itself
-    // ---------------------------------------------------------------------------------------
-
-    /**
-     * The offset column is in 0..255 units, not 0..1. Writing it as 0..1 compiles, runs, and
-     * produces a near-black glyph -- it silently reintroduces the exact bug. Nothing else in the
-     * build would catch that, so it is asserted first and directly: a BLACK source pixel must come
-     * out at `accent * floor`.
-     */
-    @Test
-    fun `black source washes to accent times floor`() {
-        val floor = 0.80f
-        val m = AresWashMath.washMatrix(0xFF, 0x88, 0xB4, floor)
-        val out = AresWashMath.applyMatrix(m, 0, 0, 0)
-
-        assertThat(out[0]).isEqualTo((0xFF * floor).toInt())
-        assertThat(out[1]).isEqualTo((0x88 * floor).toInt())
-        assertThat(out[2]).isEqualTo((0xB4 * floor).toInt())
-    }
-
-    /**
-     * A WHITE source pixel must come out at the FULL accent, at any floor. This is what keeps the
-     * fix from being "just tint everything": the top of the range still reaches the accent exactly,
-     * so a light legacy icon renders as it always did.
-     */
-    @Test
-    fun `white source washes to the full accent at every floor`() {
-        for (floor in listOf(0.0f, 0.55f, 0.80f, 1.0f)) {
-            val m = AresWashMath.washMatrix(0xFF, 0x88, 0xB4, floor)
-            val out = AresWashMath.applyMatrix(m, 255, 255, 255)
-            assertThat(out[0]).isWithin(1).of(0xFF)
-            assertThat(out[1]).isWithin(1).of(0x88)
-            assertThat(out[2]).isWithin(1).of(0xB4)
-        }
-    }
-
-    /**
-     * Shape must survive. A plain `SRC_IN` tint is the obvious fix and is wrong here: many legacy
-     * icons are fully opaque squares with no alpha shape, and SRC_IN renders them as solid coloured
-     * blocks with the artwork thrown away. So the wash has to stay strictly monotonic in source
-     * luminance -- darker artwork stays darker -- rather than collapsing to one colour.
-     */
-    @Test
-    fun `wash stays monotonic in source luminance`() {
-        val m = AresWashMath.washMatrix(0xAF, 0xC7, 0xEB, AresWashMath.DEFAULT_WASH_FLOOR)
-        var previous = -1.0
-        for (grey in 0..255 step 15) {
-            val out = AresWashMath.applyMatrix(m, grey, grey, grey)
-            val lum = AresWashMath.relativeLuminance(out[0], out[1], out[2])
-            assertThat(lum).isGreaterThan(previous)
-            previous = lum
-        }
-    }
-
-    /** The two luminance weightings in play are different, and conflating them skews everything. */
-    @Test
-    fun `WCAG luminance is not the matrix luminance`() {
-        // Pure green: NTSC weights it 0.587, WCAG (on linearised channels) 0.7152.
-        assertThat(AresWashMath.relativeLuminance(0, 255, 0)).isWithin(1e-4).of(0.7152)
-        assertThat(AresWashMath.LG).isWithin(1e-6f).of(0.587f)
-
-        // Anchors for the contrast formula.
-        assertThat(AresWashMath.contrastRatio(255, 255, 255, 0, 0, 0)).isWithin(1e-6).of(21.0)
-        assertThat(AresWashMath.contrastRatio(1, 2, 3, 1, 2, 3)).isWithin(1e-9).of(1.0)
-    }
-
-    // ---------------------------------------------------------------------------------------
-    // The decision: the shipped floor clears the readability bar, and floor 0 does not
+    // Shipped palettes
     // ---------------------------------------------------------------------------------------
 
     /**
@@ -114,137 +49,224 @@ class AresWashMathTest {
     /**
      * Every palette this launcher can render the wash in, as (accent, tile) = (primary, onPrimary).
      *
-     * The first two are parsed from the shipped resource. The last two were MEASURED off
-     * emulator-5554 on 2026-09-02 by sampling the modal pixel of a rendered themed icon (a synth
-     * monochrome glyph is painted at exactly the accent by `BlendModeColorFilter(accent, SRC_IN)`,
-     * so its glyph colour IS `materialColorPrimary` and its tile IS `materialColorOnPrimary`).
-     * They are here because they come from the dynamic API-34+ path, which the baked pair cannot
-     * reach -- see `design/scripts/icon-pixel-contrast.ps1`.
+     * The first two are parsed from the shipped resource. The rest were MEASURED off real devices
+     * by sampling the modal pixel of a rendered themed icon (a synth monochrome glyph is painted at
+     * exactly the accent by `BlendModeColorFilter(accent, SRC_IN)`, so its glyph colour IS
+     * `materialColorPrimary` and its tile IS `materialColorOnPrimary`). They are here because they
+     * come from the dynamic API-34+ path, which the baked pair cannot reach. The owner's Pixel
+     * palette is the one that produced the third report, so it earns a permanent place.
+     * See `design/scripts/icon-pixel-contrast.ps1`.
      */
     private fun palettes(): List<Triple<String, Triple<Int, Int, Int>, Triple<Int, Int, Int>>> = listOf(
         Triple("baked AOSP light", bakedColor("system_primary_light"), bakedColor("system_on_primary_light")),
         Triple("baked AOSP dark", bakedColor("system_primary_dark"), bakedColor("system_on_primary_dark")),
-        Triple("measured dynamic dark", Triple(0xAF, 0xC7, 0xEB), Triple(0x30, 0x47, 0x65)),
-        Triple("measured dynamic light", Triple(0x42, 0x62, 0x8A), Triple(0xEE, 0xF0, 0xF9)),
+        Triple("owner Pixel dark", Triple(0xFF, 0x88, 0xB4), Triple(0x61, 0x00, 0x33)),
+        Triple("emulator dark", Triple(0xAF, 0xC7, 0xEB), Triple(0x30, 0x47, 0x65)),
+        Triple("emulator light", Triple(0x42, 0x62, 0x8A), Triple(0xEE, 0xF0, 0xF9)),
     )
 
-    private fun worstCase(floor: Float): List<Pair<String, Double>> = palettes().map { (name, accent, tile) ->
+    /** Contrast of the accent against its own tile -- what the MONOCHROME icon path renders at. */
+    private fun accentContrast(accent: Triple<Int, Int, Int>, tile: Triple<Int, Int, Int>) =
+        AresWashMath.contrastRatio(
+            accent.first, accent.second, accent.third,
+            tile.first, tile.second, tile.third,
+        )
+
+    private fun worstCase(span: Float) = palettes().map { (name, accent, tile) ->
         name to AresWashMath.worstCaseGlyphContrast(
             accent.first, accent.second, accent.third,
             tile.first, tile.second, tile.third,
-            floor,
+            span,
         )
     }
 
-    /**
-     * The palettes whose TILE is dark, which is the only place the defect ever bit.
-     *
-     * This distinction is the thing the first draft of these tests got wrong, and it is worth
-     * spelling out. Floor 0 drives the glyph toward BLACK. Against the light tile of a light-mode
-     * palette that is a contrast *increase* -- ~20:1, gorgeous, and completely useless as evidence.
-     * The bug lived entirely in dark mode, where black-on-#323F60 is 2.02:1. A negative control
-     * that averages the two modes together, or asserts over both, does not discriminate.
-     */
-    private fun darkTilePalettes() = palettes().filter { (_, _, tile) ->
-        AresWashMath.relativeLuminance(tile.first, tile.second, tile.third) < 0.5
-    }
+    // ---------------------------------------------------------------------------------------
+    // The decision
+    // ---------------------------------------------------------------------------------------
 
-    private fun worstCaseOnDarkTiles(floor: Float): List<Pair<String, Double>> =
-        darkTilePalettes().map { (name, accent, tile) ->
-            name to AresWashMath.worstCaseGlyphContrast(
+    /**
+     * THE DECISION, and the reason the floor was abandoned.
+     *
+     * A washed legacy icon must never be dimmer than a themed one. The band's endpoints are the
+     * accent and a colour strictly further from the tile, so the worst pixel in any washed icon has
+     * *exactly* the accent's contrast -- the same number the monochrome path renders. Not "clears
+     * 3:1": equal to the icons sitting next to it.
+     */
+    @Test
+    fun `the worst washed pixel is exactly as readable as a themed icon`() {
+        for ((name, accent, tile) in palettes()) {
+            val worst = AresWashMath.worstCaseGlyphContrast(
                 accent.first, accent.second, accent.third,
                 tile.first, tile.second, tile.third,
-                floor,
+                AresWashMath.DEFAULT_WASH_SPAN,
             )
-        }
-
-    /**
-     * THE DECISION. At the shipped floor, the darkest pixel a legacy icon can contain still clears
-     * the WCAG 3:1 bar for non-text graphics against its own tile, in every palette we ship.
-     *
-     * The worst case is the black source pixel, because the wash is monotonic (asserted above) and
-     * its top end is the accent, which Material 3 already guarantees is a contrast-safe pair with
-     * onPrimary. So this single number bounds the whole icon.
-     */
-    @Test
-    fun `shipped floor keeps the darkest glyph pixel readable in every shipped palette`() {
-        for ((name, contrast) in worstCase(AresWashMath.DEFAULT_WASH_FLOOR)) {
-            assertThat(name to contrast).isNotNull()
-            assertThat(contrast).isAtLeast(AresWashMath.MIN_GLYPH_CONTRAST)
+            assertThat(name to worst).isNotNull()
+            assertThat(worst).isWithin(1e-9).of(accentContrast(accent, tile))
+            assertThat(worst).isAtLeast(AresWashMath.MIN_GLYPH_CONTRAST)
         }
     }
 
-    /**
-     * THE NEGATIVE CONTROL, and the reason the test above is worth anything.
-     *
-     * An assertion is not coverage until it has been made to fail on the broken path. Floor 0 IS
-     * the broken path -- byte for byte the formula that shipped -- so on a dark tile the same check
-     * must report these palettes as unreadable. If this ever passes, the check above has stopped
-     * discriminating and is green for the wrong reason.
-     *
-     * Measured values at floor 0: baked AOSP dark 2.02:1, measured dynamic dark 2.21:1.
-     */
+    /** And that holds for every span, because the accent is always one end of the band. */
     @Test
-    fun `floor zero is unreadable on a dark tile - negative control`() {
-        val cases = worstCaseOnDarkTiles(0f)
-        assertThat(cases).isNotEmpty()
-        for ((name, contrast) in cases) {
-            assertThat(name to contrast).isNotNull()
-            assertThat(contrast).isLessThan(AresWashMath.MIN_GLYPH_CONTRAST)
+    fun `the guarantee does not depend on the span`() {
+        for (span in listOf(0f, 0.2f, 0.5f, 0.8f, 1f)) {
+            for ((name, accent, tile) in palettes()) {
+                val worst = AresWashMath.worstCaseGlyphContrast(
+                    accent.first, accent.second, accent.third,
+                    tile.first, tile.second, tile.third,
+                    span,
+                )
+                assertThat(name to span).isNotNull()
+                assertThat(worst).isWithin(1e-9).of(accentContrast(accent, tile))
+            }
         }
     }
 
     /**
-     * 0.80 is claimed to be the LOWEST floor that clears the bar everywhere, and a claim like that
-     * rots quietly: someone drops it to 0.70 for a softer look, the light palettes still pass with
-     * room to spare, and the dark ones quietly go back under the bar.
+     * THE NEGATIVE CONTROL. Floor and pole are different fixes for different things, and only one
+     * of them addresses the report -- so the old formula must still fail here, on a dark tile.
      *
-     * Measured on a dark tile: 0.70 gives 3.07:1 for the baked palette but only **2.73:1** for the
-     * dynamic palette measured on device -- under the bar. 0.80 gives 3.91 and 3.52.
+     * Measured: owner Pixel palette 1.12:1, baked AOSP dark 2.02:1. On a LIGHT tile the same
+     * formula is fine (~19:1), which is exactly why this went unnoticed for weeks and why the
+     * control has to be mode-specific to discriminate at all.
      */
     @Test
-    fun `the floor sits at the boundary, not comfortably above it`() {
-        assertThat(worstCase(AresWashMath.DEFAULT_WASH_FLOOR).minOf { it.second })
-            .isAtLeast(AresWashMath.MIN_GLYPH_CONTRAST)
-        assertThat(worstCaseOnDarkTiles(0.70f).minOf { it.second })
-            .isLessThan(AresWashMath.MIN_GLYPH_CONTRAST)
+    fun `the original formula is unreadable on a dark tile - negative control`() {
+        val darkTiles = palettes().filter { (_, _, tile) ->
+            AresWashMath.poleIsWhite(tile.first, tile.second, tile.third)
+        }
+        assertThat(darkTiles).isNotEmpty()
+        for ((name, accent, tile) in darkTiles) {
+            val legacy = AresWashMath.worstCaseGlyphContrastLegacy(
+                accent.first, accent.second, accent.third,
+                tile.first, tile.second, tile.third,
+            )
+            assertThat(name to legacy).isNotNull()
+            assertThat(legacy).isLessThan(AresWashMath.MIN_GLYPH_CONTRAST)
+        }
     }
 
     /**
-     * The trap that makes "just compromise on a middle value" actively wrong.
-     *
-     * Contrast against a dark tile is NOT monotonic in the floor. Raising it from 0 walks the glyph
-     * UP through the tile's own luminance before it comes out the other side, so a half-measure is
-     * worse than doing nothing: on the palette measured on device, floor 0 gives 2.21:1 and floor
-     * 0.55 gives **1.81:1**. Anyone who softens the floor a little and eyeballs it will conclude the
-     * fix did not work -- and will be looking at a real regression while thinking they compromised.
+     * THE SECOND NEGATIVE CONTROL: the floor that shipped first is also not good enough, which is
+     * the whole reason this file changed. Reproduce it (`accent * (0.8 + 0.2 * lum)`, worst case at
+     * lum 0) and require it to fall MEASURABLY short of the accent on a dark tile. Owner Pixel:
+     * 3.96:1 against 6.06:1.
      */
     @Test
-    fun `a middle floor is worse than no floor on a dark tile`() {
-        val atZero = worstCaseOnDarkTiles(0f).toMap()
-        val atHalf = worstCaseOnDarkTiles(0.55f).toMap()
-        val regressed = atZero.keys.filter { atHalf.getValue(it) < atZero.getValue(it) }
-        assertThat(regressed).isNotEmpty()
+    fun `the floor approach falls short of the accent on a dark tile - negative control`() {
+        var checked = 0
+        for ((name, accent, tile) in palettes()) {
+            if (!AresWashMath.poleIsWhite(tile.first, tile.second, tile.third)) continue
+            val floored = AresWashMath.contrastRatio(
+                (accent.first * 0.80f).toInt(), (accent.second * 0.80f).toInt(), (accent.third * 0.80f).toInt(),
+                tile.first, tile.second, tile.third,
+            )
+            assertThat(name to floored).isNotNull()
+            assertThat(floored).isLessThan(accentContrast(accent, tile) - 1.0)
+            checked++
+        }
+        assertThat(checked).isGreaterThan(0)
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The matrix itself
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * The offset column is in 0..255 units, not 0..1. Writing it as 0..1 compiles, runs, and
+     * produces a near-black glyph -- it silently reintroduces the original bug. Nothing else in the
+     * build would catch that, so it is asserted directly: the matrix's endpoints must be the band's
+     * endpoints.
+     */
+    @Test
+    fun `the matrix endpoints are the band endpoints`() {
+        for ((name, accent, tile) in palettes()) {
+            val band = AresWashMath.washBand(
+                accent.first, accent.second, accent.third,
+                tile.first, tile.second, tile.third,
+                AresWashMath.DEFAULT_WASH_SPAN,
+            )
+            val m = AresWashMath.washMatrix(
+                accent.first, accent.second, accent.third,
+                tile.first, tile.second, tile.third,
+                AresWashMath.DEFAULT_WASH_SPAN,
+            )
+            val atBlack = AresWashMath.applyMatrix(m, 0, 0, 0)
+            val atWhite = AresWashMath.applyMatrix(m, 255, 255, 255)
+            assertThat(name).isNotEmpty()
+            for (i in 0..2) {
+                assertThat(atBlack[i]).isWithin(1).of(band[i])
+                assertThat(atWhite[i]).isWithin(1).of(band[i + 3])
+            }
+        }
     }
 
     /**
-     * The device agreed with the model. On 2026-09-02 the dark-artwork probe rendered #8FA3C0 on
-     * tile #304765 with accent #AFC7EB -- the device drew `accent * 0.817`, and the model says a
-     * source luminance of 0.085 at floor 0.80 gives `0.80 + 0.20 * 0.085 = 0.817`. Pinning that
-     * here means a future change to the formula has to explain the discrepancy against a real
-     * measurement rather than just rebuilding.
+     * Shape must survive. A plain `SRC_IN` tint is the reflex fix and is wrong here: many legacy
+     * icons are fully opaque squares with no alpha shape, and SRC_IN renders them as solid coloured
+     * blocks with the artwork thrown away. So the wash has to stay strictly monotonic in source
+     * luminance -- and now it is monotonic in BOTH modes, which the floor version was not.
      */
     @Test
-    fun `model reproduces the fraction measured on device`() {
-        val fraction = AresWashMath.washFraction(srcLum = 0.085f, floor = AresWashMath.DEFAULT_WASH_FLOOR)
-        assertThat(fraction).isWithin(0.002f).of(0.817f)
+    fun `wash stays monotonic in source luminance in every palette`() {
+        for ((name, accent, tile) in palettes()) {
+            val m = AresWashMath.washMatrix(
+                accent.first, accent.second, accent.third,
+                tile.first, tile.second, tile.third,
+                AresWashMath.DEFAULT_WASH_SPAN,
+            )
+            var previous = -1.0
+            for (grey in 0..255 step 15) {
+                val out = AresWashMath.applyMatrix(m, grey, grey, grey)
+                val lum = AresWashMath.relativeLuminance(out[0], out[1], out[2])
+                assertThat(name to grey).isNotNull()
+                assertThat(lum).isGreaterThan(previous)
+                previous = lum
+            }
+        }
+    }
 
-        // ... and the matrix, driven at that source luminance, lands on the pixel the device drew.
-        val m = AresWashMath.washMatrix(0xAF, 0xC7, 0xEB, AresWashMath.DEFAULT_WASH_FLOOR)
-        val grey = (0.085f * 255).toInt()
-        val out = AresWashMath.applyMatrix(m, grey, grey, grey)
-        assertThat(out[0]).isWithin(2).of(0x8F)
-        assertThat(out[1]).isWithin(2).of(0xA3)
-        assertThat(out[2]).isWithin(2).of(0xC0)
+    /**
+     * The pole is chosen by the TILE, not by the accent and not by a build flag. This is the whole
+     * fix in one assertion, and it is the thing a future refactor is most likely to quietly drop.
+     */
+    @Test
+    fun `the pole is chosen away from the tile`() {
+        assertThat(AresWashMath.poleIsWhite(0x61, 0x00, 0x33)).isTrue()
+        assertThat(AresWashMath.poleIsWhite(0xF9, 0xF8, 0xFF)).isFalse()
+
+        // Same accent, opposite tiles -> opposite ramp directions.
+        val onDark = AresWashMath.washBand(0xFF, 0x88, 0xB4, 0x61, 0x00, 0x33, 0.5f)
+        val onLight = AresWashMath.washBand(0xFF, 0x88, 0xB4, 0xF9, 0xF8, 0xFF, 0.5f)
+        // Dark tile: black artwork sits AT the accent and white artwork goes brighter.
+        assertThat(onDark[0]).isEqualTo(0xFF)
+        assertThat(onDark[4]).isGreaterThan(0x88)
+        // Light tile: white artwork sits AT the accent and black artwork goes darker.
+        assertThat(onLight[4]).isEqualTo(0x88)
+        assertThat(onLight[1]).isLessThan(0x88)
+    }
+
+    /** The two luminance weightings in play are different, and conflating them skews everything. */
+    @Test
+    fun `WCAG luminance is not the matrix luminance`() {
+        // Pure green: NTSC weights it 0.587, WCAG (on linearised channels) 0.7152.
+        assertThat(AresWashMath.relativeLuminance(0, 255, 0)).isWithin(1e-4).of(0.7152)
+        assertThat(AresWashMath.contrastRatio(255, 255, 255, 0, 0, 0)).isWithin(1e-6).of(21.0)
+        assertThat(AresWashMath.contrastRatio(1, 2, 3, 1, 2, 3)).isWithin(1e-9).of(1.0)
+    }
+
+    /**
+     * A span of 0 collapses the band to a flat accent silhouette -- which is exactly `SRC_IN`, the
+     * fix that was rejected because it throws away the artwork of an opaque legacy icon. Asserted
+     * so that "just set the span to 0" is recognisably that rejected fix rather than a tuning
+     * choice.
+     */
+    @Test
+    fun `span zero degenerates to a flat SRC_IN tint`() {
+        val m = AresWashMath.washMatrix(0xFF, 0x88, 0xB4, 0x61, 0x00, 0x33, span = 0f)
+        val atBlack = AresWashMath.applyMatrix(m, 0, 0, 0)
+        val atWhite = AresWashMath.applyMatrix(m, 255, 255, 255)
+        assertThat(atBlack.toList()).isEqualTo(atWhite.toList())
+        assertThat(atBlack.toList()).isEqualTo(listOf(0xFF, 0x88, 0xB4))
     }
 }
