@@ -1012,6 +1012,31 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * ordinary rows, via a fine-grained range insert (never notifyDataSetChanged). Children keep
      * `container=<folderId>`, so persistOrder skips them and ITH treats them as non-draggable.
      */
+    /**
+     * Post-condition of an inline expand: the run rendered matches the model (ledger row 71).
+     *
+     * See [AresInvariants.WP_EXPAND_RUN_MISMATCH] for why this predicate and not the old
+     * declined-open one. Counts the items sitting immediately after the folder row whose container
+     * is this folder -- the same scan [expandedRunRange] uses, so a disagreement here is exactly a
+     * run the packer would also mis-measure.
+     */
+    private fun checkExpandedRun(folderInfo: FolderInfo, expected: Int) {
+        val folderRow = items.indexOfFirst { it.id == folderInfo.id }
+        var actual = 0
+        var k = folderRow + 1
+        while (folderRow >= 0 && k < items.size && items[k].container == folderInfo.id) {
+            actual++
+            k++
+        }
+        if (folderRow >= 0 && actual == expected) return
+        AresInvariants.violation(
+            AresInvariants.WP_EXPAND_RUN_MISMATCH,
+            "expandWpFolder",
+            "folder=${folderInfo.id} row=$folderRow inlineChildren=$actual modelContents=$expected " +
+                "items=${items.size} expandedId=$expandedWpFolderId",
+        )
+    }
+
     private fun expandWpFolder(folderInfo: FolderInfo) {
         // Switching folders (toggle collapses the old, then expands the new): complete any in-flight
         // animated close synchronously first, so the deferred removal can't run AFTER this insert and
@@ -1027,12 +1052,16 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // Hide the redundant mini-icon preview inside the (still-bound) folder tile.
         setWpFolderPreviewHidden(folderInfo.id, true)
         if (children.isEmpty()) {
+            // Legal: an empty folder expands to nothing. checkExpandedRun agrees (0 == 0), but it is
+            // called anyway so the checkpoint covers this path too rather than only the happy one.
+            checkExpandedRun(folderInfo, expected = 0)
             wpExpandHost?.invoke(folderInfo, true)
             return
         }
         val at = folderRow + 1
         items.addAll(at, children)
         notifyItemRangeInserted(at, children.size)
+        checkExpandedRun(folderInfo, expected = children.size)
         // WP accordion (owner: "like Windows Phone"): slide the tiles BELOW the folder down into
         // their new positions as the gap opens, rather than snapping. animateNextLayout captures the
         // existing tiles' old bounds and tweens them; the folder tile itself is above the insert so

@@ -102,4 +102,34 @@ object AresInvariants {
      * and nothing has ever read it.
      */
     const val FOLDER_OPEN_DECLINED = "INV-FOLDER-OPEN-DECLINED"
+
+    /**
+     * A WP folder finished expanding, but the number of children spliced inline does not match the
+     * number the model says it has.
+     *
+     * ## Why this one, and why [FOLDER_OPEN_DECLINED] is no longer enough
+     *
+     * The seed invariant above cannot fire on the home grid any more, and ledger row 71 records why:
+     * `ModelDbController.migrateAresWpFolders()` stamps `FLAG_ARES_WP` onto every desktop folder on
+     * every load, and `AresHomeAdapter` replaces the click handler with `toggleWpFolder`, so
+     * `ItemClickHandler.onClickFolderIcon`'s declined-open branch is unreachable for the folders the
+     * owner actually taps. It is kept (the hotseat and any non-WP path still route through it) but
+     * it is no longer where the defect lives.
+     *
+     * Row 40 ("folder won't open") is still open, and on the WP surface it can only appear one way:
+     * the tap is accepted, the expansion latch is set, and the apps do not show up. That is exactly
+     * a run-length mismatch, so this predicate targets the open flagship defect on the surface it
+     * now lives on. It is also the shape of an already-fixed owner bug -- "adding apps to the folder
+     * will not render them if the folder is already open" (2026-08-24) -- which is evidence the
+     * splice really can disagree with the model rather than being a theoretical worry.
+     *
+     * NOT a tautology over the code that fills the run: the expected count comes from
+     * `FolderInfo.getContents()` (the model) and the actual from a scan of the adapter's own list
+     * (the render), so the two operands come from different sides of the seam.
+     *
+     * An EMPTY folder expanding with no children is legal and must not fire -- `expandWpFolder`
+     * returns early for it on purpose -- which is why this compares against the model's count rather
+     * than asserting the run is non-empty.
+     */
+    const val WP_EXPAND_RUN_MISMATCH = "INV-WP-EXPAND-RUN"
 }
