@@ -584,16 +584,33 @@ object AresTestInfo {
     private fun paneAlign(launcher: Launcher): String {
         val loc = IntArray(2)
         fun topOnScreen(v: View?): Int = v?.let { it.getLocationOnScreen(loc); loc[1] } ?: -1
+
+        /**
+         * The VISUALLY topmost attached child, not `getChildAt(0)`.
+         *
+         * `getChildAt(0)` is attach order, which is neither adapter order nor visual order. Measured
+         * on the owner's Pixel after a fold cycle: `getChildAt(0)` was the tile at adapter position
+         * **1** (screen y 1453) while position **0** sat where it belonged at y 489 — so the probe
+         * reported a 964px misalignment on a launcher that was laid out correctly. On the emulator
+         * the two happened to coincide, which is exactly how that kind of bug survives. Alignment is
+         * a question about the topmost ROW, so ask for it directly.
+         */
+        fun topmostChild(parent: ViewGroup?): View? =
+            (0 until (parent?.childCount ?: 0))
+                .mapNotNull { parent?.getChildAt(it) }
+                .filter { it.visibility == View.VISIBLE }
+                .minByOrNull { topOnScreen(it) }
+
         val home = launcher.workspace?.aresHomeList
         val homeTop = topOnScreen(home)
         val homePad = home?.paddingTop ?: -1
-        val homeChild = topOnScreen(home?.getChildAt(0))
+        val homeChild = topOnScreen(topmostChild(home))
         val pane = launcher.workspace?.aresAppListPane
         val paneTop = topOnScreen(pane)
         val rv = pane?.activeRecyclerView
         val rvPad = rv?.paddingTop ?: -1
         val rvTop = topOnScreen(rv)
-        val firstChild = rv?.getChildAt(0)
+        val firstChild = topmostChild(rv)
         val paneChild = topOnScreen(firstChild)
         // Decomposition of the residual gap between rvPad and the first row's screen Y. The gap is
         // either a LAYOUT offset (the recycler not starting at the pane's top, or a decoration) or
@@ -608,14 +625,18 @@ object AresTestInfo {
         // header or divider is not the same kind of thing as the home grid's first tile, so forcing
         // their view tops equal would move the whole list to satisfy an arbitrary comparison.
         val kidText = (firstChild as? android.widget.TextView)?.text?.toString()?.take(16) ?: "-"
-        val kids = (0 until (rv?.childCount ?: 0)).take(3).joinToString(",") { i ->
-            val c = rv?.getChildAt(i)
+        val kids = (0 until (rv?.childCount ?: 0))
+            .mapNotNull { rv?.getChildAt(it) }
+            .sortedBy { topOnScreen(it) }
+            .take(3)
+            .joinToString(",") { c ->
             "${c?.javaClass?.simpleName}@${topOnScreen(c)}" +
                 ((c as? android.widget.TextView)?.text?.toString()?.take(10)?.let { "'$it'" } ?: "")
         }
         val headerH = pane?.floatingHeaderView?.height ?: -1
-        val homeKidClass = home?.getChildAt(0)?.javaClass?.simpleName ?: "none"
-        val homeKidPadTop = home?.getChildAt(0)?.paddingTop ?: -1
+        val homeKid = topmostChild(home)
+        val homeKidClass = homeKid?.javaClass?.simpleName ?: "none"
+        val homeKidPadTop = homeKid?.paddingTop ?: -1
         val dp = launcher.deviceProfile
         val homeListPad = AresAllApps.homeListTopPaddingPx(launcher)
         val recon = dp.insets.top + dp.workspacePadding.top + homeListPad
