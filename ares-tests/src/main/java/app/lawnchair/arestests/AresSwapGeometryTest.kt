@@ -134,7 +134,9 @@ class AresSwapGeometryTest {
 
         val jumps = samples.zipWithNext { a, b -> abs(b - a) }
         val worst = jumps.maxOrNull() ?: 0
+        val gaps = sampler.intervals()
         Log.i(TAG, "swap-geometry bottom-row: offsets=${samples.distinct()} worstJump=$worst")
+        Log.i(TAG, "swap-geometry bottom-row: sampleGapsMs=$gaps (nominal ${40}ms)")
 
         assertThat(samples).isNotEmpty()
         // Precondition: the SWAP actually happened. A drag that armed edit mode but never

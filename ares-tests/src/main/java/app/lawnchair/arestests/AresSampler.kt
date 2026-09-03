@@ -1,5 +1,6 @@
 package app.lawnchair.arestests
 
+import android.os.SystemClock
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -29,7 +30,7 @@ class AresSampler<T>(
     private val intervalMs: Long = 50L,
     private val sample: () -> T,
 ) {
-    private val collected = CopyOnWriteArrayList<T>()
+    private val collected = CopyOnWriteArrayList<Pair<Long, T>>()
     @Volatile private var running = false
     private var thread: Thread? = null
 
@@ -37,7 +38,7 @@ class AresSampler<T>(
         running = true
         thread = Thread {
             while (running) {
-                runCatching { collected += sample() }
+                runCatching { collected += SystemClock.uptimeMillis() to sample() }
                 try {
                     Thread.sleep(intervalMs)
                 } catch (e: InterruptedException) {
@@ -53,6 +54,28 @@ class AresSampler<T>(
         running = false
         thread?.join(2_000)
         thread = null
-        return collected.toList()
+        return collected.map { it.second }
     }
+
+    /**
+     * The same samples with the `uptimeMillis` at which each was taken.
+     *
+     * Exists because **a per-sample delta is not a rate here, and treating it as one produced a
+     * false defect.** The class comment above already says the sampler is best-effort and "will
+     * simply take fewer samples than requested rather than fall behind" — each sample costs an IPC
+     * round-trip on top of [intervalMs], and that cost balloons while the UI thread is busy
+     * animating, which is exactly when these tests sample. Measured 2026-09-03 during an
+     * edit-mode drag: a nominal 40ms interval yielded **9 samples across ~2.8s**, i.e. roughly
+     * 310ms apiece.
+     *
+     * So an assertion of the form "no two consecutive samples may differ by more than one cell
+     * row" silently asserts a scroll VELOCITY whose denominator it never measured. Any caller
+     * making a smoothness claim must divide by the real elapsed time from here.
+     *
+     * Call after [stop].
+     */
+    fun stamped(): List<Pair<Long, T>> = collected.toList()
+
+    /** Gaps between consecutive samples, in ms — the denominator a rate claim needs. */
+    fun intervals(): List<Long> = collected.map { it.first }.zipWithNext { a, b -> b - a }
 }
