@@ -34,6 +34,8 @@ import static com.android.launcher3.util.Executors.UI_HELPER_EXECUTOR;
 
 import android.app.AlertDialog;
 import android.content.Context;
+
+import app.lawnchair.areslauncher.AresInvariants;
 import android.content.Intent;
 import android.content.pm.LauncherApps;
 import android.content.pm.PackageInstaller.SessionInfo;
@@ -159,13 +161,20 @@ public class ItemClickHandler {
             // the other wedges it actually is (attached-and-mIsOpen, destroyed, or mid-animation)
             // the next time it happens in normal use — no live repro required. Silent on every
             // successful open. Remove once the real wedge is identified and the heal widened.
-            android.util.Log.w("AresFolderOpen", "DECLINED open after heal: id="
-                    + System.identityHashCode(folder)
+            // Routed into AresInvariants as well as the log (2026-09-02). The log alone had been
+            // printing here since 2026-08-22 and nothing ever read it -- which is the whole reason
+            // row 40 is still open with its root state uncaptured. The counter is readable through
+            // the `ares-invariants` channel and ares-smoke FAILS on a non-zero delta, so the next
+            // recurrence stops a run instead of scrolling past in logcat.
+            String facets = "id=" + System.identityHashCode(folder)
                     + " infoId=" + (folder.mInfo != null ? folder.mInfo.id : -1)
                     + " isOpen=" + folder.isOpen()
                     + " isDestroyed=" + folder.isDestroyed()
                     + " hasParent=" + (folder.getParent() != null)
-                    + " animating=" + folder.aresIsAnimating());
+                    + " animating=" + folder.aresIsAnimating();
+            android.util.Log.w("AresFolderOpen", "DECLINED open after heal: " + facets);
+            AresInvariants.violation(
+                    AresInvariants.FOLDER_OPEN_DECLINED, "onClickFolderIcon", facets);
             // H1 (state-seam, ledger row 40 / Bug B): the cheap detached-variant heal above
             // declined, so the folder is wedged in a variant it does not cover (attached-invisible
             // or destroyed) and is un-openable for the rest of the session. Rebind its home row to a

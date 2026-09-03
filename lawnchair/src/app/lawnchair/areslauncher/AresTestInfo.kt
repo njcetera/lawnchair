@@ -298,6 +298,24 @@ object AresTestInfo {
     const val REQUEST_HOME_COLUMNS = "ares-home-columns"
 
     /**
+     * Runtime invariant violations ([AresInvariants]).
+     *
+     * `arg` = `reset` clears the counters and returns `total=0`; absent returns
+     * `total=N|<id>=<count>|...` plus the first violating record for each.
+     *
+     * DELTA, NOT TOTAL. `ares-smoke` resets at the start of a run and asserts zero at the end. A
+     * raw total would be neither per-run nor per-install nor per-boot -- the counters live in a
+     * process-scoped object, so one violation at startup would make the suite permanently red while
+     * any process kill would silently reset it to green, and both failures are invisible.
+     *
+     * Deliberately NOT routed through `getLauncherUIProperty`. Every other channel here resolves a
+     * live `Launcher` and answers `null` when there is not one -- and a caller comparing `null > 0`
+     * reads that as a PASS. These counters are process-scoped and need no Launcher, so this answers
+     * even when the activity is gone, which is precisely when a violation is most interesting.
+     */
+    const val REQUEST_INVARIANTS = "ares-invariants"
+
+    /**
      * The app list's edge-glow state: `topFinished|bottomFinished`.
      *
      * Ledger row 29: `mAllAppsOvershootStarted` armed by an overscroll pull was only released when
@@ -418,6 +436,26 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> homeColumns(launcher, arg) },
         )
+        // No getLauncherUIProperty: see REQUEST_INVARIANTS. Answers with or without a live Launcher.
+        REQUEST_INVARIANTS -> Bundle().apply {
+            if (arg == "reset") AresInvariants.reset()
+            // `selftest` records a synthetic violation so the HARNESS can be proven capable of
+            // failing. The seeded invariant is defect-ledger row 40, which is not reproducible on
+            // demand -- the whole reason it is still open -- so without this the smoke check would
+            // be an assertion that has never been shown to fail, which this project treats as no
+            // coverage at all. It proves the plumbing (record -> count -> channel -> smoke FAIL),
+            // NOT the invariant's own predicate. Nothing in the product calls it.
+            if (arg == "selftest") {
+                AresInvariants.violation(
+                    "INV-SELFTEST", "ares-invariants selftest",
+                    "synthetic violation, injected by the harness",
+                )
+            }
+            putString(
+                com.android.launcher3.testing.shared.TestProtocol.TEST_INFO_RESPONSE_FIELD,
+                AresInvariants.report(),
+            )
+        }
         REQUEST_HOME_REVEAL -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> homeReveal(launcher, arg) },
