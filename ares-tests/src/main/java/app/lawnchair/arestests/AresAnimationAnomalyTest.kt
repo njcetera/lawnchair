@@ -152,6 +152,73 @@ class AresAnimationAnomalyTest {
     }
 
     /**
+     * The WP folder expand/collapse animation, which is where the ledger's folder complaints live.
+     *
+     * Driven through `ares-wp-expand` rather than by a tap, deliberately. The channel calls the
+     * product's own `toggleWpFolder`, so the animation under test is the real one, while the
+     * trigger is deterministic — and this surface is precisely where a synthetic gesture is least
+     * trustworthy (CLAUDE.md: a bare long-press does not start a drag in this fork, and a scripted
+     * gesture aimed at a folder "closes it more often than it opens it").
+     *
+     * Expand and collapse are captured in ONE recording on purpose. The reported jitter is a
+     * leave-then-reenter shape, so the interesting frames are the ones where one animation hands
+     * over to the next, not either animation in isolation.
+     */
+    @Test
+    fun wpFolderExpandAndCollapseIsFreeOfAnomalies() {
+        requireLauncher()
+
+        val folderId = driver.findWpFolderId()
+        assumeTrue("no WP folder on the home grid", folderId != null)
+
+        // findWpFolderId toggles what it finds, so normalise to collapsed before recording.
+        if (driver.wpExpand(folderId!!).startsWith("expanded=true")) driver.wpExpand(folderId)
+        device.waitForIdle()
+
+        driver.viewCapture("reset")
+        assumeTrue("capture did not start", driver.viewCapture("start") == "started")
+
+        val expanded = driver.wpExpand(folderId)
+        device.waitForIdle()
+        Thread.sleep(SETTLE_MS)
+        val collapsed = driver.wpExpand(folderId)
+        device.waitForIdle()
+        Thread.sleep(SETTLE_MS)
+        Log.i(TAG, "wp folder $folderId: expand -> $expanded, collapse -> $collapsed")
+
+        // Proof the scenario ran at all. Without it a channel that answered `no-folder` twice would
+        // produce a still screen, no frames, and a SKIP that looks like an environment problem
+        // rather than a broken probe.
+        assumeTrue("expand did not report expanded=true: $expanded", expanded.startsWith("expanded=true"))
+        assumeTrue("collapse did not report expanded=false: $collapsed", collapsed.startsWith("expanded=false"))
+
+        val export = driver.viewCapture("export")
+        assumeTrue("export produced no frames: $export", export.contains("|frames="))
+        val path = export.substringBefore("|")
+        val frames = export.substringAfter("|frames=").substringBefore("|").toIntOrNull() ?: 0
+        Log.i(TAG, "wp folder capture: $frames frames")
+
+        // A folder that snapped open with no animation would still "work" and would still report
+        // zero anomalies, which is the vacuous pass this floor exists to prevent.
+        assertThat(frames).isAtLeast(20)
+
+        val bytes = driver.readCapturedProto(path)
+        assumeTrue("could not read the proto off the device", bytes != null && bytes.isNotEmpty())
+        val data = runCatching { ExportedData.parseFrom(bytes) }.getOrNull()
+        assumeTrue("proto did not parse", data != null)
+
+        val anomalies = ViewCaptureAnalyzer.getAnomalies(data!!)
+        anomalies.forEach { (p, m) -> Log.w(TAG, "ANOMALY $p -> $m") }
+        Log.i(TAG, "wp folder: ${anomalies.size} anomaly/anomalies over $frames frames")
+
+        assertWithMessage(
+            "ViewCapture detectors reported ${anomalies.size} anomaly/anomalies over $frames " +
+                "frames of a WP folder expand+collapse:\n" +
+                anomalies.entries.joinToString("\n") { (p, m) -> "  $p\n    $m" },
+        ).that(anomalies).isEmpty()
+    }
+
+    /**
      * NEGATIVE CONTROL for [homeToAppListTransitionIsFreeOfAnomalies], and the reason that test is
      * worth anything.
      *
@@ -248,5 +315,8 @@ class AresAnimationAnomalyTest {
 
     private companion object {
         const val TAG = "AresAnimAnomaly"
+
+        /** Long enough for the expand/collapse spring to finish before the next toggle. */
+        const val SETTLE_MS = 900L
     }
 }

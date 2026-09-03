@@ -540,6 +540,28 @@ class AresLauncherDriver {
     fun viewCapture(sub: String): String =
         call("ares-view-capture", sub)?.getString("response") ?: "null"
 
+    /** Toggles a WP folder's inline expansion. `expanded=<bool>|contents=<n>`, or a marker. */
+    fun wpExpand(folderId: Int): String =
+        call("ares-wp-expand", folderId.toString())?.getString("response") ?: "null"
+
+    /**
+     * The id of the first WP folder on the home grid, or null if there is none.
+     *
+     * Found by PROBING rather than by reading a type, because [homeOrder] reports `id/title` and a
+     * folder's title is indistinguishable from an app's. `ares-wp-expand` answers `expanded=…` only
+     * for a real WP folder and `no-folder(id)` / `not-wp` otherwise, so the probe is exact.
+     *
+     * The probe TOGGLES the folder it finds — that is unavoidable through this channel — so it
+     * returns the id and leaves the caller to put the folder in whatever state it wants.
+     */
+    fun findWpFolderId(): Int? {
+        for (entry in homeOrder()) {
+            val id = entry.substringBefore('/').toIntOrNull() ?: continue
+            if (wpExpand(id).startsWith("expanded=")) return id
+        }
+        return null
+    }
+
     /**
      * Reads the exported proto off the device, or null if it cannot be read.
      *
