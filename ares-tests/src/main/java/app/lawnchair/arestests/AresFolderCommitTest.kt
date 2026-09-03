@@ -1,173 +1,157 @@
 package app.lawnchair.arestests
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
-import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * S4 (ledger row 15) — releasing OUTSIDE an open folder within the 400ms grace still filed the
- * item into it. Spec B2/B3: only a manual release **inside** a folder adds an item to it.
+ * S4 (ledger row 15) on the WP surface — *a release OUTSIDE a folder must never file the item INTO
+ * it*, and pulling a child out must land it on the grid. Folder spec B2/B3.
  *
- * ## The mechanism
+ * ## What the original caught, and why the surface moved
  *
- * A dwell over a folder opens it. Leaving the open folder posts a 400ms grace
- * (`EXIT_CLOSE_MS`) before it closes, so a finger that clips the edge on its way to a slot does
- * not lose the folder — the grace is about whether the FOLDER stays open. But `commitDrop`'s
- * open-folder branch keyed only on `isOpen()`, so a release during that window — after the user
- * had deliberately pulled the icon OUT — still resolved into the folder. Everyone decelerates and
- * releases promptly after pulling out, so the window was the common case, not a corner. The fix
- * declines the commit while `previewExiting` (the drag's last known point was outside).
+ * On the OVERLAY folder, a dwell opened the folder and leaving it posted a 400ms grace
+ * (`EXIT_CLOSE_MS`) before it closed — the grace being about whether the FOLDER stays open. But
+ * `commitDrop`'s open-folder branch keyed only on `isOpen()`, so a release during that window —
+ * after the user had deliberately pulled the icon OUT — still resolved INTO the folder. Everyone
+ * decelerates and releases promptly after pulling out, so that window was the common case, not a
+ * corner. The WP migration deleted the overlay and the grace with it, so the old gesture test could
+ * no longer open a folder at all (ledger row 67) and timed out every run.
  *
- * ## The shape of the gesture, and why the exit leg lands on the big widget
+ * The INVARIANT is spec, not mechanism, so it survives: *only a deliberate drop inside a folder adds
+ * to it.* On the WP surface a folder expands inline and drop resolution is decided by
+ * `AresWpMembership`, so B2/B3 is now a statement about what that classifier returns.
  *
- * One continuous gesture: long-press an icon (edit mode), drag onto the folder, hold until the
- * dwell opens it, pull OUT, release within the grace. The exit leg aims at the 4×3 widget's
- * centre deliberately: a folder cannot be created from a widget (`kindOf` answers NONE), so the
- * point disarms the dwell without arming a new one — exiting over another icon would offer to
- * CREATE a folder, which is a different behaviour and a different test.
+ * ## Why the classifier and not a gesture
  *
- * ## Observables
+ * Measured on emulator-5554 while porting the sibling D4 test: a synthetic drag of a folder child
+ * out onto the grid changed neither the home order nor the membership, while edit mode armed — the
+ * drag either never cleared touch slop or resolved to a non-extract action. A gesture that cannot be
+ * made to perform the action cannot be trusted to prove it is declined either. `ares-wp-resolve-drag`
+ * runs the SAME classifier the real drop path uses, without performing a drag, so it is deterministic
+ * where the gesture is not. The cost is honest and stated: this covers the DECISION, not the commit
+ * animation or the DB write that follows it.
  *
- * Both sides of the same write: `homeOrder().size` (a folder-add removes the item from the top
- * level) and the folder's own count, read by reopening it after the drag. The precondition — the
- * preview actually opened mid-gesture — is sampled from `ares-folder-metrics`, which answers only
- * while a folder is open; without it, a drag that never dwelled long enough would pass vacuously.
+ * ## Why these cases cannot pass vacuously
+ *
+ * They are each other's control. The measured table, folder 40 expanded, three apps inside:
+ *
+ * ```
+ *   outside -> a CHILD      AddToFolder(40)      the deliberate drop inside
+ *   outside -> empty grid   None                 a release outside files nothing
+ *   child   -> empty grid   Extract(40)          pulled out, lands on the grid
+ *   child   -> a sibling    ReorderInFolder(40)
+ * ```
+ *
+ * A classifier stuck on `None` fails [aDropOnAChildAddsToTheFolder]; one stuck on `AddToFolder`
+ * fails [aReleaseOutsideTheFolderAddsNothing]. Neither test can be green on a build where the
+ * distinction has collapsed, which is exactly what row 15 was.
+ *
+ * SKIPs when the fixture has no WP folder, or when the grid has no app outside it to drag.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
 class AresFolderCommitTest {
 
-    private val TAG = "AresSpike"
+    private val TAG = "AresFolderCommit"
     private lateinit var ares: AresLauncherDriver
 
     @Before
     fun setUp() {
         ares = AresLauncherDriver()
         ares.openTestChannel()
-        ares.setAnimatorScale(1)
         ares.goHome()
         ares.exitEditMode()
-        ares.scrollGridToTop()
     }
 
     @After
     fun tearDown() {
-        runCatching { AresGestures.cancelStuckPointer() }
-        runCatching { ares.setFolderEdit(false) }
-        runCatching { ares.pressBack() }
         runCatching { ares.exitEditMode() }
     }
 
+    /** B2/B3, the positive half: dropping an outside app onto a child files it into the folder. */
     @Test
-    fun pullingOutOfAnOpenFolderAndReleasingLandsOnTheGrid() {
-        val tiles = ares.tiles()
-        val folder = tiles.first { it.itemType == 2 }
-        val widget = tiles.first { it.isWidget && it.position != folder.position }
-        val dragged = tiles.first {
-            !it.isWidget && it.itemType != 2 && it.position != folder.position
-        }
-        val topLevelBefore = ares.homeOrder().size
-        Log.i(
-            TAG,
-            "s4 drag ${dragged.title}@${dragged.position} onto folder@${folder.position}, " +
-                "exit via widget@${widget.position}, topLevel=$topLevelBefore",
-        )
-
-        // The SCENARIO needs two witnesses, and the whole gesture is retried until both hold
-        // (assertions below are never retried). sawPreview: the folder actually opened under the
-        // dwell. The decline counter: the S4 branch actually RAN -- commitDrop fires ~250ms of
-        // settle after the UP, and the 400ms grace started mid-exit-leg, so the branch's window
-        // is tens of milliseconds wide and one loaded-emulator stutter pushes the release past
-        // it; the preview self-closes, the item lands on the grid for the WRONG reason, and
-        // every outcome assertion would pass (adversarial review, 2026-08-21 -- and the very
-        // first suite run with the counter caught exactly that slip). The launcher counts the
-        // branch; the scenario requires the count to move.
-        var exercised = false
-        for (attempt in 1..MAX_ATTEMPTS) {
-            ares.exitEditMode()
-            Thread.sleep(400)
-            val tries = ares.tiles()
-            val tFolder = tries.first { it.itemType == 2 }
-            val tWidget = tries.first { it.isWidget && it.position != tFolder.position }
-            val tDragged = tries.first {
-                !it.isWidget && it.itemType != 2 && it.position != tFolder.position
-            }
-            val declinedBefore = ares.folderDropDeclinedCount()
-            var sawPreview = false
-            val sampler = AresSampler(intervalMs = 40L) {
-                ares.folderIcons().isNotEmpty().also { if (it) sawPreview = true }
-            }
-            sampler.start()
-            ares.enterEditModeAndDrag(
-                fromIndex = tDragged.position,
-                toIndex = tFolder.position,
-                holdMs = 700,
-                travelMs = 600,
-                // Long enough for the 500ms dwell plus the open animation, with margin.
-                hangMs = DWELL_HANG_MS,
-                // Then OUT, and release on arrival -- inside the 400ms grace, which is the point.
-                secondTargetIndex = tWidget.position,
-                secondTravelMs = EXIT_TRAVEL_MS,
-            )
-            sampler.stop()
-            // commitDrop runs from clearView, ~250ms of settle AFTER the UP the gesture just
-            // returned from -- reading the counter immediately races it (measured: three
-            // attempts in a row declined 0->1->2 each just after their read said unchanged). A
-            // bounded poll is a precondition-wait, not an assertion retry.
-            var declinedAfter = declinedBefore
-            repeat(12) {
-                declinedAfter = ares.folderDropDeclinedCount()
-                if (declinedAfter > declinedBefore) return@repeat
-                Thread.sleep(100)
-            }
-            Log.i(
-                TAG,
-                "s4 attempt $attempt: sawPreview=$sawPreview " +
-                    "declined=$declinedBefore->$declinedAfter",
-            )
-            if (sawPreview && declinedBefore >= 0 && declinedAfter > declinedBefore) {
-                exercised = true
-                break
-            }
-            Thread.sleep(400)
-        }
-        check(exercised) {
-            "the S4 scenario could not be produced in $MAX_ATTEMPTS attempts (preview open AND " +
-                "decline branch run); nothing about S4 was measured"
-        }
-
-        // The assertion, from both sides of the would-be write. Edit mode is still active from the
-        // drag and a tap routes differently under it, so leave it before reopening the folder.
-        ares.waitFor("grid to settle after the drop") { ares.folderIcons().isEmpty() }
-        ares.exitEditMode()
-        Thread.sleep(400)
-        val topLevelAfter = ares.homeOrder().size
-        assertThat(ares.openFolder()).isTrue()
-        ares.waitFor("folder to reopen") { ares.folderIcons().isNotEmpty() }
-        val folderCount = ares.folderIcons().size
-        Log.i(TAG, "s4 topLevel=$topLevelBefore->$topLevelAfter folderCount=$folderCount")
-
-        assertThat(topLevelAfter).isEqualTo(topLevelBefore)
-        assertThat(folderCount).isEqualTo(3)
+    fun aDropOnAChildAddsToTheFolder() {
+        val s = scene()
+        val action = ares.wpResolveDrag(s.outsideId, s.childId.toString())
+        Log.i(TAG, "outside ${s.outsideId} -> child ${s.childId} = $action")
+        assertWithMessage("a deliberate drop onto a folder child should file the app into the folder")
+            .that(action).startsWith("AddToFolder")
     }
 
-    private companion object {
-        const val DWELL_HANG_MS = 1_400L
+    /**
+     * B2/B3, the half row 15 broke: releasing an outside app on empty grid must file NOTHING.
+     *
+     * This is the direct descendant of the original defect — there, a release outside the folder
+     * still resolved into it because the commit keyed on the folder merely being open.
+     */
+    @Test
+    fun aReleaseOutsideTheFolderAddsNothing() {
+        val s = scene()
+        val onEmpty = ares.wpResolveDrag(s.outsideId, "none")
+        val onFolderItself = ares.wpResolveDrag(s.outsideId, s.folderId.toString())
+        Log.i(TAG, "outside ${s.outsideId} -> none = $onEmpty ; -> folder ${s.folderId} = $onFolderItself")
+        assertWithMessage("releasing an app on empty grid must not file it into the open folder")
+            .that(onEmpty).isEqualTo("None")
+        assertWithMessage("releasing an app on the folder's own tile must not file it in either")
+            .that(onFolderItself).isEqualTo("None")
+    }
 
-        /**
-         * The exit leg's duration. The decline moment is `exit + ~250ms settle`, and the grace
-         * expires at `exit + 400ms`, so the margin is roughly `400 - travel - 250`. At 110ms that
-         * was ~40ms and one loaded-emulator stutter blew it; 60ms doubles it while still giving
-         * the injected stream a handful of MOVEs to register the exit.
-         */
-        const val EXIT_TRAVEL_MS = 60L
+    /** The other direction, and the old test's name: pulled out and released, the child lands out. */
+    @Test
+    fun pullingAChildOutLandsItOnTheGrid() {
+        val s = scene()
+        val action = ares.wpResolveDrag(s.childId, "none")
+        Log.i(TAG, "child ${s.childId} -> none = $action")
+        assertWithMessage("a child released on empty grid should leave the folder, not stay in it")
+            .that(action).startsWith("Extract")
+    }
 
-        /** Scenario attempts, NOT assertion retries. See AresFolderExitTest. */
-        const val MAX_ATTEMPTS = 3
+    private data class Scene(val folderId: Int, val childId: Int, val outsideId: Int)
+
+    /**
+     * Expands the folder and names one child of it and one app that is NOT in it.
+     *
+     * The outside app is taken from BEFORE the folder in the home order, which is the reliable way
+     * to get a non-member: the children render as the run immediately AFTER the folder, so anything
+     * ahead of it is top level. Widgets are skipped — `type4` is not draggable into a folder.
+     */
+    private fun scene(): Scene {
+        val folderId = ares.findWpFolderId()
+        assumeTrue("no WP folder on the home grid", folderId != null)
+        folderId!!
+        val responses = mutableListOf<String>()
+        // A `for` with a real `break`, NOT repeat + return@repeat -- that returns from the LAMBDA,
+        // i.e. continues, so the loop would keep toggling past the state it just reached and could
+        // leave the folder collapsed for the queries below.
+        var expanded = false
+        for (i in 0 until 6) {
+            val r = ares.wpExpand(folderId)
+            responses += r
+            if (r.startsWith("expanded=true")) {
+                expanded = true
+                break
+            }
+            SystemClock.sleep(400)
+        }
+        assumeTrue("folder would not expand; wp-expand said $responses", expanded)
+
+        val order = ares.homeOrder()
+        val folderIndex = order.indexOfFirst { it.substringBefore('/') == folderId.toString() }
+        assumeTrue("expanded folder not in the home order", folderIndex >= 0)
+        val childId = order.getOrNull(folderIndex + 1)?.substringBefore('/')?.toIntOrNull()
+        assumeTrue("folder has no child after it in the order", childId != null)
+        val outsideId = order.take(folderIndex)
+            .firstOrNull { !it.endsWith("/type4") }
+            ?.substringBefore('/')?.toIntOrNull()
+        assumeTrue("no non-widget app outside the folder to drag", outsideId != null)
+        return Scene(folderId, childId!!, outsideId!!)
     }
 }
