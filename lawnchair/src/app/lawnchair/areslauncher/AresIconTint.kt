@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import app.lawnchair.preferences2.PreferenceManager2
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
+import com.android.launcher3.Utilities
 import com.android.launcher3.icons.MonochromeIconFactory
 import com.patrykmichalik.opto.core.firstBlocking
 
@@ -44,11 +45,6 @@ object AresIconTint {
 
     private const val TAG = "AresIconTint"
 
-    // Luminance weights (Rec. 601), used to fold colour onto the accent for the non-adaptive fallback.
-    private const val LR = 0.299f
-    private const val LG = 0.587f
-    private const val LB = 0.114f
-
     // Bump when the theming RENDERING changes so cached icons invalidate and regenerate even though
     // the app's versionCode is fixed across debug builds. 1=uniform wash, 2=hybrid, 3=hybrid+system
     // mono, 4=system mono outside the icon-pack gate, 5=full theming (synth mono for every app;
@@ -57,6 +53,8 @@ object AresIconTint {
     //   which cropped the synth glyph into the top-left corner).
 // 9=non-adaptive wash gets its own CustomAdaptiveIconDrawable theme background, so the legacy
 //   BaseIconFactory wrapper cannot paint a palette-derived WHITE background behind it.
+// 10=the wash gains a FLOOR (AresWashMath.DEFAULT_WASH_FLOOR), so dark legacy artwork no longer
+//   collapses into its own tile. The floor itself is also in the key -- see stateFragment.
     private const val RENDER_VERSION = 10
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
@@ -108,21 +106,45 @@ object AresIconTint {
     }
 
     /**
-     * Full-accent duotone colour filter toward [accent], or `null` for a no-op. Used only for the
-     * non-adaptive fallback in [wash].
+     * The wash floor actually in force, and the one-build A/B hook for it.
+     *
+     * Normally [AresWashMath.DEFAULT_WASH_FLOOR]. `setprop debug.ares.wash_floor 0` reproduces the
+     * PRE-FIX rendering from these exact bytes, which is what makes this fix's verification a real
+     * negative control rather than a before/after of two different builds. Any value in 0..1 works,
+     * so an intermediate floor can be measured without recompiling.
+     *
+     * Read ONCE per process, deliberately: the value is folded into the icon cache key
+     * ([stateFragment]), so changing it mid-process could only produce a mix of icons baked at two
+     * different floors. The A/B procedure is setprop -> force-stop -> relaunch, which re-reads it.
      */
-    private fun fullWashFilter(accent: Int): ColorFilter {
-        val ar = Color.red(accent) / 255f
-        val ag = Color.green(accent) / 255f
-        val ab = Color.blue(accent) / 255f
-        val m = floatArrayOf(
-            ar * LR, ar * LG, ar * LB, 0f, 0f,
-            ag * LR, ag * LG, ag * LB, 0f, 0f,
-            ab * LR, ab * LG, ab * LB, 0f, 0f,
-            0f, 0f, 0f, 1f, 0f,
-        )
-        return ColorMatrixColorFilter(ColorMatrix(m))
+    private val washFloorOverride: Float? by lazy {
+        Utilities.getSystemProperty("debug.ares.wash_floor", "")
+            .toFloatOrNull()
+            ?.takeIf { it in 0f..1f }
+            ?.also { Log.w(TAG, "wash floor OVERRIDDEN to $it via debug.ares.wash_floor") }
     }
+
+    private fun washFloor(): Float = washFloorOverride ?: AresWashMath.DEFAULT_WASH_FLOOR
+
+    /**
+     * Full-accent duotone colour filter toward [accent]. Used only for the non-adaptive fallback in
+     * [wash]. The arithmetic, the measurements behind the floor, and why a plain `SRC_IN` tint is
+     * the wrong fix here all live in [AresWashMath] -- an Android-free file so `:ares-geom-tests`
+     * can assert on the matrix the device actually uses rather than on a copy of it.
+     *
+     * Measured on device 2026-09-02 (emulator-5554, dynamic blue palette, DARK mode) after this
+     * landed: a dark-artwork legacy probe rendered #8FA3C0 on tile #304765 = **3.98:1**, where the
+     * same artwork at floor 0 models to 1.44:1. The rendered glyph came out at exactly
+     * `accent * 0.817`, against a predicted `0.80 + 0.20 * 0.085` -- so the matrix, offset-column
+     * units included, does on the device what the model says it does.
+     */
+    private fun fullWashFilter(accent: Int): ColorFilter = ColorMatrixColorFilter(
+        ColorMatrix(
+            AresWashMath.washMatrix(
+                Color.red(accent), Color.green(accent), Color.blue(accent), washFloor(),
+            ),
+        ),
+    )
 
     /**
      * Fallback for a NON-adaptive icon (no layers to monochrome): if theming is active, fold the
@@ -149,6 +171,11 @@ object AresIconTint {
         if (!prefs.aresIconTintEnabled.firstBlocking()) return "tint=v$RENDER_VERSION:off"
         val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val c = themedColors(context)
-        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}"
+        // The floor is part of the KEY, not just the rendering. Without it a `setprop
+        // debug.ares.wash_floor` A/B would compare two runs that both served the same cached
+        // bitmaps and report no difference -- the same shape of silent false-green a stale Gradle
+        // UP-TO-DATE produced here on 2026-09-02, where four negative controls "passed" without
+        // ever running.
+        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}:f${washFloor()}"
     }
 }

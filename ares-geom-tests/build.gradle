@@ -24,6 +24,7 @@ sourceSets {
         kotlin {
             srcDir '../lawnchair/src'
             include 'app/lawnchair/areslauncher/AresGeometry.kt'
+            include 'app/lawnchair/areslauncher/AresWashMath.kt'
         }
     }
 }
@@ -43,7 +44,7 @@ tasks.named('test') {
     // is a worse failure than a wrong assertion because nothing distinguishes it from a real green.
     // Declaring the files makes an edit to any of them re-run the suite.
     inputs.files(
-        fileTree(dir: "$rootDir/res", includes: ["values*/ares_dimens.xml", "layout/ares_all_apps_icon.xml"])
+        fileTree(dir: "$rootDir/res", includes: ["values*/ares_dimens.xml", "layout/ares_all_apps_icon.xml", "values*/colors.xml"])
     ).withPropertyName("aresResources").withPathSensitivity(PathSensitivity.RELATIVE)
 
     testLogging {
