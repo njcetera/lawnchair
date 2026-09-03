@@ -531,6 +531,48 @@ class AresLauncherDriver {
     /** Tiles that are plain icons, in visual order. `itemType` 0 is an application. */
     fun iconTiles(): List<Tile> = tiles().filter { it.itemType == 0 }
 
+    // ------------------------------------------------------------------ view capture
+
+    /**
+     * Drives the `ares-view-capture` channel. Sub-commands `start` / `export` / `reset` / `status`;
+     * there is deliberately no `stop` (see `AresViewCapture`).
+     */
+    fun viewCapture(sub: String): String =
+        call("ares-view-capture", sub)?.getString("response") ?: "null"
+
+    /**
+     * Reads the exported proto off the device, or null if it cannot be read.
+     *
+     * NOT a plain `File(path).readBytes()`, and this is the whole reason the method exists. The
+     * proto lands in the LAUNCHER's external files dir, `Android/data/app.lawnchair.debug/files/`,
+     * and this test APK is a separate application id and therefore a separate UID. Under scoped
+     * storage one app cannot read another's external files dir. `adb pull` works on it only because
+     * adb runs as shell, which is specially allowlisted — that is not evidence the test can.
+     *
+     * So it tries the direct read first (cheap, and if a future platform allows it we want to know),
+     * then falls back to `UiAutomation.executeShellCommand`, which runs as shell and returns a
+     * `ParcelFileDescriptor` — binary-safe, unlike `UiDevice.executeShellCommand`, which hands back
+     * a `String` and would corrupt a megabyte of proto. Which path won is logged, because guessing
+     * here is exactly what this project's `run-as … sqlite3` trap punishes.
+     *
+     * Returns null rather than throwing so the caller can report SKIP: a proto that cannot be read
+     * is a check that could not run, not a launcher defect.
+     */
+    fun readCapturedProto(path: String): ByteArray? {
+        runCatching { java.io.File(path).readBytes() }
+            .onSuccess { if (it.isNotEmpty()) { Log.i("AresViewCap", "proto read directly (${it.size} bytes)"); return it } }
+            .onFailure { Log.i("AresViewCap", "direct read refused (${it.javaClass.simpleName}), falling back to shell") }
+
+        return runCatching {
+            instrumentation.uiAutomation.executeShellCommand("cat $path").use { pfd ->
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+            }
+        }.onFailure { Log.w("AresViewCap", "shell read failed", it) }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?.also { Log.i("AresViewCap", "proto read via shell (${it.size} bytes)") }
+    }
+
     fun waitFor(what: String, timeoutMs: Long = 30_000, condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
