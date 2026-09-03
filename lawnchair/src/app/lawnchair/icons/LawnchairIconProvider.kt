@@ -263,41 +263,53 @@ class LawnchairIconProvider @Inject constructor(
                     return CustomAdaptiveIconDrawable(ares[0].toDrawable(), synth)
                 }
             }
-            // Non-adaptive icon: no layers to monochrome, so it takes the accent wash. BOTH colours
-            // matter and they are not interchangeable: ares[1] is the GLYPH accent the band starts
-            // at, ares[0] is the TILE this same call then paints behind it, which is what decides
-            // whether the band ramps toward white or toward black.
+            // NON-ADAPTIVE (legacy) icon. It has no layers to monochrome, but that does NOT mean it
+            // cannot BE monochromed: MonochromeIconFactory never reads the source alpha, it derives
+            // the mask from luminance and auto-detects polarity. So a legacy icon can go through
+            // the very same generator as everything above, which makes it match by construction
+            // rather than by tuning a colour ramp to approximate the match.
             //
-            // Two separate defects were fixed here, in that order. First the wash was aimed at
-            // ares[0] -- the tile's own colour -- so it was dark-on-dark by construction. Then,
-            // aimed correctly at ares[1], it still ramped toward a FIXED black pole, which is away
-            // from a light tile but straight into a dark one. Owner Pixel 2026-09-02, palette
-            // #FF88B4 on #610033: adaptive icons render at 6.06:1 on the monochrome path while a
-            // washed legacy icon managed 3.96:1 beside them, and the owner said so.
-            val washed = AresIconTint.wash(result, prefs2, ares[1], ares[0])
-            // Take over ONLY the wrap that BaseIconFactory's legacy branch would have done:
-            // a non-adaptive icon that did NOT come from an icon pack
-            // (normalizeAndWrapToAdaptiveIcon shrinks only when `!isFromIconPack &&
-            // shouldWrapAdaptive(context)`, and early-returns for an AdaptiveIconDrawable).
-            // Wrapping anything else DOUBLE wraps -- an already-adaptive icon reaches here
-            // whenever generateMono() returns null (below API 33, or on any failure) and would
-            // get a second background painted across a 1.5x layer rect, and a pack icon, which
-            // that branch deliberately never wrapped, would gain a background it never had.
-            // Adversarial review 2026-09-01.
+            // That is the owner's call, 2026-09-02: "I feel like we just gotta try to get the glyph
+            // one color and the background another? then it'll match the monochromatic icons."
+            // Two previous revisions tried to reach that with a duotone wash -- first aimed at the
+            // wrong colour, then ramping toward a fixed black pole -- and both landed short of the
+            // adaptive icons sitting beside them. See AresIconTint.generateMonoFromLegacy for why
+            // the earlier objection to this ("opaque icons would flatten into a colour block") was
+            // wrong, and why the icon must fill the layer rect for the polarity check to work.
+            //
+            // THE WRAP GATE COMES FIRST, and the mono lives INSIDE it. Take over ONLY the wrap that
+            // BaseIconFactory's legacy branch would have done: a non-adaptive icon that did NOT come
+            // from an icon pack (normalizeAndWrapToAdaptiveIcon shrinks only when `!isFromIconPack
+            // && shouldWrapAdaptive(context)`, and early-returns for an AdaptiveIconDrawable).
+            // Wrapping anything else DOUBLE wraps -- an already-adaptive icon reaches here whenever
+            // generateMono() returns null (below API 33, or on any failure) and would get a second
+            // background painted across a 1.5x layer rect, and a pack icon, which that branch
+            // deliberately never wrapped, would gain a background it never had. Adversarial review
+            // 2026-09-01, and the reason the mono is not simply returned above: it would have
+            // reintroduced exactly that.
             if (result is AdaptiveIconDrawable || result.isFromIconPack ||
                 !shouldWrapAdaptive(context)
             ) {
-                return washed
+                return AresIconTint.wash(result, prefs2, ares[1], ares[0])
             }
             // Reproduce that branch's GEOMETRY, not just its background colour. It wraps the
             // icon in a FixedScaleDrawable at IconNormalizer's scale -- and setScale() itself
-            // multiplies by LEGACY_ICON_SCALE (~0.467). Handing the raw drawable straight in as
-            // an adaptive foreground instead let CustomAdaptiveIconDrawable stretch it to the
+            // multiplies by LEGACY_ICON_SCALE (~0.467). Handing a full-bleed drawable straight in
+            // as an adaptive foreground instead let CustomAdaptiveIconDrawable stretch it to the
             // 1.5x layer rect: ~2.1x too large, corners cut off by the icon mask. The original
             // fix here changed the background colour and silently changed the size with it;
             // sampling pixel COLOURS could not see that. Adversarial review 2026-09-01.
+            //
+            // Both the mono mask and the wash fallback go through this same scale, so switching
+            // between them changes the COLOUR treatment and nothing about the geometry.
+            val legacyMono =
+                if (AresIconTint.legacyMonoEnabled) {
+                    AresIconTint.generateMonoFromLegacy(context, result, ares[1])
+                } else {
+                    null
+                }
             val foreground = FixedScaleDrawable().apply {
-                setDrawable(washed)
+                setDrawable(legacyMono ?: AresIconTint.wash(result, prefs2, ares[1], ares[0]))
                 setScale(IconNormalizer(LauncherAppState.getIDP(context).iconBitmapSize).getScale(result))
             }
             return CustomAdaptiveIconDrawable(ares[0].toDrawable(), foreground)

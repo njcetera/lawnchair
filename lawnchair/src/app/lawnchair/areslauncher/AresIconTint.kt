@@ -13,6 +13,8 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toDrawable
+import app.lawnchair.icons.CustomAdaptiveIconDrawable
 import app.lawnchair.preferences2.PreferenceManager2
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
@@ -58,7 +60,10 @@ object AresIconTint {
 //   dark tile and toward black on a light one, so its worst pixel equals the accent instead of a
 //   dimmed accent. Owner 2026-09-02: floor 0.80 was still "not enough contrast" beside the
 //   monochrome icons, which render at the accent. The span is also in the key -- see stateFragment.
-    private const val RENDER_VERSION = 11
+// 12=legacy (non-adaptive) icons go through MonochromeIconFactory too, instead of any colour
+//   wash, so they are a flat accent glyph on the theme tile exactly like every other themed icon
+//   (owner 2026-09-02: "get the glyph one color and the background another").
+    private const val RENDER_VERSION = 12
 
     /** True when theming should be baked into generated icons. On/off only -- no strength. */
     fun isActive(prefs: PreferenceManager2): Boolean =
@@ -106,6 +111,94 @@ object AresIconTint {
             Log.w(TAG, "monochrome synthesis failed", t)
             null
         }
+    }
+
+    /**
+     * Synthesize a monochrome from a NON-adaptive (legacy) icon, so it goes through the exact same
+     * generator every other themed icon does and matches them by construction.
+     *
+     * Owner 2026-09-02, after the wash's second revision still did not satisfy: *"I feel like we
+     * just gotta try to get the glyph one color and the background another? then it'll match the
+     * monochromatic icons."* Right, and my earlier objection to that was wrong. I rejected a plain
+     * tint because "many legacy icons are fully opaque squares with no alpha shape, so SRC_IN
+     * renders them as solid colour blocks" — true of tinting the raw bitmap, and irrelevant to
+     * [MonochromeIconFactory], which **never looks at the source alpha**. It draws the icon on
+     * black, sets `alpha = average(R,G,B)` so LUMINANCE becomes the mask, contrast-stretches
+     * min..max, and pushes the result toward 0/255. Opaque artwork with no alpha is precisely what
+     * it was built for.
+     *
+     * **Why the icon must fill the layer rect here.** `generateMono` decides whether to INVERT by
+     * averaging the canvas's top and bottom edge pixels, on the assumption that the edges are the
+     * icon's own background. Wrapping a legacy icon at its usual shrunken legacy scale would put
+     * black padding at those edges, the polarity check would read that padding instead of the
+     * artwork, and a dark-logo-on-white icon would come out inverted — the white background
+     * becoming the glyph. Passing the raw drawable as a full-bleed foreground puts the artwork's
+     * own background at the edges, which makes all four cases resolve correctly: dark-on-light and
+     * light-on-dark both flip as needed, and either on transparent reads the black filler as
+     * background and does not flip.
+     *
+     * The caller scales the result back down to legacy geometry afterwards; this returns the
+     * full-canvas mask.
+     */
+    fun generateMonoFromLegacy(context: Context, legacy: Drawable, accent: Int): Drawable? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
+        return try {
+            val full = CustomAdaptiveIconDrawable(
+                Color.TRANSPARENT.toDrawable(),
+                legacy.mutate(),
+            )
+            val size = LauncherAppState.getIDP(context).iconBitmapSize.coerceAtLeast(1)
+            val factory = MonochromeIconFactory(size)
+            factory.wrap(full, full.iconMask)
+            factory.colorFilter = flatGlyphFilter(accent)
+            factory
+        } catch (t: Throwable) {
+            Log.w(TAG, "legacy monochrome synthesis failed", t)
+            null
+        }
+    }
+
+    /** Steepness of the alpha threshold in [flatGlyphFilter]. 8 makes the ramp ±16/255 wide. */
+    private const val GLYPH_ALPHA_STEEPNESS = 8f
+
+    /**
+     * Paint the mask as a FLAT accent glyph: every pixel is either the accent or nothing.
+     *
+     * The plain `BlendModeColorFilter(accent, SRC_IN)` that [generateMono] uses keeps the mask's
+     * partial alpha, which is right for a native monochrome layer (already designed as a glyph) and
+     * wrong for a synthesized one. Measured 2026-09-02 on a dark-artwork legacy probe: the
+     * generator produced a largely MID-alpha mask, so the disc composited to `#576F8F` over a
+     * `#2A415F` tile — a washed-out mid-tone, visibly flatter and dimmer than the `#B0C8EC` that
+     * adaptive icons render at, and worse than the colour wash it was meant to replace.
+     *
+     * The owner's ask is a two-tone icon — "the glyph one color and the background another" — so
+     * the alpha is thresholded rather than passed through. This matrix does both jobs at once:
+     * the RGB rows are constant offsets (the accent, ignoring the source colour entirely, exactly
+     * like SRC_IN), and the alpha row is a steep ramp centred on 50%, which drives anything
+     * meaningfully opaque to fully opaque and everything else to nothing. Antialiasing at the glyph
+     * edge survives as the narrow ±16/255 transition band, so edges stay smooth rather than jagged.
+     */
+    private fun flatGlyphFilter(accent: Int): ColorFilter {
+        val k = GLYPH_ALPHA_STEEPNESS
+        return ColorMatrixColorFilter(
+            ColorMatrix(
+                floatArrayOf(
+                    0f, 0f, 0f, 0f, Color.red(accent).toFloat(),
+                    0f, 0f, 0f, 0f, Color.green(accent).toFloat(),
+                    0f, 0f, 0f, 0f, Color.blue(accent).toFloat(),
+                    0f, 0f, 0f, k, 128f - k * 128f,
+                ),
+            ),
+        )
+    }
+
+    /**
+     * Escape hatch back to the colour wash for the legacy path, for a one-build A/B and in case a
+     * real icon turns up that the mono generator mangles. `setprop debug.ares.legacy_mono 0`.
+     */
+    val legacyMonoEnabled: Boolean by lazy {
+        (Utilities.getSystemProperty("debug.ares.legacy_mono", "") != "0")
+            .also { if (!it) Log.w(TAG, "legacy mono DISABLED via debug.ares.legacy_mono, using wash") }
     }
 
     /**
@@ -194,6 +287,6 @@ object AresIconTint {
         // bitmaps and report no difference -- the same shape of silent false-green a stale Gradle
         // UP-TO-DATE produced here on 2026-09-02, where four negative controls "passed" without
         // ever running.
-        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}:s${washSpan()}:l$washLegacy"
+        return "tint=v$RENDER_VERSION:on:n$night:${c[0]}:${c[1]}:s${washSpan()}:l$washLegacy:m$legacyMonoEnabled"
     }
 }
