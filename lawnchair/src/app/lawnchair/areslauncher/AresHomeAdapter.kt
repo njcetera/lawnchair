@@ -1375,6 +1375,22 @@ class AresHomeAdapter(private val launcher: Launcher) :
                 // empty state PERMANENT. Measured on emulator-5554 2026-09-02: after a screen-off
                 // cold start (which binds the grid while the host is not listening), a full
                 // fold+unfold rebind left pending at 2, unchanged. See defect-ledger row 57a.
+                //
+                // THIS LINE IS THE ENTIRE FIX for row 57a, confirmed by a sysprop-gated A/B on
+                // 2026-09-02: the separate `healPendingWidgetRows()` added alongside it made no
+                // difference on either arm and has been removed. Stock
+                // `PendingAppWidgetHostView.reInflate()` already reaches Ares rows, because
+                // `bindAppWidget` -> `Workspace.addInScreen` redirects CONTAINER_DESKTOP into this
+                // list; it just handed the placeholder straight back until this refusal existed.
+                //
+                // DO NOT narrow this to `isDeferredWidget` only. It looks like the tighter,
+                // more correct guard -- a reviewer proposed exactly that -- but a RESTORE-pending
+                // placeholder is not deferred, and `checkIfRestored()` heals it through the very
+                // same `reInflate()` -> rebind path. Reusing it there would freeze a restored
+                // widget as a placeholder forever: the identical defect, on the restore path.
+                // The cost of the broad refusal is re-inflating a placeholder on rebind, which is
+                // cheap -- the flicker loop this reuse exists to break is driven by LIVE host views
+                // calling requestLayout, and a placeholder does not do that.
                 it !is com.android.launcher3.widget.PendingAppWidgetHostView &&
                 // isWidgetIdAllocated guards the unbound/pending case: two not-yet-bound widgets both
                 // carry appWidgetId = -1 (see the duplicate-widget note above), so match on a REAL id.

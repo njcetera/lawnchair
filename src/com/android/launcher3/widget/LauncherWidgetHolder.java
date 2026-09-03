@@ -156,7 +156,18 @@ public class LauncherWidgetHolder {
 
     /** Update any views which have been deferred because the host was not listening */
     protected void updateDeferredView() {
-        aresHealPendingHomeListWidgets();
+        // LC-Ares: an `aresHealPendingHomeListWidgets()` call stood here from b490c8c755 until
+        // 2026-09-02. It was DEAD CODE and it was removed after a measurement, not a review:
+        // sysprop-gated one-build A/B on emulator-5554 (`debug.ares.widget_heal`), screen-off cold
+        // start, pending-placeholder count before/after wake --
+        //     heal DISABLED: 2 -> 0, 2 -> 0        heal ENABLED: 2 -> 0, 2 -> 0
+        // The loop below already heals Ares-hosted widgets. Its `reInflate()` calls
+        // `launcher.bindAppWidget()` -> `Workspace.addInScreen()`, and THAT redirects
+        // CONTAINER_DESKTOP into the Ares home list (Workspace.java:1356). The removed comment
+        // claimed "neither half reaches them", which was simply wrong.
+        // The real fix for defect-ledger row 57a is the placeholder-reuse refusal in
+        // AresHomeAdapter: before it, reInflate() re-bound the row and the adapter handed the SAME
+        // PendingAppWidgetHostView straight back, so the empty state survived every heal.
         // Update any views which have been deferred because the host was not listening.
         // We go in reverse order and inflate any deferred or cached widget
         for (int i = mViews.size() - 1; i >= 0; i--) {
@@ -164,33 +175,6 @@ public class LauncherWidgetHolder {
             if (view instanceof PendingAppWidgetHostView pv) {
                 pv.reInflate();
             }
-        }
-    }
-
-    /**
-     * LC-Ares: Strategy D counterpart to the loop above.
-     *
-     * <p>The loop only reaches views the holder itself tracks in { mViews}, and heals them via
-     * { reInflate()} -> { launcher.removeItem}/{ bindAppWidget}, which are
-     * Workspace-oriented. Ares widgets live in { AresHomeListView}, so neither half reaches
-     * them and a widget inflated while the host was not listening stays an empty placeholder
-     * forever. Defect-ledger rows 57 / 57a.
-     *
-     * <p>Hooked HERE rather than overridden in { LawnchairWidgetHolder} because that subclass
-     * is never instantiated at runtime -- every { AresWidgetListen} line reports
-     * { holder=LauncherWidgetHolder}, and { getClass()} is the runtime class. An override
-     * there is dead code.
-     */
-    private void aresHealPendingHomeListWidgets() {
-        Launcher launcher = null;
-        try {
-            launcher = ActivityContext.lookupContext(mContext);
-        } catch (Exception ignored) {
-            // Preview and test contexts are not a Launcher; nothing to heal.
-        }
-        if (launcher != null && launcher.getWorkspace() != null
-                && launcher.getWorkspace().getAresHomeList() != null) {
-            launcher.getWorkspace().getAresHomeList().healPendingWidgetRows();
         }
     }
 
