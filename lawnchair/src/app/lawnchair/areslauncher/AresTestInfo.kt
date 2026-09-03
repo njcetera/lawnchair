@@ -592,13 +592,38 @@ object AresTestInfo {
         val paneTop = topOnScreen(pane)
         val rv = pane?.activeRecyclerView
         val rvPad = rv?.paddingTop ?: -1
-        val paneChild = topOnScreen(rv?.getChildAt(0))
+        val rvTop = topOnScreen(rv)
+        val firstChild = rv?.getChildAt(0)
+        val paneChild = topOnScreen(firstChild)
+        // Decomposition of the residual gap between rvPad and the first row's screen Y. The gap is
+        // either a LAYOUT offset (the recycler not starting at the pane's top, or a decoration) or
+        // the row's OWN internal top inset -- and the two want opposite fixes, so name them apart.
+        // `kidClass`/`kidPadTop`: what the first row actually is and what it insets itself by; an
+        // icon row that pads itself sits lower than its view top and can be VISUALLY aligned with a
+        // widget that does not, so removing that inset would break the look rather than fix it.
+        val kidClass = firstChild?.javaClass?.simpleName ?: "none"
+        val kidPadTop = firstChild?.paddingTop ?: -1
+        val kidInRv = if (firstChild != null && rv != null) paneChild - rvTop else -1
+        // WHAT the first row is decides whether the residual should be closed at all: a section
+        // header or divider is not the same kind of thing as the home grid's first tile, so forcing
+        // their view tops equal would move the whole list to satisfy an arbitrary comparison.
+        val kidText = (firstChild as? android.widget.TextView)?.text?.toString()?.take(16) ?: "-"
+        val kids = (0 until (rv?.childCount ?: 0)).take(3).joinToString(",") { i ->
+            val c = rv?.getChildAt(i)
+            "${c?.javaClass?.simpleName}@${topOnScreen(c)}" +
+                ((c as? android.widget.TextView)?.text?.toString()?.take(10)?.let { "'$it'" } ?: "")
+        }
+        val headerH = pane?.floatingHeaderView?.height ?: -1
+        val homeKidClass = home?.getChildAt(0)?.javaClass?.simpleName ?: "none"
+        val homeKidPadTop = home?.getChildAt(0)?.paddingTop ?: -1
         val dp = launcher.deviceProfile
         val homeListPad = AresAllApps.homeListTopPaddingPx(launcher)
         val recon = dp.insets.top + dp.workspacePadding.top + homeListPad
         return "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
             "paneTop=$paneTop rvPad=$rvPad paneChild=$paneChild | " +
             "insetsTop=${dp.insets.top} wsPadTop=${dp.workspacePadding.top} homeListPad=$homeListPad recon=$recon | " +
+            "rvTop=$rvTop kidInRv=$kidInRv kidClass=$kidClass kidPadTop=$kidPadTop kidText=$kidText headerH=$headerH kids=[$kids] " +
+            "homeKidClass=$homeKidClass homeKidPadTop=$homeKidPadTop | " +
             "delta(paneChild-homeChild)=${paneChild - homeChild}"
     }
 

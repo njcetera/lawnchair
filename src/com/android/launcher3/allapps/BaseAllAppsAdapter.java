@@ -201,11 +201,20 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
     protected final OnLongClickListener mOnIconLongClickListener;
     protected OnFocusChangeListener mIconFocusListener;
 
+    /**
+     * AresLauncher: the section header's inter-section top margin, resolved once. Restored onto
+     * every header except the first, which must sit flush with the list's top padding -- see the
+     * VIEW_TYPE_ARES_SECTION_HEADER bind block.
+     */
+    private final int mAresSectionHeaderMarginTop;
+
     public BaseAllAppsAdapter(T activityContext, LayoutInflater inflater,
             AlphabeticalAppsList<T> apps, SearchAdapterProvider<?> adapterProvider) {
         mActivityContext = activityContext;
         mApps = apps;
         mLayoutInflater = inflater;
+        mAresSectionHeaderMarginTop = activityContext.asContext().getResources()
+                .getDimensionPixelSize(R.dimen.ares_section_header_padding_top);
 
         mOnIconClickListener = mActivityContext.getItemOnClickListener();
         mOnIconLongClickListener = mActivityContext.getAllAppsItemLongClickListener();
@@ -394,6 +403,27 @@ public abstract class BaseAllAppsAdapter<T extends Context & ActivityContext> ex
                 AdapterItem headerItem = mApps.getAdapterItems().get(position);
                 if (headerItem instanceof AresSectionHeaderItem sectionHeader) {
                     TextView header = (TextView) holder.itemView;
+                    // AresLauncher: the header's layout_marginTop is inter-section SEPARATION, so
+                    // the FIRST row must not carry it -- there is nothing above it to separate
+                    // from. With it, the app list's first row rested 10dp (24px, measured on
+                    // emulator-5554 and the owner's Pixel) BELOW the recycler's top padding, while
+                    // the home grid's first tile rests exactly AT its padding. Unfolded the two
+                    // lists sit side by side, so that gap is the residual misalignment the owner
+                    // reads between the panes (owner 2026-09-03). The paddings themselves already
+                    // agree -- measured rvPad == homePad == 464 -- so this is the whole difference.
+                    //
+                    // BOTH branches are written because headers RECYCLE: a holder that last bound
+                    // at position 0 would otherwise keep a zero margin further down the list and
+                    // collapse the gap between two sections. Same recycling hazard the icon/letter
+                    // branches below already guard.
+                    ViewGroup.LayoutParams headerLp = header.getLayoutParams();
+                    if (headerLp instanceof ViewGroup.MarginLayoutParams marginLp) {
+                        int wanted = position == 0 ? 0 : mAresSectionHeaderMarginTop;
+                        if (marginLp.topMargin != wanted) {
+                            marginLp.topMargin = wanted;
+                            header.setLayoutParams(marginLp);
+                        }
+                    }
                     if (sectionHeader.iconRes != 0) {
                         // Empty text, not a placeholder character: the drawable IS the marker, and
                         // it sits at the start exactly where a letter would, because the header's

@@ -29,15 +29,20 @@ import org.junit.runner.RunWith
  *
  * ## The measurement, taken before this test was written
  *
- * `ares-pane-align`, emulator-5554 and Pixel 59091FDCG000D1, unfolded, HEAD build ab59569:
+ * `ares-pane-align`, emulator-5554 and Pixel 59091FDCG000D1, unfolded:
  * ```
- *   emulator: homeChild=464 paneChild=488  delta=+24   (stable across 2 fold cycles)
- *   pixel:    homeChild=489 paneChild=513  delta=+24   (owner-verified aligned)
+ *   before the header fix:  emulator 464 vs 488,  pixel 489 vs 513   delta=+24
+ *   after  the header fix:  emulator 464 vs 464,  pixel 489 vs 489   delta=0
  * ```
- * The home first row holds its Y across fold cycles on this build (that is what the fold-guard fix
- * buys); the only residual is a constant ~24px (~10dp) header offset in the app-list recycler, which
- * the owner accepts. The old build's failure was the home row MOVING, which blows the delta well past
- * the header offset. So the tolerance below is set to pass the accepted residual and fail the drift.
+ * Two separate defects sat on this seam. The home first row DRIFTING across a fold cycle was the
+ * big one (the fold-guard fix pins it, and the second test here guards it). The remaining +24px was
+ * the section header's own `layout_marginTop` -- 10dp of INTER-section separation -- being applied
+ * to the FIRST header too, where there is nothing above it to separate from; the paddings
+ * themselves already agreed (measured rvPad == homePad). Dropping it at position 0, and restoring
+ * it on every other header because headers RECYCLE, lines the panes up exactly.
+ *
+ * A/B measured on emulator-5554: with the header fix off this test FAILS
+ * "delta=24 expected at most 19"; with it on, both tests pass with 0 skips.
  *
  * Non-two-panel devices SKIP (the pane view does not exist), never pass: a check that could not run
  * must be louder than one that failed, not quieter.
@@ -86,9 +91,22 @@ class AresPaneAlignTest {
             .that(kotlin.math.abs(after.delta)).isAtMost(tolPx())
     }
 
-    /** Reads the alignment, or SKIPs when the launcher is not in two-panel (unfolded) posture. */
+    /**
+     * Reads the alignment, or SKIPs when the launcher is not in two-panel (unfolded) posture.
+     *
+     * WAITS for the panes first. The app-list pane seeds its store on attach, so for a stretch after
+     * a launcher restart (every install does one) its recycler has NO children and `paneChild` reads
+     * -1. Asserting straight away turned BOTH arms of an A/B into assumption SKIPs that printed
+     * `OK (1 test)` -- measured 2026-09-03, and exactly the false-green this suite exists to avoid.
+     * A genuine single-pane device still SKIPs, it just costs the timeout first.
+     */
     private fun requireTwoPanel(): AresLauncherDriver.PaneAlign {
-        val a = ares.paneAlign()
+        var a = ares.paneAlign()
+        val deadline = System.currentTimeMillis() + PANE_BIND_TIMEOUT_MS
+        while (a != null && !a.bothPanesLaidOut && System.currentTimeMillis() < deadline) {
+            Thread.sleep(1_000)
+            a = ares.paneAlign()
+        }
         assumeTrue("pane-align channel did not answer", a != null)
         assumeTrue("not in two-panel posture (single-pane device or folded): ${a!!.raw}", a.bothPanesLaidOut)
         return a
@@ -102,8 +120,11 @@ class AresPaneAlignTest {
     }
 
     private companion object {
-        /** Passes the accepted ~10dp header offset; fails the old build's home-row drift (~22–32dp). */
-        const val ALIGN_TOLERANCE_DP = 16f
+        /** The panes now align EXACTLY (delta=0 measured); 8dp still fails the 10dp header margin. */
+        const val ALIGN_TOLERANCE_DP = 8f
+
+        /** The app-list pane seeds its store on attach; give it time after a launcher restart. */
+        const val PANE_BIND_TIMEOUT_MS = 40_000L
 
         /** The home first row held its Y to 0px across fold cycles on the fixed build; allow a hair. */
         const val DRIFT_TOLERANCE_PX = 4
