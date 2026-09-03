@@ -57,6 +57,31 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * Keyed off layout direction rather than a hard-coded left edge: the pane is the trailing panel,
      * so its seam is on the left in LTR and on the right in RTL.
      */
+    /**
+     * Pixels between the pane's OUTER edge and the physical screen edge.
+     *
+     * [onMeasure] extends the pane vertically past its workspace cell but NOT horizontally, so the
+     * view box stops short of the display edge (measured: pane 1018 wide starting at x=1040 on a
+     * 2076 screen -- an 18px strip). The app list only reaches the edge because the whole ancestor
+     * chain is clipChildren=false and its content draws outside the box; a background painted at the
+     * view bounds does not, which left an undimmed sliver down the outer edge (owner 2026-09-02).
+     * Measured from the real on-screen position, so it is correct in either posture and in RTL.
+     */
+    private var outerEdgeGapPx = 0
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        // DragLayer spans the whole display, so its width is the screen width in either posture.
+        val screenW = mActivityContext.dragLayer.width
+        val gap = if (layoutDirection == LAYOUT_DIRECTION_RTL) loc[0] else screenW - (loc[0] + width)
+        if (gap != outerEdgeGapPx) {
+            outerEdgeGapPx = gap.coerceAtLeast(0)
+            background?.invalidateSelf()
+        }
+    }
+
     private inner class SeamDimDrawable : android.graphics.drawable.Drawable() {
         private val paint = android.graphics.Paint()
 
@@ -80,7 +105,18 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         }
 
         override fun draw(canvas: android.graphics.Canvas) {
-            if (paint.shader != null) canvas.drawRect(bounds, paint)
+            if (paint.shader == null) return
+            // Paint past the view box on the OUTER edge so the dim reaches the physical screen edge,
+            // the same way the pane's own content already does. Safe because unclipHostChain() has
+            // cleared clipChildren on every ancestor up to (not including) the full-screen Workspace.
+            val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
+            canvas.drawRect(
+                (if (rtl) bounds.left - outerEdgeGapPx else bounds.left).toFloat(),
+                bounds.top.toFloat(),
+                (if (rtl) bounds.right else bounds.right + outerEdgeGapPx).toFloat(),
+                bounds.bottom.toFloat(),
+                paint,
+            )
         }
 
         override fun setAlpha(alpha: Int) = Unit
