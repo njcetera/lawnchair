@@ -335,6 +335,37 @@ object AresTestInfo {
     const val REQUEST_FOLDER_DROP_STATS = "ares-folder-drop-stats"
 
     /**
+     * Drives [AresViewCapture], the in-memory recording of the launcher's view tree that lets a test
+     * assert on how something ANIMATED rather than where it ended up.
+     *
+     * `arg` is the sub-command:
+     * - `start` — begin recording. Returns `started`, `already-running`, or `error:<Exception>`.
+     * - `stop` — stop recording, keeping the frames readable. `stopped` / `already-stopped` /
+     *   `not-running`.
+     * - `export` — write the proto and return `<abs path>|frames=<n>`, or `empty` / `not-running`.
+     * - `reset` — tear it down so a later `start` begins from an empty buffer.
+     * - anything else (including absent) — `recording=<bool>` as a status read.
+     *
+     * ## Why the sub-commands are NOT uniformly routed through `getLauncherUIProperty`
+     *
+     * They genuinely need different threads, and getting it wrong deadlocks rather than fails:
+     *
+     * `start` attaches an `OnDrawListener` to the decor view, which must happen on the UI thread —
+     * and it needs a live `Launcher`, so `getLauncherUIProperty` is exactly right, `null` when
+     * there is no launcher included.
+     *
+     * `export` must NOT run on the UI thread. `ViewCapture.getExportedData` blocks on `.get()` of a
+     * future whose first stage is `CompletableFuture.supplyAsync(..., MAIN_EXECUTOR)`; called from
+     * main it waits on the thread that has to produce its answer. It runs on the binder thread,
+     * using the application context [AresViewCapture] kept at `start`.
+     *
+     * `stop` and `reset` are `@AnyThread` in the library — `ViewCapture.runOnUiThread` posts to the
+     * view's handler itself — so they also answer on the binder thread and, like the invariants
+     * channel, work even when the activity is gone.
+     */
+    const val REQUEST_VIEW_CAPTURE = "ares-view-capture"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -460,7 +491,28 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> homeReveal(launcher, arg) },
         )
+        REQUEST_VIEW_CAPTURE -> viewCapture(arg)
         else -> null
+    }
+
+    /** See [REQUEST_VIEW_CAPTURE]. Each sub-command picks its own thread; the KDoc says why. */
+    private fun viewCapture(arg: String?): Bundle? = when (arg) {
+        // UI thread, and needs a live Launcher: attaches an OnDrawListener to the decor view.
+        "start" -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> AresViewCapture.start(launcher) },
+        )
+        // Binder thread. `export` on main would deadlock against MAIN_EXECUTOR; `stop`/`reset` are
+        // @AnyThread and are useful precisely when the activity is already gone.
+        "stop" -> respond(AresViewCapture.stop())
+        "export" -> respond(AresViewCapture.export())
+        "reset" -> respond(AresViewCapture.reset())
+        else -> respond("recording=${AresViewCapture.isRecording}")
+    }
+
+    /** A plain answer with no `Launcher` resolution, for the channels that do not need one. */
+    private fun respond(value: String): Bundle = Bundle().apply {
+        putString(com.android.launcher3.testing.shared.TestProtocol.TEST_INFO_RESPONSE_FIELD, value)
     }
 
     /** See [REQUEST_HOME_COLUMNS]. Runs on the UI thread via getLauncherUIProperty. */
