@@ -41,6 +41,32 @@ android {
         nightly { dimension = "channel" }
         play { dimension = "channel" }
     }
+
+    // A NON-FOLDABLE device, which is the whole point.
+    //
+    // Every instrumented run this project has ever done was on `AresFold`, and that AVD cannot be
+    // talked out of being a foldable: `mIsFoldable` is
+    // `hasSystemFeature(FEATURE_SENSOR_HINGE_ANGLE)` (`DisplayController.java:589`), a
+    // PackageManager feature, so `wm size` resizes the window and changes nothing about the flag.
+    // `isTwoPanels = isTablet && isMultiDisplay` (`DeviceProperties.kt:73`) is therefore
+    // permanently true at tablet size on it -- the "tablet" rows of the 2026-09-02 form-factor
+    // sweep were a foldable in a costume, and the sweep says so.
+    //
+    // Twelve behaviours hang off `isTwoPanels` in `Workspace.java` alone and their single-panel
+    // branch has never executed under test. This device runs it. Expect findings; that is the
+    // point, and the owner's stated worry ("the goal is for this to be installed on any newer
+    // android device") is exactly this gap.
+    //
+    // Deliberately NOT wired into `check` -- it boots an AVD and downloads a system image, so it
+    // stays an explicit task (`:ares-tests:pixel7Api36DebugAndroidTest`). A slow job silently
+    // attached to the default build is how a gate gets switched off for good.
+    testOptions.managedDevices.localDevices {
+        create("pixel7Api36") {
+            device = "Pixel 7"
+            apiLevel = 36
+            systemImageSource = "google"
+        }
+    }
 }
 
 dependencies {

@@ -130,6 +130,33 @@ class AresLauncherDriver {
 
     fun isEditMode(): Boolean = call("ares-edit-mode")?.getBoolean("response") ?: false
 
+    /**
+     * Home grid column count, or null when the channel cannot answer.
+     *
+     * NULLABLE ON PURPOSE. Every other reader here defaults a missing answer to a number, and a
+     * caller comparing that default against a range reads "the launcher was not there" as a PASS.
+     * A shape test on an unfamiliar device is exactly where that happens, so this makes the
+     * caller decide -- see AresDeviceShapeTest, which turns a null into a SKIP.
+     */
+    fun homeColumnsOrNull(): Int? =
+        call("ares-home-columns")?.getString("response")
+            ?.substringAfter("columns=", "")
+            ?.trim()
+            ?.toIntOrNull()
+
+    /**
+     * Total AresInvariants violations, or null when the channel cannot answer.
+     *
+     * The response is `total=N|<id>=<count>|...`; only the total is needed here. Nullable for the
+     * same reason as [homeColumnsOrNull]: a missing answer must not read as zero violations.
+     */
+    fun invariantTotalOrNull(): Long? =
+        call("ares-invariants")?.getString("response")
+            ?.substringAfter("total=", "")
+            ?.substringBefore("|")
+            ?.trim()
+            ?.toLongOrNull()
+
     /** Monotonic S4 decline-branch counter; -1 when the channel cannot answer. */
     fun folderDropDeclinedCount(): Long =
         call("ares-folder-drop-stats")?.getLong("response") ?: -1L
