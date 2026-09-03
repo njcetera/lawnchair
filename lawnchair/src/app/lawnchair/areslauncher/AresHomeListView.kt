@@ -27,6 +27,7 @@ import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherState
+import com.android.launcher3.util.DisplayController
 import com.android.launcher3.R
 import com.android.launcher3.celllayout.CellLayoutLayoutParams
 import com.android.launcher3.folder.Folder
@@ -3210,10 +3211,39 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // configChanges so the activity is not recreated -- the window resize and the DeviceProfile
         // update arrive as separate events, exactly as described above for a fold. The home grid
         // would then lay out at HALF WIDTH on a single-panel device, with no second panel to
-        // explain the empty half. Same for a multi-window drag-resize. `isMultiDisplay` is a stable
-        // device property, unchanged by posture, so gating on it preserves the fold behaviour this
-        // heuristic exists for and disables it where two panels are impossible.
-        val profileIsStale = props.isMultiDisplay && width >= props.availableWidthPx * 1.5f
+        // explain the empty half. Same for a multi-window drag-resize.
+        //
+        // GATED ON isFoldable(), NOT isMultiDisplay. An earlier version of this line used
+        // `props.isMultiDisplay` and claimed it was "a stable device property, unchanged by
+        // posture". It is the exact opposite, and this tree already says so in the Javadoc on
+        // `DisplayController.Info.isFoldable()` (`:733`): *"getDeviceType() answers 'what does the
+        // screen look like right now', which on a foldable flips between TYPE_PHONE and
+        // TYPE_MULTI_DISPLAY as it is opened and closed"* -- and `isMultiDisplay` is precisely
+        // `deviceType == TYPE_MULTI_DISPLAY` (`InvariantDeviceProfile.java:557`).
+        //
+        // So the gate was false in exactly the frame the heuristic exists for. The stale frame this
+        // was written against is `twoPanels=false availW=1080 hostW=2036` -- a FOLDED profile, which
+        // reports TYPE_PHONE, which made `isMultiDisplay` false, which short-circuited the whole
+        // check and let the home grid render full width across both panes. That is the defect the
+        // guard was supposed to prevent.
+        //
+        // `isFoldable()` is the posture-independent accessor this project built for this exact class
+        // of bug, and it still excludes the tablet-rotation and multi-window cases above: a tablet
+        // is not a foldable.
+        val isFoldable = DisplayController.INSTANCE.get(context).info.isFoldable
+        val profileIsStale = isFoldable && width >= props.availableWidthPx * 1.5f
+        if (profileIsStale) {
+            // PROOF OF PATH. This branch fires only on a transient mid-fold frame, which no
+            // at-rest test can observe -- running the shape suite folded and unfolded shows the
+            // absence of a regression and says nothing about whether the guard ever engaged. The
+            // previous version of this gate was WRONG for months and looked fine by exactly that
+            // measure. Rare by construction, so the log costs nothing.
+            Log.i(
+                "AresFoldGuard",
+                "stale profile: width=$width availableWidthPx=${props.availableWidthPx} " +
+                    "twoPanels=$profileSaysTwoPanels isMultiDisplay=${props.isMultiDisplay} -> halving",
+            )
+        }
         if (profileSaysTwoPanels || profileIsStale) {
             width /= 2
         }

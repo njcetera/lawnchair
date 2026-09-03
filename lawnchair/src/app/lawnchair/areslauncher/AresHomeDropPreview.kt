@@ -83,7 +83,7 @@ object AresHomeDropPreview : DragController.DragListener {
         // instant a create dwell arms (dX locks), so the user can no longer pull the app back out to
         // abort the create and releasing becomes the only exit (owner report 2026-08-23; AresFolderPin
         // trace: dX froze the frame the dwell armed, handoff=true, with no further slip/target events).
-        // Relaying keeps dX live, so a pull-out moves past DWELL_SLOP_PX and disarms as it should.
+        // Relaying keeps dX live, so a pull-out moves past the dwell slop and disarms as it should.
         // Handled before the freeze-return; the gap machinery below never ran for a handoff drag
         // anyway (maybeTakeOver returns true for it), so nothing downstream changes for other drags.
         if (AresFolderExitHandoff.isActive()) {

@@ -50,9 +50,14 @@ allprojects {
                 // the baseline from it, restrict to a checked subset, and only then consider
                 // failing the build. See design/regression-testing-proposal.md "Build in this order".
                 //
-                // Note this block sits in allprojects { withType(AndroidBasePlugin) }, so it applies
-                // to :iconloaderlib, :wmshell, :shared and every other AOSP-derived module too --
-                // which is most of why the count is large and why phase 2 needs the number first.
+                // This block sits in allprojects { withType(AndroidBasePlugin) }, so the SETTINGS
+                // apply to every Android module -- but the single shared baseline is almost
+                // entirely the app module's own debt, so a sibling module has nothing frozen.
+                // Counted 2026-09-03 by <location file=> prefix: lawnchair 1525, quickstep 1387,
+                // res 1165, src 614, platform_frameworks_libs_systemui 3. An earlier version of
+                // this comment claimed the large count came from the AOSP-derived modules; it does
+                // not. CI runs only lintLawnWithQuickstepGithubDebug, so the gate is real but
+                // narrower than it reads -- a bare `./gradlew lint` would fail on the siblings.
                 // MEASURED 2026-09-02, first lint run in this project's history:
                 //   no baseline  -> 2600 errors, 1577 warnings
                 //   regenerated  -> "no new issues (2600 errors and 1577 warnings filtered)"

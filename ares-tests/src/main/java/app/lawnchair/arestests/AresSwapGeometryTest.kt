@@ -144,9 +144,18 @@ class AresSwapGeometryTest {
         // its sibling test asserts `transitions > 0` for the same reason
         // (adversarial-review finding, 2026-08-21). The order is the direct witness.
         assertThat(ares.homeOrder()).isNotEqualTo(orderBefore)
-        // One cell row is 231px here. The defect is a single absolute jump that puts the target's
-        // row at the viewport top — hundreds of px in one layout pass. Edge auto-scroll, which is
-        // legitimate and stays, moves far less than a row between 40ms samples.
+        // KNOWN-FALSE FAILURE. Ledger row 68a: this assertion is mis-calibrated and the launcher is
+        // fine. It reads as "more than a cell row in one layout pass", but the sampler cannot
+        // observe a layout pass -- measured gaps during this very drag are 44-115ms, i.e. 3-7
+        // frames at 60fps, so several frames of legitimate edge auto-scroll accumulate into one
+        // "jump". A 945-frame ViewCapture of the identical drag puts the largest single-frame
+        // translationY change of ANY view at 116px against this 231px row, so by the test's own
+        // criterion nothing ever jumped.
+        //
+        // Left ARMED rather than quietly relaxed. The right fix is to assert per-frame movement
+        // from a capture instead of per-sample movement from a channel poll (AresSampler.intervals()
+        // now exists so a rate claim has a denominator), and a re-tuned threshold is not coverage
+        // until it has been made to fail -- so it is an owner call, not an overnight one.
         assertThat(worst).isLessThan(MAX_STEP_PX)
     }
 

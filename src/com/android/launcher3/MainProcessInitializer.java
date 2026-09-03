@@ -21,7 +21,6 @@ package com.android.launcher3;
 import static android.app.PendingIntent.FLAG_IMMUTABLE;
 import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 
-import static com.android.launcher3.Flags.enableStrictMode;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -81,10 +80,22 @@ public class MainProcessInitializer implements ResourceBasedOverride {
         // ledger, and the one `meminfo` was structurally unable to see -- has been sitting here
         // switched off the entire time.
         //
-        // GATED ON BuildConfig.DEBUG, deliberately, and NOT on DEBUG_STRICT_MODE. Flipping that
-        // constant to true is the obvious move and it is wrong: it is not variant-aware, so it
-        // would arm StrictMode in lawnWithQuickstepNightlyRelease as well -- on the owner's daily
-        // device.
+        // GATED ON BuildConfig.DEBUG, and NOT on DEBUG_STRICT_MODE. Flipping that constant to true
+        // is the obvious move and it is wrong: it is not variant-aware, so it would arm StrictMode
+        // in release variants too.
+        //
+        // CORRECTION (nightly review 2026-09-03): an earlier version of this comment claimed the
+        // DEBUG gate keeps StrictMode OFF "on the owner's daily device". IT DOES NOT. The owner's
+        // Pixel runs the DEBUG variant -- `build.gradle` gives it `applicationIdSuffix ".debug"`
+        // and every harness script targets `app.lawnchair.debug` on serial 59091FDCG000D1 -- so
+        // `BuildConfig.DEBUG` is true there and this block IS armed on their phone.
+        //
+        // What that costs, on the numbers this same comment lists below: twelve `firstBlocking()`
+        // call sites plus AppDatabase and WallpaperService `runBlocking` on Room, each now a
+        // main-thread `detectDiskReads` violation with a captured stack. Penalties are `penaltyLog`
+        // only -- no death, no dialog -- so it is log noise and stack-capture overhead, not a
+        // crash risk. Whether a diagnostic instrument should run on the owner's daily driver is
+        // THEIR call, so it is left armed and flagged rather than changed overnight.
         //
         // penaltyDeath() REMOVED, and this is not a preference. It was on the VM policy, whose
         // penalties fire from the finalizer/GC thread at an arbitrary later moment, so it is a

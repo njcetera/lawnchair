@@ -136,6 +136,22 @@ class AresDeviceShapeTest {
     }
 
     /**
+     * The launcher's own window width in px, from its `DeviceProfile` dump, or null if unreadable.
+     *
+     * Format in the dump is `widthPx: 2076.0px (851.6923dp)`, so the numeric part is taken up to
+     * the `px` suffix. Null rather than a fallback constant: a caller that cannot read the window
+     * should say so rather than silently measure against something else.
+     */
+    private fun launcherWindowWidth(): Float? =
+        device.executeShellCommand("dumpsys activity ${driver.launcherPackage}/app.lawnchair.LawnchairLauncher")
+            .lineSequence()
+            .firstOrNull { it.trim().startsWith("widthPx:") }
+            ?.substringAfter("widthPx:")
+            ?.trim()
+            ?.substringBefore("px")
+            ?.toFloatOrNull()
+
+    /**
      * `isTwoPanels` as the launcher itself computed it, from its own `DeviceProfile` dump.
      *
      * Read from `dumpsys activity` rather than derived from the window size, because the whole
@@ -257,7 +273,14 @@ class AresDeviceShapeTest {
         val tiles = driver.tiles()
         assumeTrue("no home tiles rendered", tiles.isNotEmpty())
 
-        val width = device.displayWidth.toFloat()
+        // The LAUNCHER's own window width, from the same DeviceProfile dump this class already
+        // reads for isTwoPanels — not `device.displayWidth`, which an earlier version used and
+        // which is the nominal DEFAULT display. Those differ: the AresFold AVD has two displays and
+        // the 2076x2152 panel is powered off, so the default-display answer can describe a screen
+        // nobody is looking at. The KDoc above already states the rule this was breaking — "the
+        // reference must come from the same measurement as the subject" — and the subject here is
+        // a tile laid out inside the launcher's window.
+        val width = launcherWindowWidth() ?: device.displayWidth.toFloat()
         for (tile in tiles) {
             assertThat(tile.box.left).isAtLeast(-1f)
             assertThat(tile.box.right).isAtMost(width + 1f)

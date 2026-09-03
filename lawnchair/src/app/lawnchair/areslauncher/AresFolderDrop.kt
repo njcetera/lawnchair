@@ -338,7 +338,7 @@ object AresFolderDrop {
         // so the commit resolves against the live view and item.
         candidate = view
         candidateInfo = info
-        // Same tile. Only a real move restarts the count -- see DWELL_SLOP_PX.
+        // Same tile. Only a real move restarts the count -- see AresGeometry.dwellSlopPx.
         //
         // A move restarts the count even when the dwell has already ARMED, and the `!armed` guard
         // that used to be here was wrong in two directions. The user's own words are "holding one
@@ -420,7 +420,7 @@ object AresFolderDrop {
     /**
      * True while ANY dwell candidate is held — armed or still counting. The edge auto-scroll
      * consults this: a grid that scrolls under a finger deliberately holding still over a tile
-     * moves the list-space anchor past [DWELL_SLOP_PX] every frame, so the timer restarts forever
+     * moves the list-space anchor past the dwell slop (`AresGeometry.dwellSlopPx`) every frame, so the timer restarts forever
      * and a dwell near the screen edge can never complete (measured: list-local y walked 232 →
      * 52 across one still hold while the target stayed the same tile). Holding still over a
      * target is the user saying "this one" — scrolling them away from it is never what they meant.
