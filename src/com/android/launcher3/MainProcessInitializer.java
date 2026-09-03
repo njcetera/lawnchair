@@ -71,11 +71,39 @@ public class MainProcessInitializer implements ResourceBasedOverride {
             BitmapCreationCheck.startTracking(context);
         }
 
-        if (DEBUG_STRICT_MODE || (BuildConfigs.IS_STUDIO_BUILD && enableStrictMode())) {
+        // LC-Ares 2026-09-02: StrictMode now actually runs, on debug builds only.
+        //
+        // It never ran before. This condition was a COMPILE-TIME FALSE in every variant:
+        // DEBUG_STRICT_MODE is a bare `false` constant, BuildConfigs.IS_STUDIO_BUILD is a
+        // hand-written `false` with no build-variant coupling, and Flags.enableStrictMode() returns
+        // a hardcoded `false` from the generated stub. So the whole block was dead code, and
+        // `detectActivityLeaks()` -- the exact instrument for the six leak rows in the defect
+        // ledger, and the one `meminfo` was structurally unable to see -- has been sitting here
+        // switched off the entire time.
+        //
+        // GATED ON BuildConfig.DEBUG, deliberately, and NOT on DEBUG_STRICT_MODE. Flipping that
+        // constant to true is the obvious move and it is wrong: it is not variant-aware, so it
+        // would arm StrictMode in lawnWithQuickstepNightlyRelease as well -- on the owner's daily
+        // device.
+        //
+        // penaltyDeath() REMOVED, and this is not a preference. It was on the VM policy, whose
+        // penalties fire from the finalizer/GC thread at an arbitrary later moment, so it is a
+        // process kill at a random time attributed to an unrelated stack. On a launcher that is a
+        // home-screen crash loop.
+        //
+        // Not routed into AresInvariants yet, on purpose. The thread policy will be loud here --
+        // PreferenceManager2 does a blocking DataStore read in its constructor, there are twelve
+        // firstBlocking() call sites in lawnchair/src (six in areslauncher/), and AppDatabase and
+        // WallpaperService both runBlocking on Room. Wiring a noisy detector into a counter that
+        // ares-smoke FAILS on would make the suite permanently red on day one, which is the
+        // broken-window outcome the whole plan is written to avoid. Measure the real rate on a
+        // device first, then route only detectActivityLeaks() (API 28+ penaltyListener) once its
+        // base rate is known to be zero.
+        if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder()
                     .detectDiskReads()
                     .detectDiskWrites()
-                    .detectNetwork()   // or .detectAll() for all detectable problems
+                    .detectNetwork()
                     .penaltyLog()
                     .build());
             StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder()
@@ -83,7 +111,6 @@ public class MainProcessInitializer implements ResourceBasedOverride {
                     .detectLeakedClosableObjects()
                     .detectActivityLeaks()
                     .penaltyLog()
-                    .penaltyDeath()
                     .build());
         }
 
