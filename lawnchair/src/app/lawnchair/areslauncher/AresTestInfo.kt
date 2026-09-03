@@ -408,6 +408,24 @@ object AresTestInfo {
     const val REQUEST_PANE_ALIGN = "ares-pane-align"
 
     /**
+     * Walks the whole window from the DecorView down and reports every `ViewGroup` holding a NULL
+     * child slot — `getChildAt(i) == null` while `i < getChildCount()`.
+     *
+     * That is the exact corruption behind ledger row 76: a dark-mode switch relaunches the activity,
+     * and `DecorView.clearContentView()`'s recursive `dispatchDetachedFromWindow` walks into a null
+     * entry and takes the process down with an NPE, 4 times in 6. The stack names no class, and the
+     * two `AresAttach` lines that precede it are `onDetachedFromWindow` overrides — i.e. part of that
+     * same teardown walk, not a separate rebind. Reasoning from the stack alone already produced one
+     * falsified fix; this reports the offending container by name instead.
+     *
+     * Read-only, and cheap enough to poll: the hole is created at some earlier moment and only
+     * MANIFESTS at destroy, so the point of a pollable check is to find the moment it appears.
+     *
+     * Answers `clean` or one line per corrupt container: `path childCount=N nulls=[i,j]`.
+     */
+    const val REQUEST_VIEW_INTEGRITY = "ares-view-integrity"
+
+    /**
      * Drives and reads the edit-mode icon sparkle ([AresIconTransition]) so a test can prove the
      * overlay actually MOUNTS on the current device and posture, instead of silently failing to
      * appear — the "the settings animation isn't happening" class (owner report 2026-09-03). This
@@ -548,6 +566,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_VIEW_INTEGRITY -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> viewIntegrity(launcher) },
+        )
         REQUEST_ICON_TRANSITION -> iconTransition(arg)
         else -> null
     }
@@ -578,6 +600,47 @@ object AresTestInfo {
             { _ -> "showing=${AresIconTransition.isShowing}" },
         )
         else -> respond("unknown-subcommand:$arg")
+    }
+
+    /**
+     * See [REQUEST_VIEW_INTEGRITY]. Reports containers whose child array has a hole.
+     *
+     * `ViewGroup.getChildAt(i)` returns `mChildren[i]` for any `i < mChildrenCount`, so a null
+     * return inside that range means the count and the array disagree -- which is precisely what
+     * makes `dispatchDetachedFromWindow` throw during `DecorView.clearContentView`.
+     *
+     * Deliberately walks from the DECOR VIEW and not from the DragLayer: the crashing walk starts
+     * there, and a check that begins lower could miss the corrupt container entirely.
+     */
+    private fun viewIntegrity(launcher: Launcher): String {
+        val root = launcher.window?.decorView ?: return "no-decor"
+        val bad = StringBuilder()
+        var groups = 0
+        var views = 0
+
+        fun walk(view: View, path: String) {
+            views++
+            if (view !is ViewGroup) return
+            groups++
+            val count = view.childCount
+            val nulls = ArrayList<Int>()
+            for (i in 0 until count) {
+                if (view.getChildAt(i) == null) nulls.add(i)
+            }
+            if (nulls.isNotEmpty()) {
+                if (bad.isNotEmpty()) bad.append(" ;; ")
+                bad.append("$path childCount=$count nulls=$nulls")
+            }
+            // Re-read getChildAt rather than caching: a hole must not stop the walk, and the
+            // non-null siblings still need visiting.
+            for (i in 0 until count) {
+                val child = view.getChildAt(i) ?: continue
+                walk(child, "$path|${child.javaClass.simpleName}")
+            }
+        }
+        walk(root, root.javaClass.simpleName)
+
+        return if (bad.isEmpty()) "clean groups=$groups views=$views" else "CORRUPT $bad"
     }
 
     /** See [REQUEST_PANE_ALIGN]. */

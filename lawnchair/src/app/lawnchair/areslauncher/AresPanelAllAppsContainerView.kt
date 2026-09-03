@@ -198,7 +198,30 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * is already null is a no-op, so the genuine-detach path calling it too is harmless.
      */
     fun releaseSearchPill() {
-        (searchView?.parent as? ViewGroup)?.removeView(searchView)
+        val pill = searchView ?: return
+        val host = pill.parent as? ViewGroup ?: return
+        // NEVER remove it synchronously: this is called from [onDetachedFromWindow], and the pill's
+        // host is the shared DragLayer -- a DIFFERENT parent from this pane's own. During an activity
+        // teardown `DecorView.clearContentView()` walks the tree with `dispatchDetachedFromWindow`,
+        // which iterates each parent's child array by index; this pane's callback fires from inside
+        // the DragLayer's own iteration, so removing another DragLayer child there compacts the array
+        // underneath that loop and the next index reads a hole:
+        //     FATAL EXCEPTION: NullPointerException
+        //       'void View.dispatchDetachedFromWindow()' on a null object reference
+        //       at ViewGroup.dispatchDetachedFromWindow -> removeViewInternal -> removeViewAt
+        //       at DecorView.clearContentView -> handleDestroyActivity -> handleRelaunchActivity
+        // A dark-mode switch relaunches the activity and so hit exactly this (ledger row 76).
+        // Measured 2026-09-03 on emulator-5554: UNFOLDED, where this pane is attached, 5 of 6
+        // switches killed the process; FOLDED, where it is not, 0 of 6.
+        //
+        // Posting on the HOST rather than on this pane is deliberate: the pane is the view being
+        // detached, and a detached view's handler is not a reliable place to run from, while the
+        // DragLayer is still attached in the case this method actually exists for (a fold, where the
+        // pill must not be left stranded). If the whole window is going away the runnable simply
+        // never runs -- correct, because the DragLayer is being destroyed with it.
+        host.post {
+            if (pill.parent === host) host.removeView(pill)
+        }
     }
 
     /**
