@@ -1593,6 +1593,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     private void syncAresAppListPane() {
+        // §9 unfolded wallpaper dim: on for two panels, off folded (where the app-list page drives
+        // its own state-gated dim instead). Set here because this is the one place posture is already
+        // resolved on every fold, and it runs before the early return below.
+        if (mLauncher.getRootView() != null) {
+            mLauncher.getRootView().setAresUnfoldedWallpaperDim(isTwoPanelEnabled());
+        }
         if (!isTwoPanelEnabled() || getChildCount() < 2) {
             // getChildCount() < 2 is TRANSIENT during a rebind: the pages have been torn down and
             // panel 1 has not been recreated yet. Tearing the pane out on that transient is what made

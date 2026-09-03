@@ -239,8 +239,4 @@
          instead - 169px against our 260px masonry cell), so inheriting it would be silently
          indistinguishable from no inset at all. -->
     <dimen name="ares_home_widget_inset">8dp</dimen>
-    <!-- §9 readability dim: width of the soft falloff on the app-list pane's SEAM edge (the
-         edge nearest the home panel when unfolded), so the dim does not end in a hard vertical
-         line down the middle of the open device. Owner 2026-09-02. -->
-    <dimen name="ares_app_list_dim_seam_falloff">25dp</dimen>
 </resources>

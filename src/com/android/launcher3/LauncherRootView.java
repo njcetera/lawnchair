@@ -64,6 +64,9 @@ public class LauncherRootView extends InsettableFrameLayout {
      */
     private float mAresWallpaperDimProgress = 0f;
 
+    /** §9 unfolded wallpaper dim, on whenever the workspace is showing two panels. */
+    private boolean mAresUnfoldedWallpaperDim = false;
+
     public LauncherRootView(Context context, AttributeSet attrs) {
         super(context, attrs);
         mStatefulContainer = ActivityContext.lookupContext(context);
@@ -210,6 +213,14 @@ public class LauncherRootView extends InsettableFrameLayout {
             int alpha = Math.round(Color.alpha(base) * mAresWallpaperDimProgress);
             canvas.drawColor(ColorUtils.setAlphaComponent(base, alpha));
         }
+        // §9 UNFOLDED: a constant dim over the WHOLE wallpaper, not just the app-list half. Folded,
+        // the dim above rides the ALL_APPS state because folded the app list IS a separate page.
+        // Unfolded, home and the app list share one canvas and the launcher stays in NORMAL, so that
+        // term never fires -- and scoping a dim to the pane instead put a visible brightness step
+        // down the middle of the open device, which the owner rejected after three falloff widths.
+        if (mAresUnfoldedWallpaperDim) {
+            canvas.drawColor(getContext().getColor(R.color.ares_wallpaper_dim_unfolded));
+        }
         super.dispatchDraw(canvas);
     }
 
@@ -224,6 +235,17 @@ public class LauncherRootView extends InsettableFrameLayout {
 
     public float getAresWallpaperDimProgress() {
         return mAresWallpaperDimProgress;
+    }
+
+    /**
+     * §9 unfolded wallpaper dim. Driven from {@link com.android.launcher3.Workspace} on every
+     * posture sync, which is where two-panel state is already resolved.
+     */
+    public void setAresUnfoldedWallpaperDim(boolean on) {
+        if (mAresUnfoldedWallpaperDim != on) {
+            mAresUnfoldedWallpaperDim = on;
+            invalidate();
+        }
     }
 
     @Override

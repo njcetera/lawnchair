@@ -455,6 +455,12 @@
          travels in with the pane and never washes the workspace behind it. ARGB; the alpha is the
          wallpaper darkening strength. Tune here. -->
     <color name="ares_app_list_wallpaper_dim">#73000000</color>
+    <!-- §9 readability dim, UNFOLDED: a constant 25% over the WHOLE wallpaper, home half
+         included. The folded dim above is app-list-only because folded the app list is a separate
+         page; unfolded both panes share one canvas, and a pane-scoped dim put a visible brightness
+         step down the middle of the open device (owner 2026-09-02, after trying 64/40/25dp seam
+         falloffs: "honestly I don't love it"). -->
+    <color name="ares_wallpaper_dim_unfolded">#40000000</color>
 
     <!--
          §17 app-list search: the expanded search field's trailing close (✕) button, styled as a
