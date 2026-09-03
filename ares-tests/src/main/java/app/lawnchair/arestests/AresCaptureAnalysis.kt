@@ -28,6 +28,23 @@ import kotlin.math.abs
  */
 object AresCaptureAnalysis {
 
+    /** Which translation axis to diff. A reflow can move tiles sideways as well as down. */
+    enum class Axis { X, Y }
+
+    /**
+     * The VISUAL position on [axis]: layout position PLUS translation.
+     *
+     * Translation alone is wrong here and it is wrong in the direction that invents defects.
+     * `AresHomeListView.animateNextRelayout` captures each tile's OLD bounds, lets the layout move
+     * it, then sets translation to the displacement and tweens that to zero -- so in the frame the
+     * animation arms, translation changes by the whole displacement while `top`/`left` change by the
+     * same amount the other way, and the view does not move on screen at all. Measured 2026-09-03:
+     * a WP expand/collapse with ZERO detector anomalies showed 13 views "moving" 836px by translation
+     * alone. Summing the two fields is what makes the number mean what its name says.
+     */
+    private fun ViewNode.visualOn(axis: Axis) =
+        if (axis == Axis.X) left + translationX else top + translationY
+
     /** The largest single-frame movement found, and enough context to identify it. */
     data class Jump(
         val px: Float,
@@ -67,6 +84,7 @@ object AresCaptureAnalysis {
          * do, so the answer is about the surface you mean rather than whatever moved most.
          */
         classFilter: String? = null,
+        axis: Axis = Axis.Y,
     ): Jump {
         val names = data.classnameList
         fun nameOf(node: ViewNode): String =
@@ -78,7 +96,7 @@ object AresCaptureAnalysis {
             var previous: Map<Int, Pair<Float, String>>? = null
             window.frameDataList.forEachIndexed { index, frame ->
                 val current = HashMap<Int, Pair<Float, String>>()
-                if (frame.hasNode()) collect(frame.node, current, ::nameOf)
+                if (frame.hasNode()) collect(frame.node, current, ::nameOf, axis)
                 previous?.let { before ->
                     comparisons++
                     before.forEach { (hashcode, was) ->
@@ -124,6 +142,7 @@ object AresCaptureAnalysis {
     fun worstCoordinatedJump(
         data: ExportedData,
         thresholdPx: Float,
+        axis: Axis = Axis.Y,
     ): Coordinated {
         var worst = Coordinated(0, -1, 0f, 0)
         var comparisons = 0
@@ -131,7 +150,7 @@ object AresCaptureAnalysis {
             var previous: Map<Int, Pair<Float, String>>? = null
             window.frameDataList.forEachIndexed { index, frame ->
                 val current = HashMap<Int, Pair<Float, String>>()
-                if (frame.hasNode()) collect(frame.node, current) { "" }
+                if (frame.hasNode()) collect(frame.node, current, { "" }, axis)
                 previous?.let { before ->
                     comparisons++
                     val movers = before.mapNotNull { (hashcode, was) ->
@@ -152,8 +171,9 @@ object AresCaptureAnalysis {
         node: ViewNode,
         into: MutableMap<Int, Pair<Float, String>>,
         nameOf: (ViewNode) -> String,
+        axis: Axis,
     ) {
-        into[node.hashcode] = node.translationY to nameOf(node)
-        node.childrenList.forEach { collect(it, into, nameOf) }
+        into[node.hashcode] = node.visualOn(axis) to nameOf(node)
+        node.childrenList.forEach { collect(it, into, nameOf, axis) }
     }
 }

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
 import com.android.app.viewcapture.data.ExportedData
+import com.android.launcher3.util.viewcapture_analysis.ViewCaptureAnalyzer
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
@@ -159,24 +160,22 @@ class AresSwapGeometryTest {
         val data = runCatching { ExportedData.parseFrom(bytes) }.getOrNull()
         assumeTrue("capture at $path did not parse as ExportedData", data != null)
 
-        val worst = AresCaptureAnalysis.maxPerFrameTranslationYJump(data!!)
-        val coordinated = AresCaptureAnalysis.worstCoordinatedJump(data, MAX_STEP_PX.toFloat())
-        Log.i(TAG, "swap-geometry bottom-row: worst per-frame translationY jump = $worst")
-        Log.i(TAG, "swap-geometry bottom-row: worst coordinated = $coordinated")
-        // Not "nothing moved" -- that is also true of a capture that recorded nothing.
-        assertThat(worst.comparisons).isGreaterThan(0)
-        // STILL RED, but now for a MEASURED and understood reason -- see the class KDoc. The raw
-        // per-view maximum (~1109px on a FrameLayout) is RecyclerView recycling and must not be
-        // asserted on. What is real is the coordinated step: 7 views moving together by a median
-        // ~233px in one frame, reproducible across runs at frame ~73. That is one cell row, snapped
-        // rather than animated, and it is the same signature as task #59 (column-change reflow
-        // snaps on device). Whether an instant one-row reflow is a DEFECT or the intended feel of a
-        // swap is a product question, so the bound stays where the original author put it rather
-        // than being re-tuned to whatever today's number happens to be.
+        // ASSERT THROUGH THE DETECTORS, not a hand-rolled per-node metric. Three attempts at the
+        // latter gave three different answers on the same healthy drag -- translation alone counted
+        // the frame where animateNextRelayout ARMS (translation jumps, top moves the opposite way,
+        // nothing moves on screen); layout+translation then counted legitimate edge auto-scroll,
+        // because this list scrolls by translation so every tile moves together every frame. A
+        // per-node number cannot separate "scrolled" from "teleported" without reconstructing window
+        // coordinates through the tree -- which PositionJumpDetector already does, calibrated, and
+        // which the folder test next door already relies on.
+        val anomalies = ViewCaptureAnalyzer.getAnomalies(data!!)
+        anomalies.forEach { (p, m) -> Log.w(TAG, "ANOMALY $p -> $m") }
+        Log.i(TAG, "swap-geometry bottom-row: ${anomalies.size} anomaly/anomalies over $frames frames")
         assertWithMessage(
-            "the grid stepped a full cell row in a SINGLE frame, coordinated across views: " +
-                "$coordinated (worst single view was $worst, which is recycling, not a jump)",
-        ).that(coordinated.views).isEqualTo(0)
+            "ViewCapture detectors reported ${anomalies.size} anomaly/anomalies over $frames frames " +
+                "of a bottom-row swap drag:\n" +
+                anomalies.entries.joinToString("\n") { (p, m) -> "  $p\n    $m" },
+        ).that(anomalies).isEmpty()
     }
 
     private companion object {

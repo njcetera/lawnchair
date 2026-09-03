@@ -211,10 +211,28 @@ class AresAnimationAnomalyTest {
         anomalies.forEach { (p, m) -> Log.w(TAG, "ANOMALY $p -> $m") }
         Log.i(TAG, "wp folder: ${anomalies.size} anomaly/anomalies over $frames frames")
 
+        // CLASSIFY, do not just report. `PositionJumpDetector` fires on a single view moving far in
+        // one frame, and on a RecyclerView surface that is ambiguous by construction: a RECYCLED
+        // tile keeps its identity, is rebound to a different item, and legitimately lands somewhere
+        // else in one frame. The same detector text therefore covers both "the accordion snapped"
+        // and "a row got reused", which is why this anomaly read as intermittent and unexplained
+        // (task #89). The discriminator is how many views moved TOGETHER: a reflow moves a run of
+        // tiles, recycling moves one. Reported on both axes because an expand reflows sideways as
+        // well as down -- the observed anomaly was a 644px jump in `left`.
+        val coordX = AresCaptureAnalysis.worstCoordinatedJump(
+            data, CELL_PX, AresCaptureAnalysis.Axis.X,
+        )
+        val coordY = AresCaptureAnalysis.worstCoordinatedJump(
+            data, CELL_PX, AresCaptureAnalysis.Axis.Y,
+        )
+        Log.i(TAG, "wp folder: coordinated X=$coordX Y=$coordY")
+
         assertWithMessage(
             "ViewCapture detectors reported ${anomalies.size} anomaly/anomalies over $frames " +
                 "frames of a WP folder expand+collapse:\n" +
-                anomalies.entries.joinToString("\n") { (p, m) -> "  $p\n    $m" },
+                anomalies.entries.joinToString("\n") { (p, m) -> "  $p\n    $m" } +
+                "\n  coordinated movement past ${CELL_PX}px -- X: $coordX | Y: $coordY" +
+                "\n  (1 view = a recycled row, which is bookkeeping; several = a real reflow snap)",
         ).that(anomalies).isEmpty()
     }
 
@@ -314,6 +332,9 @@ class AresAnimationAnomalyTest {
     }
 
     private companion object {
+        /** One home cell, the unit a reflow moves by; measured 254x232px on emulator-5554. */
+        const val CELL_PX = 200f
+
         const val TAG = "AresAnimAnomaly"
 
         /** Long enough for the expand/collapse spring to finish before the next toggle. */
