@@ -645,6 +645,18 @@ class AresLauncherDriver {
         call("ares-wp-expand", folderId.toString())?.getString("response") ?: "null"
 
     /**
+     * What the membership classifier WOULD do for a drag of [draggedId] onto [targetId] (`"none"`
+     * for empty grid), without performing one: `Extract(40)`, `ReorderInFolder(40)`,
+     * `AddToFolder(40)` or `None`. The folder must be expanded first.
+     *
+     * Used as a CONTROL by gesture tests: it proves an action is reachable on this surface, so a
+     * gesture that correctly declines to trigger it cannot be confused with an action that was never
+     * possible in the first place.
+     */
+    fun wpResolveDrag(draggedId: Int, targetId: String): String =
+        call("ares-wp-resolve-drag", "$draggedId,$targetId")?.getString("response") ?: "null"
+
+    /**
      * The id of the first WP folder on the home grid, or null if there is none.
      *
      * Found by PROBING rather than by reading a type, because [homeOrder] reports `id/title` and a

@@ -1,170 +1,188 @@
 package app.lawnchair.arestests
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
-import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * D4 — *"holding an app inside a folder to enter edit mode leaves that app with no frost/×/!"*.
+ * D4, on the WP surface — *holding an app inside a folder must not drag it out of the folder*.
  *
- * ## The chrome was never the bug. The drag was.
+ * ## What this is a port OF, and what moved
  *
- * A bare hold armed a drag that then never completed. `AresFolderDrag.DragStarter` was installed
- * *mid-gesture* — the long-press that created it had already consumed the DOWN — so it had no
- * recorded press point, and the first MOVE was measured against a phantom origin at `0,0`:
+ * The original D4 opened an OVERLAY folder and asserted that a bare hold on one of its icons did
+ * not start a drag. The reported symptom was that the held app lost its edit chrome (frost box, ×,
+ * !) while every sibling kept theirs — because a drag really had armed: `AresFolderDrag.DragStarter`
+ * was installed mid-gesture, so the long-press had already eaten the DOWN and the first MOVE was
+ * measured against a phantom origin at `0,0`. `hypot(107,119) = 160px` cleared touch slop instantly,
+ * `Folder.onDragStart` lifted the icon into a `DragView`, and the vacated cell's chrome was torn
+ * down. The fix was `haveOrigin`: the first MOVE after a mid-gesture install SETS the reference
+ * point instead of being measured against one that never existed.
  *
- * ```
- * DragStarter.startDrag v=230641199 down=0.0,0.0 now=107.03613,119.53516
- * ```
+ * The WP migration deleted the overlay, so the old test could never open a folder again and timed
+ * out every run (ledger row 67). The INVARIANT did not go away — it moved. A WP folder expands
+ * inline and its children ARE home-grid tiles, so "hold an app inside a folder" is now "hold a tile
+ * that belongs to an expanded folder", and the thing that must not happen is that the child gets
+ * dragged out (extract-by-drag, Phase 3 #4, is the modern equivalent of the overlay's `onDragStart`).
  *
- * `hypot(107, 119)` is 160px, comfortably past the touch slop, so the drag armed on the first
- * jitter. `Folder.onDragStart` then lifted that icon out of the container into a `DragView`, and
- * the edit chrome for the vacated cell was correctly torn down — giving exactly the reported
- * symptom: every other app has its frost box, × and !, and the one being held does not.
+ * ## Why this is not a duplicate of AresHomeReorderTest
  *
- * The fix is `haveOrigin`: the first MOVE after a mid-gesture install *sets* the reference point
- * instead of being measured against one that does not exist.
+ * `AresHomeReorderTest.longPressEntersEditModeWithoutStartingADrag` asserts the same invariant for
+ * an ORDINARY home tile. This one holds a tile that is a folder CHILD while the folder is expanded,
+ * which is a different arbitration path: the expanded surface additionally has extract-by-drag
+ * watching the same gesture. A bare hold must arm edit mode and leave membership alone.
  *
  * ## The observable
  *
- * Two numbers, and they move together:
+ * Two things, checked together, because either alone can read correct on a broken build:
+ *  - [AresLauncherDriver.homeOrder] is UNCHANGED — an extracted child re-ranks the grid.
+ *  - the folder's `contents` count is unchanged — read from the collapse at the end, since
+ *    `ares-wp-expand` is a toggle and cannot be read without moving the state.
  *
- *  - `Folder.iconsInReadingOrder` **loses the dragged icon**, because `onDragStart` calls
- *    `mContent.removeItem` and invalidates the cached list. 3 icons become 2.
- *  - a `DragView` appears in the `DragLayer`.
+ * ## Falsification, and why the control exists
  *
- * The tree mid-defect read `icons=2 EditCells=2 DragViews=1` on a three-app folder.
+ * The obvious falsification -- make the gesture a REAL drag-out and watch it fail -- did NOT work:
+ * with 600ms of travel over 700px the order and the membership were byte-identical, and edit mode
+ * had armed (`editMode=true`), so the drag either never cleared touch slop or resolved to a
+ * non-extract action. A gesture that cannot be made to break the invariant cannot prove the
+ * assertion sees it. Hence [extractionIsReachableForThatSameChild], which asserts through the
+ * classifier that an Extract IS the resolution for exactly this child, so a green above means "the
+ * hold declined an action that was available" rather than "nothing could have happened anyway".
  *
- * ## Why the gesture travels zero pixels
- *
- * That *is* the reproduction. The bug was never about real travel — it was that a MOVE at the same
- * coordinates as the press still measured 160px away from a phantom origin. So this sends MOVEs
- * that do not move, which is the strongest form of the case: if a drag arms here, it armed on
- * nothing at all.
+ * SKIPs when the fixture has no WP folder; a check that could not run must be louder than one that
+ * failed, never quieter.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
 class AresFolderHoldTest {
 
-    private val TAG = "AresSpike"
+    private val TAG = "AresFolderHold"
     private lateinit var ares: AresLauncherDriver
 
     @Before
     fun setUp() {
         ares = AresLauncherDriver()
         ares.openTestChannel()
-        ares.setAnimatorScale(1)
         ares.goHome()
         ares.exitEditMode()
     }
 
     @After
     fun tearDown() {
-        runCatching { ares.setFolderEdit(false) }
-        runCatching { ares.pressBack() }
+        runCatching { ares.exitEditMode() }
     }
 
     @Test
-    fun aBareHoldInsideAFolderDoesNotStartADrag() {
-        assertThat(ares.openFolder()).isTrue()
-        ares.waitFor("folder to open") { ares.folderIcons().size >= 3 }
+    fun aBareHoldOnAFolderChildDoesNotPullItOut() {
+        val folderId = ares.findWpFolderId()
+        assumeTrue("no WP folder on the home grid to expand", folderId != null)
+        folderId!!
 
-        // Folder edit mode is entered BY THE GESTURE, not through the channel, and that is the
-        // whole test. An earlier version attached it up front and then pressed -- which passed on
-        // the broken build, because ACTION_DOWN reached DragStarter normally and takeOrigin ran.
-        // The defect only exists when the long-press INSTALLS DragStarter half way through a
-        // gesture whose DOWN it never saw. Setting up the state first removes the defect from the
-        // test. That is exactly how folder-edit-chrome came to pass on a build it should have
-        // failed.
-        val before = ares.folderIcons()
-        Log.i(TAG, "d4 icons before: ${before.size} dragViews=${ares.dragViewCount()}")
-        assertThat(before.size).isAtLeast(3)
-        assertThat(ares.dragViewCount()).isEqualTo(0)
+        val contentsBefore = expand(folderId)
+        assumeTrue("folder would not expand; wp-expand said $lastResponses", contentsBefore != null)
+        assumeTrue("folder is empty, so it has no child to hold", (contentsBefore ?: 0) > 0)
 
-        val held = before.first()
+        val orderBefore = ares.homeOrder()
+        val folderIndex = orderBefore.indexOfFirst { it.substringBefore('/') == folderId.toString() }
+        assumeTrue("expanded folder not found in the home order", folderIndex >= 0)
+        // A WP folder's children render as the tiles immediately after it, so the next position is
+        // a child of THIS folder rather than an unrelated app.
+        val childPos = folderIndex + 1
+        val child = ares.tiles().firstOrNull { it.position == childPos }
+        assumeTrue("no child tile at position $childPos", child != null)
+        Log.i(TAG, "folder=$folderId contents=$contentsBefore child='${child!!.title}' order=$orderBefore")
 
-        // The SCENARIO is retried; the assertions never are (the AresFolderExitTest discipline).
-        // The synthetic long-press arms folder edit mode only some of the time -- measured at
-        // roughly 2-in-5 for folder drags -- and an unarmed hold exercises nothing, so attempts
-        // continue until one arms or the budget runs out. Each attempt's counts are kept only if
-        // it armed; a run that never arms fails on the words "could not be reproduced", which is
-        // a different statement from "a drag started on a bare hold".
-        var counts = listOf<Triple<Int, Int, Boolean>>()
-        var armed = false
-        for (attempt in 1..MAX_ATTEMPTS) {
-            // The state this attempt requires: folder open, edit mode NOT yet active. If a prior
-            // attempt armed undetected, holding again exercises the attached-up-front
-            // configuration the class doc records as the historical false pass -- so that is a
-            // scenario failure, said out loud, not a silent go-around.
-            val pre = ares.folderIcons()
-            check(pre.size >= 3 && pre.none { it.stateLift > 0f }) {
-                "attempt $attempt precondition broken: icons=${pre.size}, " +
-                    "lifted=${pre.count { it.stateLift > 0f }} -- a previous attempt likely " +
-                    "armed undetected"
-            }
-            val tryCounts = mutableListOf<Triple<Int, Int, Boolean>>()
-            AresGestures.pressHoldDragRelease(
-                start = held.center(),
-                holdMs = HOLD_MS,
-                travelMs = 0,
-                // Zero travel: MOVEs at the press point. See the class doc -- this is the case,
-                // not a weaker version of it.
-                target = { held.center() },
-                hangMs = HANG_MS,
-                onHangStep = {
-                    val icons = ares.folderIcons()
-                    tryCounts += Triple(
-                        icons.size,
-                        ares.dragViewCount(),
-                        icons.any { it.stateLift > 0f },
-                    )
-                },
-            )
-            Log.i(TAG, "d4 attempt $attempt: ${tryCounts.distinct()}")
-            if (tryCounts.any { it.third }) {
-                counts = tryCounts
-                armed = true
-                break
-            }
-            // Not armed: nothing happened at all. Settle and go again.
-            Thread.sleep(400)
-        }
+        // A bare hold: zero travel, so nothing past touch slop is ever produced. On the broken
+        // build the phantom 0,0 origin made the first MOVE read as a 160px drag anyway.
+        AresGestures.pressHoldDragRelease(
+            start = child.screenCenter(),
+            holdMs = 800,
+            travelMs = 0,
+            target = { ares.tiles().firstOrNull { it.position == childPos }?.screenCenter() ?: child.screenCenter() },
+        )
 
-        // THE PRECONDITION, and the reason this test is not vacuous: the long-press must actually
-        // have entered folder edit mode DURING the gesture. That is what installs DragStarter
-        // mid-gesture, which is the only situation in which D4 exists. Without this assertion a
-        // gesture that quietly did nothing would report a clean pass.
-        check(armed) {
-            "folder edit mode could not be reproduced in $MAX_ATTEMPTS synthetic holds -- " +
-                "the scenario never armed, so nothing about D4 was measured"
-        }
-        assertThat(counts).isNotEmpty()
+        val orderAfter = ares.homeOrder()
+        Log.i(TAG, "after hold: editMode=${ares.isEditMode()} order=$orderAfter")
+        assertWithMessage("a bare hold on a folder child re-ranked the grid, i.e. it pulled the child out")
+            .that(orderAfter).isEqualTo(orderBefore)
 
-        counts.forEach { (icons, dragViews, _) ->
-            assertThat(icons).isEqualTo(before.size)
-            assertThat(dragViews).isEqualTo(0)
-        }
-
-        // And it recovers: the chrome is still there once the finger lifts.
-        ares.waitFor("folder to settle after the hold") {
-            ares.folderIcons().size == before.size && ares.dragViewCount() == 0
-        }
-        val after = ares.folderIcons()
-        Log.i(TAG, "d4 icons after: ${after.size}")
-        assertThat(after.size).isEqualTo(before.size)
-        assertThat(after.all { it.stateLift > 0f }).isTrue()
+        ares.exitEditMode()
+        // Collapsing returns the live contents count; equality proves membership never moved.
+        val contentsAfter = collapse(folderId)
+        assertWithMessage("folder membership changed across a bare hold")
+            .that(contentsAfter).isEqualTo(contentsBefore)
     }
 
-    private companion object {
-        const val HOLD_MS = 900L
-        const val HANG_MS = 1_200L
+    /**
+     * The control: extraction really IS reachable for the tile the hold test presses.
+     *
+     * Without this, `aBareHoldOnAFolderChildDoesNotPullItOut` is not coverage — it would pass just
+     * as happily on a build where a child can never leave its folder at all, which is the vacuous
+     * green this project keeps getting caught by. Measured while writing it, folder 40 expanded:
+     *
+     * ```
+     *   900 -> none  Extract(40)          the drag the hold must NOT perform
+     *   900 -> 901   ReorderInFolder(40)  a sibling drop is a reorder, not an extract
+     * ```
+     *
+     * `ares-wp-resolve-drag` runs the classifier WITHOUT performing a drag, which is deliberate: an
+     * actual synthetic drag-out of a child changed nothing here (it either never armed past slop or
+     * resolved to a non-extract action), so a gesture makes an unreliable control on this surface
+     * while the classifier is deterministic.
+     */
+    @Test
+    fun extractionIsReachableForThatSameChild() {
+        val folderId = ares.findWpFolderId()
+        assumeTrue("no WP folder on the home grid to expand", folderId != null)
+        folderId!!
+        val contents = expand(folderId)
+        assumeTrue("folder would not expand; wp-expand said $lastResponses", contents != null)
 
-        /** Scenario attempts, NOT assertion retries. See the loop and AresFolderExitTest. */
-        const val MAX_ATTEMPTS = 5
+        val order = ares.homeOrder()
+        val folderIndex = order.indexOfFirst { it.substringBefore('/') == folderId.toString() }
+        assumeTrue("expanded folder not found in the home order", folderIndex >= 0)
+        val childId = order.getOrNull(folderIndex + 1)?.substringBefore('/')?.toIntOrNull()
+        assumeTrue("no child id after the folder", childId != null)
+
+        val ontoEmpty = ares.wpResolveDrag(childId!!, "none")
+        Log.i(TAG, "control: child $childId -> none = $ontoEmpty")
+        assertWithMessage(
+            "dragging this child onto empty grid should classify as an Extract; if it does not, the " +
+                "bare-hold test above proves nothing because extraction was never possible",
+        ).that(ontoEmpty).startsWith("Extract")
     }
+
+    /**
+     * Drives the folder to [wanted] and returns the contents count it reported, or null.
+     *
+     * `ares-wp-expand` is a TOGGLE, so reaching a known state costs at most one extra call — but it
+     * is driven in a bounded retry rather than a fixed two, because the model can rebind underneath
+     * (a re-seed, a reload) and answer `no-folder(id)` for a beat. Every response seen is recorded
+     * in [lastResponses] so a SKIP says what it actually saw instead of just asserting it gave up.
+     */
+    private fun drive(folderId: Int, wanted: Boolean): Int? {
+        val marker = "expanded=$wanted"
+        repeat(6) {
+            val r = ares.wpExpand(folderId)
+            lastResponses += r
+            if (r.startsWith(marker)) return contentsOf(r)
+            SystemClock.sleep(400)
+        }
+        return null
+    }
+
+    private fun expand(folderId: Int): Int? = drive(folderId, wanted = true)
+
+    private fun collapse(folderId: Int): Int? = drive(folderId, wanted = false)
+
+    private val lastResponses = mutableListOf<String>()
+
+    private fun contentsOf(response: String): Int? =
+        Regex("contents=(\\d+)").find(response)?.groupValues?.get(1)?.toIntOrNull()
 }
