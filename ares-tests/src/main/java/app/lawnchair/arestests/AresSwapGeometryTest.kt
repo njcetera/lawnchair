@@ -3,8 +3,11 @@ package app.lawnchair.arestests
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
+import com.android.app.viewcapture.data.ExportedData
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -120,9 +123,14 @@ class AresSwapGeometryTest {
         Log.i(TAG, "swap-geometry bottom-row: ${dragged.title}@${dragged.position} -> ${target.title}@${target.position}")
 
         val orderBefore = ares.homeOrder()
-        val offsets = mutableListOf<Int>()
-        val sampler = AresSampler(intervalMs = 40L) { ares.surfaceState().scrollOffset }
-        sampler.start()
+        // PER-FRAME, from a ViewCapture -- not per-sample from a channel poll. Ledger row 68a: the
+        // old 40ms sampler actually returned gaps of 44-115ms (3-7 frames at 60fps), so it summed
+        // several frames of legitimate edge auto-scroll into one apparent teleport and failed a
+        // launcher that was behaving. A capture records every onDraw, so consecutive entries really
+        // are consecutive frames and "in one layout pass" becomes a question the instrument can
+        // actually answer.
+        ares.viewCapture("reset")
+        ares.viewCapture("start")
         ares.enterEditModeAndDrag(
             fromIndex = dragged.position,
             toIndex = target.position,
@@ -130,37 +138,52 @@ class AresSwapGeometryTest {
             travelMs = 900,
             hangMs = HANG_MS,
         )
-        val samples = sampler.stop().also { offsets += it }
+        val export = ares.viewCapture("export")
+        Log.i(TAG, "swap-geometry bottom-row: export=$export")
 
-        val jumps = samples.zipWithNext { a, b -> abs(b - a) }
-        val worst = jumps.maxOrNull() ?: 0
-        val gaps = sampler.intervals()
-        Log.i(TAG, "swap-geometry bottom-row: offsets=${samples.distinct()} worstJump=$worst")
-        Log.i(TAG, "swap-geometry bottom-row: sampleGapsMs=$gaps (nominal ${40}ms)")
-
-        assertThat(samples).isNotEmpty()
-        // Precondition: the SWAP actually happened. A drag that armed edit mode but never
-        // displaced anything produces a flat offset trace and, without this, a vacuous pass --
-        // its sibling test asserts `transitions > 0` for the same reason
-        // (adversarial-review finding, 2026-08-21). The order is the direct witness.
+        // Precondition: the SWAP actually happened. A drag that armed edit mode but never displaced
+        // anything would pass everything below vacuously -- its sibling test asserts
+        // `transitions > 0` for the same reason (adversarial-review finding, 2026-08-21). The order
+        // is the direct witness.
         assertThat(ares.homeOrder()).isNotEqualTo(orderBefore)
-        // KNOWN-FALSE FAILURE. Ledger row 68a: this assertion is mis-calibrated and the launcher is
-        // fine. It reads as "more than a cell row in one layout pass", but the sampler cannot
-        // observe a layout pass -- measured gaps during this very drag are 44-115ms, i.e. 3-7
-        // frames at 60fps, so several frames of legitimate edge auto-scroll accumulate into one
-        // "jump". A 945-frame ViewCapture of the identical drag puts the largest single-frame
-        // translationY change of ANY view at 116px against this 231px row, so by the test's own
-        // criterion nothing ever jumped.
-        //
-        // Left ARMED rather than quietly relaxed. The right fix is to assert per-frame movement
-        // from a capture instead of per-sample movement from a channel poll (AresSampler.intervals()
-        // now exists so a rate claim has a denominator), and a re-tuned threshold is not coverage
-        // until it has been made to fail -- so it is an owner call, not an overnight one.
-        assertThat(worst).isLessThan(MAX_STEP_PX)
+
+        assumeTrue("export produced no frames: $export", export.contains("|frames="))
+        val path = export.substringBefore("|")
+        val frames = export.substringAfter("|frames=").substringBefore("|").toIntOrNull() ?: 0
+        // A floor, ASSERTED: a capture of three frames describes no drag, and a "nothing jumped"
+        // answer over it is the vacuous green this suite exists to avoid. The drag alone is ~1.6s.
+        assertThat(frames).isAtLeast(MIN_FRAMES)
+
+        val bytes = ares.readCapturedProto(path)
+        assumeTrue("capture at $path could not be read across the UID boundary", bytes != null)
+        val data = runCatching { ExportedData.parseFrom(bytes) }.getOrNull()
+        assumeTrue("capture at $path did not parse as ExportedData", data != null)
+
+        val worst = AresCaptureAnalysis.maxPerFrameTranslationYJump(data!!)
+        val coordinated = AresCaptureAnalysis.worstCoordinatedJump(data, MAX_STEP_PX.toFloat())
+        Log.i(TAG, "swap-geometry bottom-row: worst per-frame translationY jump = $worst")
+        Log.i(TAG, "swap-geometry bottom-row: worst coordinated = $coordinated")
+        // Not "nothing moved" -- that is also true of a capture that recorded nothing.
+        assertThat(worst.comparisons).isGreaterThan(0)
+        // STILL RED, but now for a MEASURED and understood reason -- see the class KDoc. The raw
+        // per-view maximum (~1109px on a FrameLayout) is RecyclerView recycling and must not be
+        // asserted on. What is real is the coordinated step: 7 views moving together by a median
+        // ~233px in one frame, reproducible across runs at frame ~73. That is one cell row, snapped
+        // rather than animated, and it is the same signature as task #59 (column-change reflow
+        // snaps on device). Whether an instant one-row reflow is a DEFECT or the intended feel of a
+        // swap is a product question, so the bound stays where the original author put it rather
+        // than being re-tuned to whatever today's number happens to be.
+        assertWithMessage(
+            "the grid stepped a full cell row in a SINGLE frame, coordinated across views: " +
+                "$coordinated (worst single view was $worst, which is recycling, not a jump)",
+        ).that(coordinated.views).isEqualTo(0)
     }
 
     private companion object {
         const val HANG_MS = 1_200L
         const val MAX_STEP_PX = 231
+
+        /** A capture of a few frames describes no drag; the drag alone runs ~1.6s (~96 frames). */
+        const val MIN_FRAMES = 20
     }
 }
