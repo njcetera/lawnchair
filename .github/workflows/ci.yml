@@ -77,6 +77,55 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew spotlessCheck
 
+  # AresLauncher: the first tests this project has ever run in CI (added 2026-09-02).
+  #
+  # Until now CI built three APK variants and ran spotless, and nothing else -- every test in the
+  # repo ran only when a human chose to run it, which is the root of the regression the whole
+  # regression-testing effort was written to answer. See design/regression-testing-proposal.md.
+  #
+  # :ares-geom-tests is plain JVM: no emulator, no Android SDK runtime, about a second. It asserts
+  # the geometry constants and the real resource files against a matrix of device shapes nobody
+  # here owns -- a compact phone, a landscape window, a high-density screen, a large font scale.
+  geom-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew :ares-geom-tests:test
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: geom-test-report
+          path: ares-geom-tests/build/reports/tests/test
+
+  # Lint gates NEW issues only. lint-baseline.xml freezes the 4178 pre-existing ones (measured
+  # 2026-09-02, overwhelmingly inherited Lawnchair translation/resource noise), so this fails on a
+  # regression and not on inherited debt. The report is uploaded either way -- reading it is how
+  # the baseline gets narrowed later.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew lintLawnWithQuickstepGithubDebug
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lint-report
+          path: build/reports/lint-results-*.html
+
   send-notifications:
     runs-on: ubuntu-latest
     if: github.repository_owner == 'LawnchairLauncher'
@@ -127,6 +176,11 @@ jobs:
     needs:
       - build-debug-apk
       - check-style
+      # A job absent from THIS list is not a gate: final-status computes its verdict from
+      # toJSON(needs.*.result), so a failure in a job it does not depend on cannot fail the check.
+      # Adding the jobs above without adding them here would have looked like coverage and been none.
+      - geom-tests
+      - lint
     runs-on: ubuntu-slim
     if: always()
     outputs:
