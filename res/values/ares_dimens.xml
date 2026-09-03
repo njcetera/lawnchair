@@ -242,5 +242,5 @@
     <!-- §9 readability dim: width of the soft falloff on the app-list pane's SEAM edge (the
          edge nearest the home panel when unfolded), so the dim does not end in a hard vertical
          line down the middle of the open device. Owner 2026-09-02. -->
-    <dimen name="ares_app_list_dim_seam_falloff">40dp</dimen>
+    <dimen name="ares_app_list_dim_seam_falloff">25dp</dimen>
 </resources>
