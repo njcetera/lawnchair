@@ -104,16 +104,29 @@
          one-handed reach, and room to scroll the last items clear of bottom UI (the nav gesture area,
          and the app list's corner search pill). Layered ON TOP of the alignment paddings above and
          added EQUALLY to both surfaces, so the §11c cross-pane icon alignment is preserved. Both lists
-         already run clipToPadding=false, so this is real scroll room, not dead space. Tuned by feel. -->
-    <dimen name="ares_list_ergo_top_padding">100dp</dimen>
+         already run clipToPadding=false, so this is real scroll room, not dead space. Tuned by feel.
+
+         DEVICE-AGNOSTIC BUCKETING, 2026-09-02. These two are the SHORT-WINDOW fallback now; the
+         tuned 100dp/140dp live in values-h720dp/ and a middle pair in values-h600dp/. Android only
+         offers "available height is AT LEAST N dp", so the smallest case has to be the default.
+
+         Why: 247dp of fixed padding is 28% of the Fold's inner panel (the shape it was tuned on),
+         but a JVM sweep over AOSP's own device fixture table measured it at 35% of a
+         twopanel-tablet, 39% of a compact phone and 60% of this same phone in landscape.
+         AresMasonryLayoutManager clamps the viewport with coerceAtLeast(0), so the failure mode is
+         not a crash: it is a list with almost no room and nothing in the log. The Fold reads
+         values-h720dp and is unchanged. Asserted by :ares-geom-tests, which parses THESE files. -->
+    <dimen name="ares_list_ergo_top_padding">40dp</dimen>
     <!-- Bottom raised 100dp -> 140dp (owner 2026-09-01): in edit mode the personalization pills sit
          in a band at the bottom of the screen and were slightly covering the last widget, making its
          resize handle hard to grab. Measured on the folded Pixel: the band (dots + pills + gesture
          bar clearance) runs from y=2045 to the 2364 bottom, ~131dp, against the 100dp reserved here.
          clipToPadding=false means this is scroll room rather than dead space, but a list that is not
          scrolled to its end still renders its last rows INTO that band, which is what the owner
-         saw. 140dp clears the band with a little margin. -->
-    <dimen name="ares_list_ergo_bottom_padding">140dp</dimen>
+         saw. 140dp clears the band with a little margin.
+         (That 140dp now lives in values-h720dp/ - see the note on the top padding above. This is
+         the short-window fallback, where a 140dp band would be a fifth of the whole screen.) -->
+    <dimen name="ares_list_ergo_bottom_padding">64dp</dimen>
 
     <!-- §17 search affordance. Collapsed it is a circle of this size in the bottom-right corner;
          expanded it grows to the pane width less twice the resting margin. -->

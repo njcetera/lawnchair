@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ergonomic list padding for MID-HEIGHT windows: 600dp <= available height < 720dp.
+
+  Covers a compact phone (720x1280 @ 320dpi = 640dp tall) and AOSP's own twopanel-tablet fixture
+  (2208x1840 @ 420dpi = 701dp tall). At the tuned values those windows lose 39% and 35% of their
+  height to fixed padding respectively; at these they lose 28% and 26%, matching the ~28% the Fold
+  was actually tuned to.
+
+  Ratio between top and bottom is preserved, so the surface feels the same, just scaled to the room
+  available.
+-->
+<resources>
+    <dimen name="ares_list_ergo_top_padding">72dp</dimen>
+    <dimen name="ares_list_ergo_bottom_padding">100dp</dimen>
+</resources>

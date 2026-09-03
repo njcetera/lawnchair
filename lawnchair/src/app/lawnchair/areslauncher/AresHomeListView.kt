@@ -3201,7 +3201,19 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         //     says the whole display is, which is itself proof the profile has not caught up.
         val props = launcher.deviceProfile.deviceProperties
         val profileSaysTwoPanels = props.isTwoPanels && width >= props.availableWidthPx * 0.9f
-        val profileIsStale = width >= props.availableWidthPx * 1.5f
+        // `isMultiDisplay` is the gate, not a bare ratio. Both halves of this race are about a FOLD
+        // -- the container and the profile disagreeing for a frame while the panel count changes --
+        // and only a multi-display device can ever have two panels (`DeviceProperties.kt:73`,
+        // `isTwoPanels = isTablet && isMultiDisplay`). Ungated, the 1.5x test fires on ANY resize
+        // that widens the container by half: a 1600x2560 tablet rotating to landscape is a 1.6x
+        // width change, and `AndroidManifest.xml` declares `screenSize|orientation` in
+        // configChanges so the activity is not recreated -- the window resize and the DeviceProfile
+        // update arrive as separate events, exactly as described above for a fold. The home grid
+        // would then lay out at HALF WIDTH on a single-panel device, with no second panel to
+        // explain the empty half. Same for a multi-window drag-resize. `isMultiDisplay` is a stable
+        // device property, unchanged by posture, so gating on it preserves the fold behaviour this
+        // heuristic exists for and disables it where two panels are impossible.
+        val profileIsStale = props.isMultiDisplay && width >= props.availableWidthPx * 1.5f
         if (profileSaysTwoPanels || profileIsStale) {
             width /= 2
         }

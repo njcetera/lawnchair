@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ergonomic list padding for TALL windows - every phone in portrait, and both Fold postures.
+
+  These are the original values, tuned by feel on the folded Pixel (see res/values/ares_dimens.xml
+  for the reasoning behind each). They are here rather than in values/ because Android only offers a
+  "height is AT LEAST N dp" qualifier: to give a short window less padding, the small values have to
+  be the fallback and the tuned values have to sit behind h720dp.
+
+  Nothing about the Pixel Fold changes as a result - its inner panel is 883dp tall and its outer
+  900dp, so both land here and read exactly the numbers they always did.
+-->
+<resources>
+    <dimen name="ares_list_ergo_top_padding">100dp</dimen>
+    <dimen name="ares_list_ergo_bottom_padding">140dp</dimen>
+</resources>

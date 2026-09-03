@@ -2,6 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.util.Log
 import android.view.View
+import android.view.ViewConfiguration
 import com.android.launcher3.DropTarget
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherSettings.Favorites
@@ -123,20 +124,26 @@ object AresFolderDrop {
     private const val ANIMATING_RETRY_MS = 80L
 
     /**
-     * How far the drag may drift while dwelling before the timer restarts.
+     * How far the drag may drift while dwelling before the timer restarts, and what counts as a
+     * layout reframe rather than a finger move.
      *
-     * Not zero: a real finger jitters by a pixel or two even when the user believes it is still,
-     * and a strict test would make the dwell unreachable on hardware while passing under synthetic
-     * input — the worst possible split between the device and the harness.
+     * Both were raw pixel constants (`18f` and `60f`) until 2026-09-02, tuned on the Pixel Fold and
+     * applied unscaled to every device. `scaledTouchSlop` is 8dp -- 19.5px at the Fold's density
+     * 2.4375, but **32px at density 4.0**, where an 18px dwell tolerance sat BELOW the threshold
+     * Android itself uses to decide a finger has moved, making dwell-to-create-folder unreachable.
+     *
+     * Now derived from the platform's own slop via [AresGeometry], which is plain Kotlin so the
+     * `:ares-geom-tests` JVM module can assert `touchSlop <= dwellSlop < reframeJump` across a
+     * density matrix without a device. Not zero, and not a fixed pixel count: a real finger jitters
+     * by a pixel or two even when the user believes it is still, and how many pixels that is
+     * depends entirely on the screen.
      */
-    private const val DWELL_SLOP_PX = 18f
+    private fun dwellSlopPx(v: View): Float =
+        AresGeometry.dwellSlopPx(ViewConfiguration.get(v.context).scaledTouchSlop)
 
-    /**
-     * A same-tile jump past this in ONE frame is a layout reframe of the reporting view, not a
-     * finger move -- fingers are continuous, frames are not. Well above any real inter-frame
-     * travel during a hold, well below the measured reframe (180px).
-     */
-    private const val REFRAME_JUMP_PX = 60f
+    /** See [dwellSlopPx]. Fingers are continuous; frames are not. */
+    private fun reframeJumpPx(v: View): Float =
+        AresGeometry.reframeJumpPx(ViewConfiguration.get(v.context).scaledTouchSlop)
 
     /** The grid the current drag is over, or null when nothing is being tracked. */
     private var grid: AresHomeListView? = null
@@ -346,7 +353,7 @@ object AresFolderDrop {
         // automated drag looks like a sequence of half-second holds and can arm on any tile it
         // passes over. Disarming on movement is what keeps a scripted reorder a reorder.
         val drift = hypot(x - anchorX, y - anchorY)
-        if (drift > REFRAME_JUMP_PX) {
+        if (drift > reframeJumpPx(list)) {
             // A REFRAME, not a move. The in-grid feed reports the dragged VIEW's position, and a
             // mid-hold rank change re-homes that view's layout frame -- the reported point then
             // teleports (measured: 180px in one frame) while the finger, and the visual locked to
@@ -357,7 +364,7 @@ object AresFolderDrop {
             Log.d(TAG, "dwell rebase: drift=${drift.toInt()} at (${x.toInt()},${y.toInt()})")
             anchorX = x
             anchorY = y
-        } else if (drift > DWELL_SLOP_PX) {
+        } else if (drift > dwellSlopPx(list)) {
             Log.d(TAG, "dwell slip: drift=${drift.toInt()} at (${x.toInt()},${y.toInt()})")
             if (armed) {
                 armed = false

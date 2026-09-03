@@ -1,0 +1,53 @@
+// AresLauncher's DEVICE-AGNOSTIC geometry test module.
+//
+// A plain JVM module -- no Android plugin, no Android runtime, no emulator, no device. It compiles
+// exactly one production file, `AresGeometry.kt`, and asserts that the relationships in it hold
+// across a matrix of real device specs.
+//
+// WHY A SEPARATE MODULE. The app module has no unit-test source set at all (there is no
+// `testImplementation` line anywhere in the root build.gradle), and adding one would drag in the
+// full Android/Dagger/Compose graph for the sake of arithmetic. This runs in about a second.
+//
+// WHY IT COMPILES THE PRODUCTION FILE RATHER THAN A COPY. A test that asserts on its own copy of a
+// constant proves nothing about the constant the device uses. `AresGeometry.kt` is included by
+// path, so if somebody changes a threshold in the app, THIS test sees the change. That is the whole
+// design; see the class doc on AresGeometry.
+//
+// THE CONSTRAINT THIS IMPOSES: `AresGeometry.kt` must never import anything from `android.*`.
+// If it does, this module stops compiling -- which is the intended alarm, not a bug.
+plugins {
+    alias(libs.plugins.kotlin.jvm)
+}
+
+sourceSets {
+    main {
+        kotlin {
+            srcDir '../lawnchair/src'
+            include 'app/lawnchair/areslauncher/AresGeometry.kt'
+        }
+    }
+}
+
+dependencies {
+    testImplementation libs.junit
+    testImplementation libs.google.truth
+}
+
+tasks.named('test') {
+    useJUnit()
+
+    // The tests read res/values*/ares_dimens.xml and res/layout/ares_all_apps_icon.xml off disk at
+    // RUNTIME, so Gradle has no way to know they are inputs. Without this it marks the task
+    // UP-TO-DATE whenever only a resource changed and serves a cached PASS for a test that never
+    // ran -- measured 2026-09-02: four separate negative controls silently "passed" that way, which
+    // is a worse failure than a wrong assertion because nothing distinguishes it from a real green.
+    // Declaring the files makes an edit to any of them re-run the suite.
+    inputs.files(
+        fileTree(dir: "$rootDir/res", includes: ["values*/ares_dimens.xml", "layout/ares_all_apps_icon.xml"])
+    ).withPropertyName("aresResources").withPathSensitivity(PathSensitivity.RELATIVE)
+
+    testLogging {
+        events "passed", "failed", "skipped"
+        showStandardStreams = true
+    }
+}

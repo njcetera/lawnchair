@@ -19,13 +19,30 @@
      colour. Since the CONVERGENCE TARGET restyle the pane draws directly on the wallpaper with no
      sheet, that default rendered dark-on-dark and was barely legible. workspaceTextColor is the
      attribute the home list already resolves against the wallpaper, so both surfaces now agree.
+
+     ROW HEIGHT IS A FLOOR, NOT A FIXED HEIGHT (2026-09-02). The label is sized in `sp`, so it grows
+     with the user's font scale; Android 14+ non-linear font scaling reaches 2.0x, and Display Size
+     (largest) multiplies density by a further ~1.3x. Both are ordinary Settings toggles that need no
+     special hardware. At 2.0x a 17sp label needs ~52.2dp of line box plus padding, inside what used
+     to be a hard 52dp box that also has to hold a 32dp icon - so the label clipped, silently, for
+     anyone who had turned font size up.
+
+     `minHeight` keeps the row at exactly 52dp at the default scale, so the measured row is unchanged
+     for anyone who has not: no visible difference on the owner's device. It only grows when the text
+     genuinely needs the room. Asserted by :ares-geom-tests, which parses THIS file and checks the
+     height is wrap_content with a minHeight rather than a fixed dimen.
+
+     Watch the `layoutHorizontal` measure path if this misbehaves: BubbleTextView is documented to
+     over-estimate content height in that mode and yield a large bogus paddingTop, and wrap_content
+     sends the row straight through it.
 -->
 <com.android.launcher3.BubbleTextView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:launcher="http://schemas.android.com/apk/res-auto"
     style="@style/BaseIcon.AllApps"
     android:id="@+id/icon"
     android:layout_width="match_parent"
-    android:layout_height="@dimen/ares_app_row_height"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/ares_app_row_height"
     android:drawablePadding="@dimen/ares_app_row_drawable_padding"
     android:ellipsize="end"
     android:gravity="start|center_vertical"
