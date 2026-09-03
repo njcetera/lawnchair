@@ -3246,7 +3246,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // `isFoldable()` is the posture-independent accessor this project built for this exact class
         // of bug, and it still excludes the tablet-rotation and multi-window cases above: a tablet
         // is not a foldable.
-        val profileIsStale = isFoldableDevice && width >= props.availableWidthPx * 1.5f
+        // ROW 69a: the ratio alone is not enough once the gate is `isFoldable`, which is true in
+        // EVERY posture. A folded phone rotated to landscape is 1080 -> 2364 = 2.19x, past the 1.5x,
+        // and halving there would produce the exact defect this guard prevents -- a half-width grid
+        // on a single-panel window with an empty right half. The owner uses rotation, so that path
+        // is live. No larger ratio fixes it either: folded-landscape is WIDER than the unfolded
+        // panel, so the two cases cannot be ordered by width at all.
+        //
+        // The container's own SHAPE orders them: a foldable's inner panel is near-square (every one
+        // measured is <= 1.20) and a phone in landscape is long and thin (>= 1.78). See AresFoldGuard
+        // for the table and for why the device's `supportedBounds` -- the obvious reference to match
+        // against, and the version of this that was written first -- is NOT posture-independent
+        // either and declined every real stale frame on the device.
+        //
+        // The decision is pure arithmetic in AresFoldGuard so it can be unit-tested on the JVM
+        // device matrix; this branch is a transient mid-fold frame that no at-rest test can observe,
+        // and the two previous versions of this gate were both wrong for weeks while looking fine.
+        val hostHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
+        val profileIsStale = isFoldableDevice && AresFoldGuard.profileIsStale(
+            containerW = width,
+            containerH = hostHeight,
+            availableWidthPx = props.availableWidthPx,
+        )
         if (profileIsStale) {
             // PROOF OF PATH. This branch fires only on a transient mid-fold frame, which no
             // at-rest test can observe -- running the shape suite folded and unfolded shows the
@@ -3255,14 +3276,29 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // measure. Rare by construction, so the log costs nothing.
             Log.i(
                 "AresFoldGuard",
-                "stale profile: width=$width availableWidthPx=${props.availableWidthPx} " +
+                "stale profile: container=${width}x$hostHeight " +
+                    "availableWidthPx=${props.availableWidthPx} " +
                     "twoPanels=$profileSaysTwoPanels isMultiDisplay=${props.isMultiDisplay} -> halving",
+            )
+        } else if (isFoldableDevice && width >= props.availableWidthPx * AresFoldGuard.STALE_WIDTH_RATIO) {
+            // THE OTHER HALF OF THE PROOF, and the one that matters more. The dangerous regression
+            // here is not a false fire, which is visible as a half-width grid -- it is the guard
+            // silently DECLINING a real stale frame, which looks exactly like a fold where no stale
+            // frame happened to occur. Without this line the two are indistinguishable in a log.
+            //
+            // This is not hypothetical: it is how the supportedBounds version above was caught, on
+            // its first fold cycle, having passed every test that existed. A folded landscape window
+            // landing here is correct -- that is row 69a being prevented. A near-square container
+            // landing here is a bug in the shape test, and the numbers to fix it are in the line.
+            Log.i(
+                "AresFoldGuard",
+                "declined: container=${width}x$hostHeight " +
+                    "availableWidthPx=${props.availableWidthPx} -- wide, but not panel-shaped",
             )
         }
         if (profileSaysTwoPanels || profileIsStale) {
             width /= 2
         }
-        val hostHeight = host?.measuredHeight?.takeIf { it > 0 } ?: MeasureSpec.getSize(heightSpec)
 
         // Keep the host ShortcutAndWidgetContainer from clipping our edge-to-edge overscan. Its
         // onAttachedToWindow re-enables clipChildren/clipToPadding whenever the allow-widget-overlap

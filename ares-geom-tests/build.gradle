@@ -25,6 +25,9 @@ sourceSets {
             srcDir '../lawnchair/src'
             include 'app/lawnchair/areslauncher/AresGeometry.kt'
             include 'app/lawnchair/areslauncher/AresWashMath.kt'
+            // Row 69a: the mid-fold guard's decision, pure so it can be checked against device
+            // shapes nobody here owns -- the branch itself is a transient frame no test can observe.
+            include 'app/lawnchair/areslauncher/AresFoldGuard.kt'
         }
     }
 }
