@@ -64,18 +64,21 @@ jobs:
           name: ${{ matrix.build-variant }}
           path: build/outputs/apk/**/*.apk
 
-  check-style:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-      - uses: actions/setup-java@v5
-        with:
-          distribution: 'zulu'
-          java-version: 21
-      - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew spotlessCheck
+  # AresLauncher, owner decision 2026-09-03 (defect-ledger row 72): the `check-style` job, which ran
+  # `./gradlew spotlessCheck`, is REMOVED rather than left failing. It was red on `ares-dev` on files
+  # nobody had touched, so it blocked nothing and signalled nothing -- and a gate that is always red
+  # is worse than no gate, because it teaches everyone to ignore a red CI.
+  #
+  # NOT fixed by running spotlessApply, deliberately: its own proposed rewrite of
+  # `AresAllApps.homeListTopPaddingPx` produces a line longer than the 120-char limit it enforces,
+  # which says the config and the code have drifted apart rather than that the code is wrong.
+  # Measured alongside it: ktlint's `import-ordering` rule is inert under this `.editorconfig`
+  # (`AresHomeListView.kt` has an out-of-order import and is not among the violators), so the gate
+  # was not checking what it appeared to check either.
+  #
+  # To restore it: reconcile the config with the code, get `./gradlew spotlessCheck` green locally,
+  # then re-add a `check-style` job here.
+
 
   # AresLauncher: the first tests this project has ever run in CI (added 2026-09-02).
   #
@@ -175,7 +178,9 @@ jobs:
   final-status:
     needs:
       - build-debug-apk
-      - check-style
+      # `check-style` removed 2026-09-03 with the job itself (row 72). It had to go from HERE too:
+      # `needs` naming a job that does not exist makes the whole workflow invalid, so CI would not
+      # have run at all rather than running without the gate.
       # A job absent from THIS list is not a gate: final-status computes its verdict from
       # toJSON(needs.*.result), so a failure in a job it does not depend on cannot fail the check.
       # Adding the jobs above without adding them here would have looked like coverage and been none.
