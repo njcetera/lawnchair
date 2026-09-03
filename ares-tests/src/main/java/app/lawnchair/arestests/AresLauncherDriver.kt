@@ -230,6 +230,33 @@ class AresLauncherDriver {
         waitFor("home grid to have items") { homeOrder().isNotEmpty() }
     }
 
+    /**
+     * Enters home edit mode with a bare long-press and NO drag, then confirms it armed.
+     *
+     * `travelMs = 0` is the whole point: a long-press with no travel enters edit mode in this fork
+     * (stock Launcher3 would start a drag — see `longPressEntersEditModeWithoutStartingADrag`).
+     * The synthetic long-press is the flakiest gesture in this suite, so it retries: on this AVD it
+     * armed on the second attempt in a hand-run spike. Each retry re-reads the tile centre because
+     * entering edit mode scales the grid to 0.92 and every tile moves.
+     *
+     * Throws if edit mode will not arm — a precondition that cannot be met must be loud.
+     */
+    fun enterEditModeNoDrag(iconIndex: Int = 0) {
+        repeat(4) {
+            if (isEditMode()) return
+            val tile = iconTiles().getOrNull(iconIndex) ?: iconTiles().firstOrNull()
+                ?: error("no icon tiles on the home grid to long-press")
+            AresGestures.pressHoldDragRelease(
+                start = tile.screenCenter(),
+                holdMs = 800,
+                travelMs = 0,
+                target = { iconTiles().getOrNull(iconIndex)?.screenCenter() ?: tile.screenCenter() },
+            )
+            SystemClock.sleep(400)
+        }
+        check(isEditMode()) { "edit mode did not arm after 4 long-press attempts" }
+    }
+
     fun exitEditMode() {
         // BACK peels one layer at a time: an open folder or popup consumes the first press and
         // leaves edit mode standing, which is exactly the state a failed folder-drag attempt
