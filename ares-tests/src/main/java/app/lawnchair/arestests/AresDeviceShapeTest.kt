@@ -1,5 +1,6 @@
 package app.lawnchair.arestests
 
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -70,6 +71,43 @@ class AresDeviceShapeTest {
             "launcher is not the resolved home app on this device",
             driver.launcherPackage.contains("lawnchair"),
         )
+    }
+
+    /**
+     * `isTwoPanels` as the launcher itself computed it, from its own `DeviceProfile` dump.
+     *
+     * Read from `dumpsys activity` rather than derived from the window size, because the whole
+     * point is what the LAUNCHER decided, not what the test thinks the screen looks like.
+     */
+    private fun isTwoPanels(): Boolean? =
+        device.executeShellCommand("dumpsys activity ${driver.launcherPackage}/app.lawnchair.LawnchairLauncher")
+            .lineSequence()
+            .firstOrNull { it.contains("isTwoPanels") }
+            ?.substringAfter("isTwoPanels:")
+            ?.trim()
+            ?.take(5)
+            ?.startsWith("true")
+
+    /**
+     * PROOF OF PATH, not an assertion about correctness.
+     *
+     * A green run on a non-foldable means nothing if the launcher still took its two-panel branch —
+     * that would be the Fold path running on a phone-shaped window, which is not what this file
+     * claims to cover. So record which branch actually executed, and fail if the launcher will not
+     * say. On the `AresFold` AVD this reports true; on `pixel7Api36` it must report false, and if
+     * it ever reports true there, every other assertion in this class was measured on the wrong
+     * path and the green is meaningless.
+     *
+     * Deliberately NOT `assertFalse`: this class is meant to run unchanged on BOTH devices, and
+     * hard-coding either answer would make it device-specific — the exact mistake it exists to
+     * catch. The value is asserted to be *readable*, and printed for the run log.
+     */
+    @Test
+    fun launcherReportsWhichPanelBranchItTook() {
+        requireLauncher()
+        val twoPanels = isTwoPanels()
+        assertThat(twoPanels).isNotNull()
+        Log.i("AresShape", "isTwoPanels=$twoPanels width=${device.displayWidth} height=${device.displayHeight}")
     }
 
     /**
