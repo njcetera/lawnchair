@@ -52,24 +52,53 @@ class AresDeviceShapeTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         device = UiDevice.getInstance(instrumentation)
 
-        // Make our launcher the home app on whatever device this is. A managed device boots with
-        // the AOSP launcher as home and hands out no interactive way to change it.
+        // Claim the home slot. A managed device boots with the Pixel launcher as home, and
+        // `set-home-activity` ALONE IS NOT ENOUGH: measured 2026-09-02 on pixel7Api36, the command
+        // succeeded, `resolve-activity` then answered `app.lawnchair.debug`, and
+        // `com.google.android.apps.nexuslauncher` stayed resumed for the whole run. Every
+        // screenshot was of the Pixel launcher. Force-stopping the incumbent after taking the
+        // preference is what actually hands the slot over.
         device.executeShellCommand(
             "cmd package set-home-activity app.lawnchair.debug/app.lawnchair.LawnchairLauncher",
         )
+        device.executeShellCommand("am force-stop com.google.android.apps.nexuslauncher")
         device.executeShellCommand("input keyevent KEYCODE_WAKEUP")
         device.executeShellCommand("wm dismiss-keyguard")
 
         driver = AresLauncherDriver()
         driver.openTestChannel()
         driver.goHome()
+        device.waitForIdle()
     }
 
-    /** The channel answering is the precondition for everything below. */
+    /** The activity the system currently has resumed, as the system reports it. */
+    private fun topResumedActivity(): String =
+        device.executeShellCommand("dumpsys activity activities")
+            .lineSequence()
+            .firstOrNull { it.contains("topResumedActivity") }
+            ?: ""
+
+    /**
+     * Our launcher must be the activity actually ON SCREEN — not merely installed, not merely
+     * resolvable as home, and not merely answering its content provider.
+     *
+     * This gate exists because the first version of this file did not have it and produced a
+     * FALSE GREEN. On pixel7Api36 all assertions passed while `com.google.android.apps.nexuslauncher`
+     * was the resumed activity for the entire run: the test channel is a ContentProvider and
+     * answers regardless of foreground, and `dumpsys activity <pkg>/LawnchairLauncher` will happily
+     * dump a DeviceProfile from an activity instance that exists but is not the home screen. Six
+     * assertions "passed" against a launcher nobody could see, and only a screenshot caught it.
+     *
+     * `resolve-activity` returning our package is therefore NOT sufficient evidence and is not used
+     * here. SKIP rather than fail: not being able to take the home slot on some device is a fact
+     * about the environment, and a check that could not run must be louder than one that failed,
+     * never quieter.
+     */
     private fun requireLauncher() {
+        val top = topResumedActivity()
         assumeTrue(
-            "launcher is not the resolved home app on this device",
-            driver.launcherPackage.contains("lawnchair"),
+            "AresLauncher is not the resumed activity; top was: ${top.trim()}",
+            top.contains("app.lawnchair") && top.contains("LawnchairLauncher"),
         )
     }
 
@@ -108,6 +137,52 @@ class AresDeviceShapeTest {
         val twoPanels = isTwoPanels()
         assertThat(twoPanels).isNotNull()
         Log.i("AresShape", "isTwoPanels=$twoPanels width=${device.displayWidth} height=${device.displayHeight}")
+    }
+
+    /**
+     * Take a screenshot of home and of the app list, so a person can LOOK at the shape.
+     *
+     * Six numeric invariants holding is not "it works on a phone", and the first non-foldable run
+     * (2026-09-02) was recorded with exactly that caveat: nothing here can see an overlapping label,
+     * a clipped fob, a pane that should not exist, or text that wrapped to three lines. Those are
+     * the defects a different screen actually produces, and every one of them is invisible to an
+     * assertion about coordinates.
+     *
+     * Writes into `additionalTestOutputDir` when the runner supplies it — Gradle Managed Devices
+     * copies that directory off the AVD before tearing it down, which is the only way to get a
+     * frame off a device that ceases to exist when the task ends. Falls back to the app's own files
+     * dir on a connected device.
+     *
+     * Never fails the build. This produces evidence for a human, and a missing screenshot is not a
+     * defect in the launcher; it is asserted only that *something* was written, so a silently empty
+     * output directory does not look like success.
+     */
+    @Test
+    fun captureFramesForHumanReview() {
+        requireLauncher()
+        val outDir = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
+            ?.let { java.io.File(it) }
+            ?: InstrumentationRegistry.getInstrumentation().targetContext.filesDir
+        outDir.mkdirs()
+
+        val tag = if (isTwoPanels() == true) "twopanel" else "onepanel"
+
+        driver.goHome()
+        device.waitForIdle()
+        val home = java.io.File(outDir, "ares-$tag-home-${device.displayWidth}x${device.displayHeight}.png")
+        val homeOk = device.takeScreenshot(home)
+
+        // The app list is workspace panel 1 in Strategy D, not a separate state, so it is reached
+        // by a page swipe rather than by opening AllApps.
+        device.swipe(device.displayWidth - 40, device.displayHeight / 2, 40, device.displayHeight / 2, 20)
+        device.waitForIdle()
+        val list = java.io.File(outDir, "ares-$tag-applist-${device.displayWidth}x${device.displayHeight}.png")
+        val listOk = device.takeScreenshot(list)
+
+        Log.i("AresShape", "frames: home=$homeOk list=$listOk dir=${outDir.absolutePath}")
+        assertThat(homeOk || listOk).isTrue()
+
+        driver.goHome()
     }
 
     /**
