@@ -246,6 +246,11 @@ object AresTestInfo {
      * to move one sends the folder name from the bottom to the centre"*, which is a layout
      * consequence of the content shrinking by a row mid-drag. `nameTop` not moving between rest and
      * mid-drag is the evidence that closes it.
+     *
+     * **Answers `[]` unconditionally on the current build (ledger row 67).** It opens with
+     * `Folder.getOpen(launcher) ?: return emptyArray()`, and the WP migration means no overlay
+     * `Folder` is ever constructed — an empty answer is now "there is no overlay surface", not
+     * "the open folder has no icons". See the warning on [REQUEST_OPEN_FOLDER].
      */
     const val REQUEST_FOLDER_METRICS = "ares-folder-metrics"
 
@@ -257,10 +262,29 @@ object AresTestInfo {
      * why `folder-edit-chrome` and `folder-badge-geometry` SKIP in the PowerShell harness, and it is
      * a reachability problem, not something worth re-tuning. What is under test on this surface is
      * what happens once the folder is open, so getting there deterministically is the point.
+     *
+     * ## "true" DOES NOT MEAN AN OVERLAY FOLDER EXISTS (ledger row 67)
+     *
+     * Since the WP migration a folder click **expands the folder inline** and never constructs an
+     * overlay `Folder`. This still answers `true` — it really did click a `FolderIcon`, and the
+     * folder really did open — but [REQUEST_FOLDER_METRICS], [REQUEST_FOLDER_EDIT] and everything
+     * else that goes through `Folder.getOpen(launcher)` will find nothing and answer empty.
+     *
+     * That combination cost four instrumentation classes a 30-second timeout each and an hour of
+     * misdiagnosis: `ares-open-folder` returning `true` next to `ares-folder-metrics` returning
+     * `[]` reads exactly like defect-ledger row 40 ("folder won't open") and is nothing of the
+     * kind. To observe a WP folder use [REQUEST_WP_EXPAND] and [REQUEST_HOME_ORDER] — an expanded
+     * folder's children appear as inline siblings in the home order, and collapsing it removes
+     * them (measured: census 34 -> 31 for a 3-child folder).
      */
     const val REQUEST_OPEN_FOLDER = "ares-open-folder"
 
-    /** Turns folder edit mode on or off on the open folder. `arg`: "on" (default) or "off". */
+    /**
+     * Turns folder edit mode on or off on the open folder. `arg`: "on" (default) or "off".
+     *
+     * Goes through `Folder.getOpen(launcher)`, so it answers `false` for a WP folder however
+     * expanded it is — see the warning on [REQUEST_OPEN_FOLDER].
+     */
     const val REQUEST_FOLDER_EDIT = "ares-folder-edit"
 
     /** §25 create+open verification: create + open a real 2-item folder; returns what happened. */
