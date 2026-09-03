@@ -421,6 +421,72 @@ class AresLauncherDriver {
         )
     }
 
+    /**
+     * The two unfolded panes' real on-screen geometry (see AresTestInfo.REQUEST_PANE_ALIGN). Every
+     * field is a screen coordinate or a live padding read on the launcher UI thread — nothing here
+     * trusts the padding formula. `null` when the channel could not answer at all. When the launcher
+     * is not in two-panel posture the pane fields come back as -1 (the pane view is absent), which
+     * [AresPaneAlignTest] turns into a SKIP rather than a pass.
+     */
+    fun paneAlign(): PaneAlign? {
+        val raw = call("ares-pane-align")?.getString("response") ?: return null
+        fun field(name: String): Int =
+            Regex("$name=(-?\\d+)").find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        return PaneAlign(
+            homeTop = field("homeTop"),
+            homePad = field("homePad"),
+            homeChild = field("homeChild"),
+            paneTop = field("paneTop"),
+            rvPad = field("rvPad"),
+            paneChild = field("paneChild"),
+            insetsTop = field("insetsTop"),
+            wsPadTop = field("wsPadTop"),
+            homeListPad = field("homeListPad"),
+            recon = field("recon"),
+            raw = raw,
+        )
+    }
+
+    data class PaneAlign(
+        val homeTop: Int,
+        val homePad: Int,
+        val homeChild: Int,
+        val paneTop: Int,
+        val rvPad: Int,
+        val paneChild: Int,
+        val insetsTop: Int,
+        val wsPadTop: Int,
+        val homeListPad: Int,
+        val recon: Int,
+        val raw: String,
+    ) {
+        /** Signed gap between the app list's first row and the home grid's first row, in px. */
+        val delta: Int get() = paneChild - homeChild
+
+        /** Both panes present and laid out — i.e. the launcher is in two-panel (unfolded) posture. */
+        val bothPanesLaidOut: Boolean get() = homeChild > 0 && paneChild > 0
+    }
+
+    /**
+     * Drives a fold→unfold on the emulator and recovers the launcher, so a caller can check an
+     * invariant SURVIVES the posture change. `cmd device_state state N` re-arms the keyguard on the
+     * AVD and the fold triggers a full model rebind (both documented traps), so the recovery here is
+     * load-bearing: wake, dismiss keyguard, HOME, then wait for the home grid to rebind before
+     * returning. Returns false if the device has no foldable states to drive.
+     */
+    fun foldCycleAndRecover(): Boolean {
+        val states = shell("cmd device_state print-states")
+        if (!states.contains("OPENED") || !states.contains("CLOSED")) return false
+        for (state in listOf(0, 2)) {
+            shell("cmd device_state state $state")
+            device.pressKeyCode(android.view.KeyEvent.KEYCODE_WAKEUP)
+            shell("wm dismiss-keyguard")
+            goHome()
+            waitFor("home grid to rebind after fold state $state") { homeOrder().isNotEmpty() }
+        }
+        return true
+    }
+
     /** True when BOTH app-list edge glows are finished (no held overscroll pull). */
     fun overscrollFinished(): Boolean {
         val p = (call("ares-overscroll-state")?.getString("response") ?: "true|true").split("|")

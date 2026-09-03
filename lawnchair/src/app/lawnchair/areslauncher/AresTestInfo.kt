@@ -398,6 +398,16 @@ object AresTestInfo {
     const val REQUEST_VIEW_CAPTURE = "ares-view-capture"
 
     /**
+     * Reports the REAL on-screen geometry of the two unfolded panes, so the home-list-vs-app-list
+     * top alignment can be measured instead of reconstructed. Every value is a screen coordinate or
+     * a live padding read on the UI thread; nothing here trusts the padding formula. Compare
+     * `homeChild` (home grid's first row top) with `paneChild` (app list's first row top): equal =
+     * aligned. `homeTop` vs `recon` shows whether the formula's assumption
+     * (homeListViewTop == insets.top + workspacePadding.top) actually holds on this device.
+     */
+    const val REQUEST_PANE_ALIGN = "ares-pane-align"
+
+    /**
      * Handles an Ares request, or returns null if [method] is not one of ours.
      *
      * Called from `TestInformationHandler.call`'s `default:` branch, so stock's own switch is
@@ -524,7 +534,33 @@ object AresTestInfo {
             { launcher -> homeReveal(launcher, arg) },
         )
         REQUEST_VIEW_CAPTURE -> viewCapture(arg)
+        REQUEST_PANE_ALIGN -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> paneAlign(launcher) },
+        )
         else -> null
+    }
+
+    /** See [REQUEST_PANE_ALIGN]. */
+    private fun paneAlign(launcher: Launcher): String {
+        val loc = IntArray(2)
+        fun topOnScreen(v: View?): Int = v?.let { it.getLocationOnScreen(loc); loc[1] } ?: -1
+        val home = launcher.workspace?.aresHomeList
+        val homeTop = topOnScreen(home)
+        val homePad = home?.paddingTop ?: -1
+        val homeChild = topOnScreen(home?.getChildAt(0))
+        val pane = launcher.workspace?.aresAppListPane
+        val paneTop = topOnScreen(pane)
+        val rv = pane?.activeRecyclerView
+        val rvPad = rv?.paddingTop ?: -1
+        val paneChild = topOnScreen(rv?.getChildAt(0))
+        val dp = launcher.deviceProfile
+        val homeListPad = AresAllApps.homeListTopPaddingPx(launcher)
+        val recon = dp.insets.top + dp.workspacePadding.top + homeListPad
+        return "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
+            "paneTop=$paneTop rvPad=$rvPad paneChild=$paneChild | " +
+            "insetsTop=${dp.insets.top} wsPadTop=${dp.workspacePadding.top} homeListPad=$homeListPad recon=$recon | " +
+            "delta(paneChild-homeChild)=${paneChild - homeChild}"
     }
 
     /** See [REQUEST_VIEW_CAPTURE]. Each sub-command picks its own thread; the KDoc says why. */
