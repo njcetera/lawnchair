@@ -10,6 +10,7 @@ import com.android.app.viewcapture.data.ViewNode
 import com.android.app.viewcapture.data.WindowData
 import com.android.launcher3.util.viewcapture_analysis.ViewCaptureAnalyzer
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -129,7 +130,25 @@ class AresAnimationAnomalyTest {
         anomalies.forEach { (path, message) -> Log.w(TAG, "ANOMALY $path -> $message") }
         Log.i(TAG, "detectors reported ${anomalies.size} anomaly/anomalies over $frames frames")
 
-        assertThat(anomalies).isEmpty()
+        // The anomaly text goes in the ASSERTION MESSAGE, not only in logcat.
+        //
+        // This failed once in roughly ten runs on 2026-09-03 and the report said exactly
+        // "expected to be empty" -- the runner does not surface logcat, so the one occurrence that
+        // mattered left no evidence and could not be reproduced in eight further attempts. An
+        // intermittent check whose failure carries no diagnosis is worse than no check: it teaches
+        // people to re-run until green, which is how every mechanism in this project decayed
+        // before. Flakiness that is diagnosable is survivable for a new instrument; flakiness that
+        // is opaque is not.
+        //
+        // Still a hard assertion rather than a warning. The thresholds ARE uncalibrated for Ares
+        // (they were tuned for stock Launcher3 and the ignore-lists name no Ares view), so the
+        // first real failure may well be the detector rather than the launcher -- but downgrading
+        // a gate because it might be noisy is exactly how a gate gets switched off for good.
+        assertWithMessage(
+            "ViewCapture detectors reported ${anomalies.size} anomaly/anomalies over $frames " +
+                "frames of the home <-> app-list transition:\n" +
+                anomalies.entries.joinToString("\n") { (path, message) -> "  $path\n    $message" },
+        ).that(anomalies).isEmpty()
     }
 
     /**
