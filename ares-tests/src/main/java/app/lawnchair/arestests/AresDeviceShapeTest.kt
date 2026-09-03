@@ -52,16 +52,30 @@ class AresDeviceShapeTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         device = UiDevice.getInstance(instrumentation)
 
-        // Claim the home slot. A managed device boots with the Pixel launcher as home, and
-        // `set-home-activity` ALONE IS NOT ENOUGH: measured 2026-09-02 on pixel7Api36, the command
-        // succeeded, `resolve-activity` then answered `app.lawnchair.debug`, and
-        // `com.google.android.apps.nexuslauncher` stayed resumed for the whole run. Every
-        // screenshot was of the Pixel launcher. Force-stopping the incumbent after taking the
-        // preference is what actually hands the slot over.
+        // Claim the home slot. A managed device boots with another launcher as home, and
+        // `set-home-activity` alone did not visibly hand it over on pixel7Api36 (2026-09-02): the
+        // command succeeded, `resolve-activity` answered `app.lawnchair.debug`, and every
+        // screenshot was still of the Pixel launcher.
+        //
+        // WHAT IS NOT KNOWN, stated because a previous version of this comment asserted it: no
+        // `topResumedActivity` reading was taken during that run, so "the stock launcher stayed
+        // resumed" is an inference from the screenshots, not a measurement. Ledger row 62 records
+        // the conflicting evidence and leaves the cause OPEN. Force-stopping the incumbent is a
+        // reasonable belt-and-braces, not a diagnosed fix.
+        //
+        // The incumbent is read from the device rather than hardcoded: `nexuslauncher` is the
+        // managed device's launcher and would be the wrong name on any other phone, and this class
+        // exists precisely to stop the test device from being treated as the definition of correct.
+        val incumbent = device.executeShellCommand(
+            "cmd package resolve-activity --brief -c android.intent.category.HOME",
+        ).lineSequence().lastOrNull { it.contains("/") }?.substringBefore("/")?.trim()
+
         device.executeShellCommand(
             "cmd package set-home-activity app.lawnchair.debug/app.lawnchair.LawnchairLauncher",
         )
-        device.executeShellCommand("am force-stop com.google.android.apps.nexuslauncher")
+        if (!incumbent.isNullOrBlank() && incumbent != "app.lawnchair.debug") {
+            device.executeShellCommand("am force-stop $incumbent")
+        }
         device.executeShellCommand("input keyevent KEYCODE_WAKEUP")
         device.executeShellCommand("wm dismiss-keyguard")
 
@@ -69,6 +83,25 @@ class AresDeviceShapeTest {
         driver.openTestChannel()
         driver.goHome()
         device.waitForIdle()
+    }
+
+    /**
+     * Skips on purpose, but only when the runner is told to: `-e aresSkipSelftest true`.
+     *
+     * The harness must be provable, and this one could not be. `run-ares-tests.sh` counts
+     * `INSTRUMENTATION_STATUS_CODE: -4` to turn a skip into exit 3, and that counter had never been
+     * observed non-zero — measured 2026-09-02, handing the home slot to the stock launcher does NOT
+     * produce a skip, because [setUp] takes the slot back before [requireLauncher] ever looks. The
+     * gate is real and simply hard to trip on demand, which leaves the *detector* untested.
+     *
+     * So this is the injected failure. It proves the plumbing (assumption failure → status -4 →
+     * runner → exit 3) and nothing about the launcher, exactly like the `ares-invariants selftest`
+     * hook it is modelled on. Without the flag it is inert, so ordinary runs stay clean.
+     */
+    @Test
+    fun skipSelftest() {
+        val on = InstrumentationRegistry.getArguments().getString("aresSkipSelftest") == "true"
+        assumeTrue("aresSkipSelftest: synthetic skip, injected by the harness", !on)
     }
 
     /** The activity the system currently has resumed, as the system reports it. */
@@ -153,9 +186,16 @@ class AresDeviceShapeTest {
      * frame off a device that ceases to exist when the task ends. Falls back to the app's own files
      * dir on a connected device.
      *
-     * Never fails the build. This produces evidence for a human, and a missing screenshot is not a
-     * defect in the launcher; it is asserted only that *something* was written, so a silently empty
-     * output directory does not look like success.
+     * Both frames are asserted **separately**. An earlier version asserted `homeOk || listOk`,
+     * which passes when the app-list frame — the one that would show a pane that should not exist,
+     * or a clipped fob — is the one that silently failed to write.
+     *
+     * Two limits this cannot close, stated rather than papered over. `UiDevice.takeScreenshot` takes
+     * no display argument and captures the default display; on the `AresFold` AVD, which has two
+     * displays with the 2076x2152 panel powered off, that is the same trap that makes `screencap`
+     * grab the wrong panel. And a `true` return proves a file was written *on the device*, not that
+     * Gradle Managed Devices copied it off before tearing the AVD down — nothing in-process can
+     * observe that, so the output directory still has to be checked by hand after a GMD run.
      */
     @Test
     fun captureFramesForHumanReview() {
@@ -180,9 +220,10 @@ class AresDeviceShapeTest {
         val listOk = device.takeScreenshot(list)
 
         Log.i("AresShape", "frames: home=$homeOk list=$listOk dir=${outDir.absolutePath}")
-        assertThat(homeOk || listOk).isTrue()
-
         driver.goHome()
+
+        assertThat(homeOk).isTrue()
+        assertThat(listOk).isTrue()
     }
 
     /**
