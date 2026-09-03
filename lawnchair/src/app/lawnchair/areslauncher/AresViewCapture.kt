@@ -2,7 +2,7 @@ package app.lawnchair.areslauncher
 
 import android.content.Context
 // `android.media.permission`, not `com.android.launcher3.util` -- ViewCapture.java:26 imports the
-// framework one and `startCapture` returns it. The two are unrelated types with the same name.
+// framework one and `startCapture` returns it. Two unrelated types with the same name.
 import android.media.permission.SafeCloseable
 import android.util.Log
 import android.view.View
@@ -31,35 +31,48 @@ import java.io.File
  * ## Why not `ViewCaptureFactory`
  *
  * `ViewCaptureFactory.getInstance` returns `PerfettoViewCapture` on a debuggable build, which routes
- * frames into a Perfetto trace session; with no session running there is nothing to read, and wiring
- * one up to answer "did this animation jump" is a great deal of machinery for a question an
- * in-memory ring buffer answers directly. `SimpleViewCapture` is that ring buffer — the same
- * `ViewCapture` base class, `mIsEnabled` true from construction, `getExportedData` returning the
- * proto the detectors already parse, and a 2000-frame history (`DEFAULT_MEMORY_SIZE`).
+ * frames into a Perfetto trace session; with no session running there is nothing to read.
+ * `SimpleViewCapture` is the plain in-memory ring buffer — same `ViewCapture` base class,
+ * `mIsEnabled` true from construction, `getExportedData` returning the proto the detectors parse,
+ * 2000-frame history (`DEFAULT_MEMORY_SIZE`).
  *
  * Also NOT `QuickstepLauncher`'s own `mViewCapture`: that is a bare `null` at `:829` with an LC-Note
- * saying Lawnchair made it a no-op for Android 8-11 support. Reviving it would re-enable capture for
- * every user of every build to serve a test. This is separate, off by default, and started only when
- * the test channel asks.
+ * saying Lawnchair made it a no-op for Android 8-11 support. Reviving it would enable capture for
+ * every user of every build to serve a test.
  *
- * ## The stop/export ordering, which is not obvious and is easy to get wrong
+ * ## Three lifecycle facts, each of which cost a wrong first draft
  *
- * `startCapture` hands back a `SafeCloseable` whose `close()` does `mListeners.remove(listener)`,
- * and `getExportedData` builds its answer by streaming **that same `mListeners`** (filtered on
- * `mIsActive`). So closing the handle and then exporting yields an empty proto every time, with no
- * error — the frames were recorded and are simply unreachable.
+ * **One instance, forever.** `SimpleViewCapture`'s constructor calls
+ * `createAndStartNewLooperExecutor`, which does `new HandlerThread(...).start()`
+ * (`ViewCapture.java:111`) — and there is no `quit`, `shutdown` or `interrupt` anywhere in
+ * `viewcapturelib`. A per-[start] instance therefore leaks one live looper thread into the
+ * launcher process on every test, permanently. [capture] is created once and reused; the frame
+ * buffer is per-`WindowListener`, created fresh by each `startCapture`, so reuse costs nothing.
  *
- * `stopCapture(root)` is the path that exists for this: it removes the draw listener and nulls
- * `mRoot`, leaving the listener in the list. Its own comment says the listeners are then "unusable
- * for anything except dumping previously captured information. They are still technically enabled to
- * allow for dumping." So [stop] stops recording, [export] can still read, and only [reset] closes the
- * handle — which is also what unregisters the ComponentCallbacks `startCapture` registered, so it
- * must still happen.
+ * **[release] must close the handle while `mRoot` is still set.** The closeable `startCapture`
+ * returns unregisters the `ComponentCallbacks` only inside
+ * `if (listener.mRoot != null && listener.mRoot.getContext() != null)` (`ViewCapture.java:147`),
+ * and `stopCapture` nulls exactly that field (`:174`). So a stop-then-close silently SKIPS the
+ * unregister and leaves a listener owning a `ViewPropertyRef[2000]` registered on the application
+ * for the life of the process. There is consequently **no `stop`**: the flow is
+ * `start` → gesture → [export] → [reset], and [export] reads a running capture.
+ *
+ * **A recreate strands the capture.** `getLauncherUIProperty` resolves
+ * `ACTIVITY_TRACKER::getCreatedContext` — *created*, not resumed — and this launcher recreates
+ * routinely (theme, icon shape, fold). A capture started against the old decor view keeps a draw
+ * listener on a dead tree and returns its pre-recreate frames, which are non-empty and therefore
+ * look exactly like a successful capture of the animation under test. [start] guards both ends:
+ * it refuses a launcher that is not resumed, and it treats a different root view as a new session
+ * rather than answering `already-running`.
  *
  * ## Cost, and why it is off by default
  *
- * A running capture allocates a frame pool and copies view state on every draw. It is started by an
- * explicit channel call, stopped by another, and never runs unless a test turns it on.
+ * A running capture allocates a frame pool and copies view state on every draw. It starts only when
+ * the test channel asks. Nothing auto-stops it: the one backstop is the library's own
+ * `onTrimMemory(>= TRIM_MEMORY_BACKGROUND)` (`ViewCapture.java:598`), which frees the buffers and
+ * unregisters — real, but it needs memory pressure with the process backgrounded, so a test that
+ * dies between [start] and [reset] leaves capture running until something evicts the process. Call
+ * [reset] in a finally.
  */
 object AresViewCapture {
 
@@ -68,128 +81,153 @@ object AresViewCapture {
     /** Where [export] writes the proto. The test reads it from here. */
     const val EXPORT_NAME = "ares-viewcapture.pb"
 
-    private var capture: ViewCapture? = null
+    /**
+     * Created once and never replaced. See the class comment: a per-start instance leaks a
+     * `HandlerThread` that nothing in `viewcapturelib` can ever quit.
+     */
+    private val capture: ViewCapture by lazy { SimpleViewCapture("ares-vc") }
+
+    /**
+     * Written on the UI thread by [start] (it arrives via `getLauncherUIProperty`) and read on
+     * binder threads by [export] and [reset]. `@Volatile` rather than a monitor on [export]: that
+     * method blocks on a future staged through `MAIN_EXECUTOR`, so holding a lock across it while
+     * [start] waits for the same lock ON the main thread is a two-way deadlock. Only the two
+     * mutating paths take [lock], and neither of them blocks on main.
+     */
+    @Volatile
     private var closeable: SafeCloseable? = null
+
+    @Volatile
     private var root: View? = null
-    private var recording = false
 
     /**
      * Captured at [start] so [export] can run off the UI thread without a `Launcher` in hand.
      *
-     * The APPLICATION context specifically: `getExportedData` only needs `getPackageName` and
-     * `getResources`, and an activity held in a process-scoped object across a fold or a recreate is
-     * the exact leak shape ledger row S5 already cost this project once.
+     * The APPLICATION context specifically. [root] does hold a decor view, and therefore the
+     * activity, for as long as a capture runs — that is inherent to capturing a view tree, and it
+     * is why [start] refuses to keep a stale one across a recreate.
      */
+    @Volatile
     private var appContext: Context? = null
 
-    val isRecording: Boolean get() = recording
+    private val lock = Any()
+
+    val isRecording: Boolean get() = closeable != null
 
     /**
-     * Begin recording [launcher]'s root view. Must run on the UI thread — `startCapture` attaches a
+     * Begin recording [launcher]'s root view. Runs on the UI thread — `startCapture` attaches a
      * draw listener to the view tree.
      *
-     * Idempotent: a second start while one is already running is a no-op rather than a leak of the
-     * first `SafeCloseable`, which would keep copying frames forever with nobody able to stop it.
+     * Answers `not-resumed` for a launcher that exists but is not on screen, `no-window` before
+     * attach or after destroy, `already-running` only when the running capture is bound to *this*
+     * launcher's current root, and `started` otherwise — including the recreate case, where the old
+     * session is released first.
      */
-    fun start(launcher: Launcher): String {
-        if (recording) return "already-running"
-        // A previous session that was stopped but never reset still holds a listener and its frames;
-        // drop it so this run's export cannot be contaminated by the last one's data.
-        if (capture != null) reset()
-        // `Activity.getWindow()` is genuinely nullable before attach and after destroy. Answer with
-        // a marker rather than `!!`: the channel's callers treat anything that is not `started` as
-        // "capture did not run", which is the honest outcome, where a crash here would take the
-        // launcher down over a test.
+    fun start(launcher: Launcher): String = synchronized(lock) {
+        // Being the CREATED launcher is not being the launcher on screen. `getLauncherUIProperty`
+        // resolves getCreatedContext(), a WeakReference set at handleCreate and cleared only at
+        // onContextDestroyed -- the same "exists but is not the home screen" hole that produced the
+        // pixel7Api36 false green in ledger row 62.
+        if (!launcher.hasBeenResumed()) return "not-resumed"
         val view = launcher.window?.decorView?.rootView ?: return "no-window"
+
+        val current = closeable
+        if (current != null) {
+            if (root === view) return "already-running"
+            // Different root: the activity was recreated under us. The old session's draw listener
+            // is on a dead tree and its frames are from before the recreate.
+            Log.i(TAG, "root changed under a running capture; restarting")
+            release()
+        }
+
+        // A previous run's file outlives a failed export, and every non-writing return path
+        // (`not-running`, `empty`, `error:`) leaves it there with a plausible mtime. That is the
+        // `uiautomator dump` trap -- stale file read as fresh -- with a new filename.
+        deleteExport(launcher.applicationContext)
+
         return try {
-            val vc = SimpleViewCapture("ares-vc")
-            closeable = vc.startCapture(view, ".AresLauncher")
-            capture = vc
+            closeable = capture.startCapture(view, ".AresLauncher")
             root = view
             appContext = launcher.applicationContext
-            recording = true
             "started"
         } catch (t: Throwable) {
             Log.w(TAG, "startCapture failed", t)
-            capture = null
             closeable = null
             root = null
             appContext = null
-            recording = false
             "error:" + t.javaClass.simpleName
         }
     }
 
     /**
-     * Stop recording, keeping the captured frames readable by [export].
+     * Write the captured frames to [EXPORT_NAME] and return `<abs path>|frames=<n>|dir=<ext|int>`,
+     * or a `not-running` / `empty` / `error:` marker.
      *
-     * Deliberately `stopCapture` and not `closeable.close()` — see the class comment. Safe to call
-     * when not recording.
-     */
-    fun stop(): String {
-        val vc = capture ?: return "not-running"
-        val view = root ?: return "not-running"
-        if (!recording) return "already-stopped"
-        return try {
-            vc.stopCapture(view)
-            "stopped"
-        } catch (t: Throwable) {
-            Log.w(TAG, "stopCapture failed", t)
-            "error:" + t.javaClass.simpleName
-        } finally {
-            recording = false
-        }
-    }
-
-    /**
-     * Write the captured frames to [EXPORT_NAME] in the app's external files dir and return the
-     * absolute path plus a frame count, or a `not-running`/`empty`/`error:` marker.
+     * Reads a RUNNING capture — there is no stop, see the class comment. Call this before [reset].
      *
-     * A FILE rather than the Bundle every other channel here answers with, deliberately: an
-     * `ExportedData` for even a short animation is far past what a Binder transaction will carry,
-     * and the failure mode for an oversize parcel is a `TransactionTooLargeException` at an
-     * unrelated call site later. The external files dir is readable by the out-of-process test
-     * without any `run-as` gymnastics.
+     * A FILE rather than the Bundle every other channel answers with: a two-swipe capture measured
+     * 1,053,751 bytes, far past a Binder transaction, and the failure mode for an oversize parcel is
+     * a `TransactionTooLargeException` at an unrelated call site later.
      *
      * MUST NOT run on the UI thread. `getExportedData` blocks on `.get()` of a future whose first
-     * stage is `CompletableFuture.supplyAsync(..., MAIN_EXECUTOR)` — so calling it from the main
-     * thread deadlocks it against the very thread that has to produce the answer.
+     * stage is `CompletableFuture.supplyAsync(..., MAIN_EXECUTOR)` (`ViewCapture.java:231`) — on
+     * main it waits for the thread that owes it the answer.
+     *
+     * The `dir=` field is not decoration: `getExternalFilesDir` can return null, and the internal
+     * fallback is NOT reachable by the out-of-process test, so a caller has to be able to tell which
+     * branch ran without parsing the path.
      */
     fun export(): String {
-        val vc = capture ?: return "not-running"
         val context = appContext ?: return "not-running"
+        if (closeable == null) return "not-running"
         return try {
-            val data = vc.getExportedData(context)
+            val data = capture.getExportedData(context)
             val frames = data.windowDataList.sumOf { it.frameDataCount }
             if (frames == 0) return "empty"
-            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            val external = context.getExternalFilesDir(null)
+            val dir = external ?: context.filesDir
             val out = File(dir, EXPORT_NAME)
             out.outputStream().use { data.writeTo(it) }
-            Log.i(TAG, "exported " + frames + " frame(s) to " + out.absolutePath)
-            out.absolutePath + "|frames=" + frames
+            val where = if (external != null) "ext" else "int"
+            Log.i(TAG, "exported $frames frame(s) to ${out.absolutePath} ($where)")
+            "${out.absolutePath}|frames=$frames|dir=$where"
         } catch (t: Throwable) {
+            // Includes ConcurrentModificationException if a [reset] lands mid-export:
+            // getWindowData streams mListeners (ViewCapture.java:232) and
+            // Collections.synchronizedList does not synchronise stream(). Reported, not swallowed.
             Log.w(TAG, "export failed", t)
             "error:" + t.javaClass.simpleName
         }
     }
 
+    /** Stop recording and release everything. A later [start] begins from an empty buffer. */
+    fun reset(): String = synchronized(lock) {
+        release()
+        "reset"
+    }
+
     /**
-     * Tear the capture down completely: stop recording, close the handle (which unregisters the
-     * ComponentCallbacks and drops the listener), and forget the frames. A later [start] then begins
-     * from an empty buffer.
+     * Closes the handle WITHOUT a prior `stopCapture`, which is the only ordering that reaches the
+     * `unregisterComponentCallbacks` inside it. See the class comment.
      */
-    fun reset(): String {
-        stop()
+    private fun release() {
+        appContext?.let { deleteExport(it) }
         try {
             closeable?.close()
         } catch (t: Throwable) {
             Log.w(TAG, "close failed", t)
         }
         closeable = null
-        capture = null
         root = null
         appContext = null
-        recording = false
-        return "reset"
+    }
+
+    private fun deleteExport(context: Context) {
+        try {
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            File(dir, EXPORT_NAME).delete()
+        } catch (t: Throwable) {
+            Log.w(TAG, "could not delete stale export", t)
+        }
     }
 }

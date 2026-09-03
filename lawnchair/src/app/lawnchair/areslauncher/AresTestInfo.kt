@@ -338,30 +338,38 @@ object AresTestInfo {
      * Drives [AresViewCapture], the in-memory recording of the launcher's view tree that lets a test
      * assert on how something ANIMATED rather than where it ended up.
      *
-     * `arg` is the sub-command:
-     * - `start` — begin recording. Returns `started`, `already-running`, or `error:<Exception>`.
-     * - `stop` — stop recording, keeping the frames readable. `stopped` / `already-stopped` /
-     *   `not-running`.
-     * - `export` — write the proto and return `<abs path>|frames=<n>`, or `empty` / `not-running`.
-     * - `reset` — tear it down so a later `start` begins from an empty buffer.
-     * - anything else (including absent) — `recording=<bool>` as a status read.
+     * `arg` is the sub-command. There is deliberately **no `stop`** — see [AresViewCapture]: the
+     * only ordering that reaches `unregisterComponentCallbacks` is closing the handle without a
+     * prior `stopCapture`, so the flow is `start` → gesture → `export` → `reset`, and `export`
+     * reads a running capture.
+     *
+     * - `start` — `started` / `already-running` / `not-resumed` / `no-window` / `error:<Exception>`.
+     * - `export` — `<abs path>|frames=<n>|dir=<ext|int>`, or `empty` / `not-running` / `error:`.
+     * - `reset` — `reset`. Releases everything; a later `start` begins from an empty buffer.
+     * - `status` (or absent) — `recording=<bool>`.
+     * - anything else — `unknown-subcommand:<arg>`, never a plausible-looking status. A typo is a
+     *   check that could not run, and must be louder than one that failed, not quieter.
      *
      * ## Why the sub-commands are NOT uniformly routed through `getLauncherUIProperty`
      *
      * They genuinely need different threads, and getting it wrong deadlocks rather than fails:
      *
-     * `start` attaches an `OnDrawListener` to the decor view, which must happen on the UI thread —
-     * and it needs a live `Launcher`, so `getLauncherUIProperty` is exactly right, `null` when
-     * there is no launcher included.
+     * `start` attaches an `OnDrawListener` to the decor view, which must happen on the UI thread,
+     * and it needs a live `Launcher`. Note what `getLauncherUIProperty` actually resolves —
+     * `ACTIVITY_TRACKER::getCreatedContext`, which is *created*, not *resumed*. `AresViewCapture`
+     * re-checks `hasBeenResumed()` itself; this channel cannot assume the launcher it is handed is
+     * the one on screen.
      *
      * `export` must NOT run on the UI thread. `ViewCapture.getExportedData` blocks on `.get()` of a
-     * future whose first stage is `CompletableFuture.supplyAsync(..., MAIN_EXECUTOR)`; called from
-     * main it waits on the thread that has to produce its answer. It runs on the binder thread,
-     * using the application context [AresViewCapture] kept at `start`.
+     * future whose first stage is `CompletableFuture.supplyAsync(..., MAIN_EXECUTOR)`
+     * (`ViewCapture.java:231`); called from main it waits on the thread that has to produce its
+     * answer. It runs on the binder thread, using the application context kept at `start`.
      *
-     * `stop` and `reset` are `@AnyThread` in the library — `ViewCapture.runOnUiThread` posts to the
-     * view's handler itself — so they also answer on the binder thread and, like the invariants
-     * channel, work even when the activity is gone.
+     * `reset` also answers on the binder thread. It does NOT "work when the activity is gone",
+     * which an earlier version of this comment claimed: the library's `detachFromRoot` goes through
+     * `runOnUiThread`, which falls back to `View.post` (`ViewCapture.java:262`), and a detached
+     * view's post queues into `HandlerActionQueue` to run on the next attach — never, for a
+     * destroyed activity. It answers; the detach may not have happened yet.
      */
     const val REQUEST_VIEW_CAPTURE = "ares-view-capture"
 
@@ -502,12 +510,14 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> AresViewCapture.start(launcher) },
         )
-        // Binder thread. `export` on main would deadlock against MAIN_EXECUTOR; `stop`/`reset` are
-        // @AnyThread and are useful precisely when the activity is already gone.
-        "stop" -> respond(AresViewCapture.stop())
+        // Binder thread. `export` on main would deadlock against MAIN_EXECUTOR.
         "export" -> respond(AresViewCapture.export())
         "reset" -> respond(AresViewCapture.reset())
-        else -> respond("recording=${AresViewCapture.isRecording}")
+        null, "", "status" -> respond("recording=${AresViewCapture.isRecording}")
+        // NOT a status read. A misspelt sub-command that answers `recording=false` is a check that
+        // silently did not run, and this file's own `handle` already models the right behaviour by
+        // returning null for an unknown METHOD.
+        else -> respond("unknown-subcommand:$arg")
     }
 
     /** A plain answer with no `Launcher` resolution, for the channels that do not need one. */
