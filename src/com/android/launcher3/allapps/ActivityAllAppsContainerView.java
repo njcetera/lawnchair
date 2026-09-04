@@ -82,7 +82,9 @@ import com.android.launcher3.Flags;
 import com.android.launcher3.Insettable;
 import com.android.launcher3.InsettableFrameLayout;
 import com.android.launcher3.R;
+import com.android.launcher3.Launcher;
 import com.android.launcher3.Utilities;
+import com.android.launcher3.Workspace;
 import com.android.launcher3.allapps.BaseAllAppsAdapter.AdapterItem;
 import com.android.launcher3.allapps.search.AllAppsSearchUiDelegate;
 import com.android.launcher3.allapps.search.DefaultSearchAdapterProvider;
@@ -886,17 +888,54 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
      * @param scrollToTop preserved from setupHeader; every current caller passes true.
      * @param why tag for the log, so a recurrence names the path that set the value.
      */
-    private void aresApplyTopPadding(int stockPadding, boolean scrollToTop, String why) {
+    /**
+     * The pane's/sheet's top padding, derived in ONE place so the applied value and
+     * {@link #aresWantedTopPadding()} can never disagree.
+     *
+     * <p>THE FOLDED SHEET STARTS WHERE HOME STARTS. Owner 2026-09-04, cover display: "the app list
+     * looks slightly higher than the home page items." Measured: home's first item at y=448, the app
+     * list's first element at y=429.
+     *
+     * <p>That 19px is NOT an icon-inset correction -- an earlier note claimed it was, and the
+     * arithmetic disproves it. It is the two surfaces reaching the top of the window by different
+     * routes: home pads itself {@code homeListTopPaddingPx 261 + overscanTop 187 = 448}, where the
+     * overscan is however far the home list sits down the window, while the sheet pads itself
+     * {@code dimen+ergo 268 + aresRelocatedTopInset 161 = 429}. Two independent derivations of the
+     * same intent that do not agree, so no constant reconciles them for long.
+     *
+     * <p>So take home's number directly. It tracks the overscan, the §11c value and the density with
+     * nothing to keep in step. Scoped hard to the LAUNCHER's own folded sheet: the panel keeps its
+     * own derivation, and the Taskbar and secondary-display hosts share this class but are not a
+     * {@link Launcher}, so neither moves.
+     *
+     * <p>Home's overscan lands during LAYOUT, after {@code setupHeader} has run, so this can be asked
+     * too early and legitimately return the fallback. {@code AresHomeListView} re-triggers the
+     * resync at the moment the overscan changes; see {@link #aresScheduleTopPaddingResync}.
+     */
+    private int aresComputeTopPadding(int stockPadding) {
+        if (!isAresWorkspacePanel() && mActivityContext instanceof Launcher) {
+            Workspace<?> workspace = ((Launcher) mActivityContext).getWorkspace();
+            app.lawnchair.areslauncher.AresHomeListView homeList =
+                    workspace == null ? null : workspace.getAresHomeList();
+            if (homeList != null && homeList.getPaddingTop() > 0) {
+                return homeList.getPaddingTop();
+            }
+        }
         // AresLauncher §11c: the stock value is room reserved under a search bar we do not draw,
         // and it put the app list's first row 88px below where the home grid's first row starts.
         // Scoped to our own pane; the Taskbar's all-apps sheet and the secondary-display host share
         // this class, still show a search bar, and keep the stock padding.
-        int padding = AresAllApps.appListTopPaddingPx(
+        return AresAllApps.appListTopPaddingPx(
                 mActivityContext, isAresWorkspacePanel(), stockPadding)
-                // Edge-to-edge: fold the relocated top inset (removed from this container's padding in
-                // setInsets) into the recycler's own top padding, so the resting first row stays put
-                // while the recycler fills the full window and content flows behind the status bar.
+                // Edge-to-edge: fold the relocated top inset (removed from this container's padding
+                // in setInsets) into the recycler's own top padding, so the resting first row stays
+                // put while the recycler fills the full window and content flows behind the status
+                // bar.
                 + aresRelocatedTopInset();
+    }
+
+    private void aresApplyTopPadding(int stockPadding, boolean scrollToTop, String why) {
+        int padding = aresComputeTopPadding(stockPadding);
         if (AresAllApps.isAresAppListPane(mActivityContext)) {
             DeviceProfile dp = mActivityContext.getDeviceProfile();
             int was = mAH.get(AdapterHolder.MAIN).mPadding.top;
@@ -996,7 +1035,11 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         int want = aresWantedTopPadding();
         // Mid-fold this reads 0 against a settled 67, and applying it is precisely how attempt 1
         // regressed. Reject the frame and come back; do not latch it.
-        boolean settled = dp.workspacePadding.top > 0 && getWindowToken() != null;
+        // The mid-fold guard applies to the PANEL only. Folded, `workspacePadding.top` is legitimately
+        // 0 -- requiring it there would decline every retry forever and silently disable the sheet's
+        // re-derive, which is the failure mode the decline log exists to make visible.
+        boolean panel = isAresWorkspacePanel();
+        boolean settled = (!panel || dp.workspacePadding.top > 0) && getWindowToken() != null;
         if (!settled || have == want) {
             android.util.Log.i("AresPaneAlign", "resync[" + mAresPadResyncWhy + "] DECLINED "
                     + (settled ? "already in sync" : "profile not settled")
@@ -1019,8 +1062,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     public int aresWantedTopPadding() {
         boolean hideBar = isAppDrawerSearchBarHidden();
         int stockPadding = (hideBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
-        return AresAllApps.appListTopPaddingPx(mActivityContext, isAresWorkspacePanel(), stockPadding)
-                + aresRelocatedTopInset();
+        return aresComputeTopPadding(stockPadding);
     }
 
     /**

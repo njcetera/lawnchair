@@ -71,6 +71,11 @@ object AresAllApps {
             val dp = launcher.deviceProfile
             return dp.insets.top + dp.workspacePadding.top + homeListTopPaddingPx(launcher)
         }
+        // NOTE (2026-09-04): the folded-sheet total is NOT finished here. The launcher's own folded
+        // app list is re-derived from the home list's live padding so the two start at the same y --
+        // see ActivityAllAppsContainerView.aresComputeTopPadding(), which is where the caller's
+        // relocated top inset is also in scope. This branch remains the value every other sheet
+        // consumer gets, and the fallback before home has laid out.
         return launcher.resources.getDimensionPixelSize(dimen) + ergoTopPaddingPx(launcher)
     }
 

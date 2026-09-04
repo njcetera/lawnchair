@@ -844,7 +844,13 @@ object AresTestInfo {
         val homeTop = topOnScreen(home)
         val homePad = home?.paddingTop ?: -1
         val homeChild = topOnScreen(topmostChild(home))
-        val pane = launcher.workspace?.aresAppListPane
+        // FOLDED (cover display) there is no pane: the app list is the ordinary ALL_APPS sheet, so
+        // `aresAppListPane` is null and every pane field below reads -1. That made this channel
+        // silently unable to answer the owner's 2026-09-04 report that the app list sits slightly
+        // high on the cover display -- it returned a `delta` computed from -1, which is a number and
+        // therefore looks like an answer. Fall back to the sheet and SAY which surface was measured.
+        val pane = launcher.workspace?.aresAppListPane ?: launcher.appsView
+        val src = if (launcher.workspace?.aresAppListPane != null) "panel" else "sheet"
         val paneTop = topOnScreen(pane)
         val rv = pane?.activeRecyclerView
         val rvPad = rv?.paddingTop ?: -1
@@ -879,11 +885,79 @@ object AresTestInfo {
         val dp = launcher.deviceProfile
         val homeListPad = AresAllApps.homeListTopPaddingPx(launcher)
         val recon = dp.insets.top + dp.workspacePadding.top + homeListPad
-        return "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
+        // State and workspace scale, because on the SHEET surface they are a confound rather than a
+        // detail: opening the folded app list puts the launcher in ALL_APPS, which scales and fades
+        // the workspace behind it. `homeChild` is then the screen Y of a SCALED home row, and
+        // comparing it against the sheet's first row would measure the state transition, not the
+        // padding. Read the home half in NORMAL (wsScale=1.0) and the sheet half in ALL_APPS.
+        val wsScale = launcher.workspace?.scaleX ?: -1f
+        val state = launcher.stateManager?.state?.javaClass?.simpleName ?: "?"
+
+        // THE ICON COMPARISON, which is the one the owner's eye is actually making.
+        //
+        // Comparing view tops compares the wrong things. Measured on the cover display 2026-09-04:
+        // the app list's topmost child is an EMPTY TextView header (`headerH=20`) at y=429 while the
+        // first real app row sits at 532, so `paneChild - homeChild` reported the app list 19px HIGH
+        // when the row itself was 84px LOW. Both numbers are about containers, and neither is what
+        // is seen -- a home tile insets its icon from its own top by one amount and an app row by
+        // another (AresAllApps.homeListTopPaddingPx is built around exactly that ~18px difference).
+        //
+        // So find the first actual icon on each surface and compare THOSE, by the same rule on both
+        // sides. Launcher3 draws a BubbleTextView's icon at its paddingTop, so view top + paddingTop
+        // is where the glyph starts.
+        fun firstIcon(v: View?): View? = when {
+            v == null -> null
+            v is com.android.launcher3.BubbleTextView -> v
+            v is ViewGroup -> (0 until v.childCount)
+                .asSequence()
+                .mapNotNull { firstIcon(v.getChildAt(it)) }
+                .firstOrNull()
+            else -> null
+        }
+        /** The topmost child that actually contains an icon -- skips headers, dividers, spacers. */
+        fun topmostIconBearer(parent: ViewGroup?): View? =
+            (0 until (parent?.childCount ?: 0))
+                .mapNotNull { parent?.getChildAt(it) }
+                .filter { it.visibility == View.VISIBLE && firstIcon(it) != null }
+                .minByOrNull { topOnScreen(it) }
+
+        val appIconView = firstIcon(topmostIconBearer(rv))
+        val homeIconView = firstIcon(topmostIconBearer(home))
+        val appIconTop = appIconView?.let { topOnScreen(it) + it.paddingTop } ?: -1
+        val homeIconTop = homeIconView?.let { topOnScreen(it) + it.paddingTop } ?: -1
+        val iconDelta = if (appIconTop >= 0 && homeIconTop >= 0) appIconTop - homeIconTop else 99999
+
+        // ...and the STRUCTURE behind those two numbers, because the numbers alone are an inference.
+        // `view top + paddingTop` assumes the glyph starts at the padding edge; on the cover display
+        // that rule made the app-list icon read 84px LOW while the owner sees it HIGH. A rule whose
+        // answer has the opposite sign to the thing being explained is not a measurement, so dump
+        // what the rows actually contain -- class, screen Y, height, own top padding, and for a
+        // TextView the compound-drawable band, which is where a BubbleTextView's icon really lives.
+        fun describe(v: View?, depth: Int): List<String> {
+            if (v == null || depth > 3) return emptyList()
+            val tv = v as? android.widget.TextView
+            val compound = tv?.compoundDrawables?.get(1)
+            val band = compound?.let {
+                "+dr(h=${it.intrinsicHeight},cpt=${tv.compoundPaddingTop},dp=${tv.compoundDrawablePadding})"
+            } ?: ""
+            val self = "${v.javaClass.simpleName}@${topOnScreen(v)}h${v.height}pt${v.paddingTop}$band"
+            val kids = if (v is ViewGroup) {
+                (0 until v.childCount).flatMap { describe(v.getChildAt(it), depth + 1) }
+            } else {
+                emptyList()
+            }
+            return listOf(self) + kids
+        }
+        val homeTree = describe(topmostIconBearer(home), 0).joinToString(">")
+        val appTree = describe(topmostIconBearer(rv), 0).joinToString(">")
+        return "src=$src state=$state wsScale=$wsScale | " +
+            "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
             "paneTop=$paneTop rvPad=$rvPad paneChild=$paneChild | " +
             "insetsTop=${dp.insets.top} wsPadTop=${dp.workspacePadding.top} homeListPad=$homeListPad recon=$recon | " +
             "rvTop=$rvTop kidInRv=$kidInRv kidClass=$kidClass kidPadTop=$kidPadTop kidText=$kidText headerH=$headerH kids=[$kids] " +
             "homeKidClass=$homeKidClass homeKidPadTop=$homeKidPadTop | " +
+            "appIconTop=$appIconTop homeIconTop=$homeIconTop iconDelta=$iconDelta | " +
+            "homeTree=$homeTree | appTree=$appTree | " +
             "delta(paneChild-homeChild)=${paneChild - homeChild}"
     }
 

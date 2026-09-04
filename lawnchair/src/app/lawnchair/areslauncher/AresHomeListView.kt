@@ -3360,6 +3360,23 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 0,
                 AresAllApps.ergoBottomPaddingPx(context) + ovBottom,
             )
+            // The FOLDED app-list sheet derives its top padding from this exact value, so that it
+            // starts where home starts (AresAllApps.appListTopPaddingPx; owner 2026-09-04, cover
+            // display). The overscan lands during LAYOUT -- after the sheet's setupHeader has already
+            // run and read a pre-overscan number -- so the sheet has to be told to re-derive. Doing
+            // it here, from the one place the value actually changes, means no polling and no
+            // "has it settled yet" heuristic: by construction home's padding is current right now.
+            //
+            // Use the constructor's `launcher`, NOT `context as? Launcher`: a View's context here is
+            // a themed wrapper, so that cast is null and the call silently does nothing. Measured
+            // 2026-09-04 -- it produced no resync line at all, which read as "the trigger never
+            // fires" rather than "the trigger fired into nothing".
+            val sheet = launcher.appsView
+            if (sheet != null) {
+                sheet.aresScheduleTopPaddingResync("homeOverscan")
+            } else {
+                Log.i("AresPaneAlign", "resync[homeOverscan] DECLINED: no appsView yet")
+            }
         }
 
         val top = headerTop - ovTop
