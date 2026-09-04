@@ -35,6 +35,7 @@ import com.android.launcher3.dragndrop.DragController;
 import com.android.launcher3.dragndrop.DragController.DragListener;
 import com.android.launcher3.dragndrop.DragOptions;
 
+import app.lawnchair.areslauncher.AresDragChrome;
 import app.lawnchair.areslauncher.AresFolderDrag;
 
 /*
@@ -331,12 +332,13 @@ public class DropTargetBar extends FrameLayout
      */
     @Override
     public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
-        // AresLauncher: a drag out of one of our open folders keeps this bar down. Its Remove and
-        // App-info targets are not part of the §4/§18 interaction model -- removal is the x badge
-        // -- and raising it behind a still-open folder is half of what the user saw as "it pops the
-        // screen out". See AresFolderDrag#isFolderDrag; Workspace.onDragStart uses the same gate
+        // AresLauncher: a folder- or app-list-sourced drag keeps this bar down. Removal from the
+        // home screen is the tile's x badge and uninstall is already in the long-press popup
+        // (LawnchairShortcut.UNINSTALL), so the bar is a second route to functions that have a
+        // first one. Raising it behind a still-open folder was also half of what the owner saw as
+        // "it pops the screen out". See AresDragChrome; Workspace.onDragStart uses the same gate
         // for the SPRING_LOADED transition that is the other half.
-        if (AresFolderDrag.isFolderDrag(mLauncher, dragObject.dragSource)) {
+        if (AresDragChrome.suppressesStockChrome(mLauncher, dragObject.dragSource)) {
             return;
         }
         animateToVisibility(true);

@@ -147,6 +147,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import app.lawnchair.areslauncher.AresPanelAllAppsContainerView;
+import app.lawnchair.areslauncher.AresDragChrome;
 import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.areslauncher.AresFolderDrop;
 import app.lawnchair.areslauncher.AresHomeDrop;
@@ -750,11 +751,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // action for move/add to homescreen.
         // When a accessible drag is started by the folder, we only allow rearranging withing the
         // folder.
-        // AresLauncher: a drag that came out of one of our open folders must not bring stock's
+        // AresLauncher: a folder-sourced or app-list-sourced drag must not bring stock's
         // workspace-level drag presentation with it -- no SPRING_LOADED zoom-out, no drop-target
-        // bar, and no extra empty page. See AresFolderDrag#isFolderDrag for the measurement and
-        // the reasoning; the same predicate gates DropTargetBar.
-        boolean aresFolderDrag = AresFolderDrag.isFolderDrag(mLauncher, dragObject.dragSource);
+        // bar, and no extra empty page. All three describe a paged CellLayout grid that Strategy D
+        // does not have. See AresDragChrome for which drags qualify and why each one does; the
+        // same predicate gates DropTargetBar and ButtonDropTarget.
+        boolean aresFolderDrag =
+                AresDragChrome.suppressesStockChrome(mLauncher, dragObject.dragSource);
 
         boolean addNewPage = !(options.isAccessibleDrag && dragObject.dragSource != this)
                 && !aresFolderDrag;

@@ -48,6 +48,7 @@ import com.android.launcher3.views.ActivityContext;
 
 import com.google.android.msdl.data.model.MSDLToken;
 
+import app.lawnchair.areslauncher.AresDragChrome;
 import app.lawnchair.areslauncher.AresFolderDrag;
 import app.lawnchair.theme.color.tokens.ColorTokens;
 import app.lawnchair.theme.drawable.DrawableTokens;
@@ -235,7 +236,7 @@ public abstract class ButtonDropTarget extends TextView
         // An invisible control must not accept a drop. Deactivating here rather than in
         // DropTargetBar because mActive lives here, so it cannot depend on which DragListener the
         // controller happens to notify first.
-        if (AresFolderDrag.isFolderDrag(
+        if (AresDragChrome.suppressesStockChrome(
                 mActivityContext instanceof Launcher ? (Launcher) mActivityContext : null,
                 dragObject.dragSource)) {
             mActive = false;
