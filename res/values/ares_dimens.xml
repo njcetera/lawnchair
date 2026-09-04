@@ -147,11 +147,11 @@
     <dimen name="ares_search_highlight_inset">10dp</dimen>
     <dimen name="ares_search_highlight_stroke">2dp</dimen>
 
-    <!-- §6 widget resize affordance, shown on resizable widgets in edit mode only.
-         28dp is below the 44dp hit-target minimum on purpose: the touch target is expanded to
-         ares_widget_resize_touch_size by AresWidgetResize, so the glyph can stay small enough not
-         to cover the widget it sits on while remaining comfortably tappable. -->
-    <dimen name="ares_widget_resize_chevron_size">28dp</dimen>
+    <!-- §6 widget resize affordance, shown on resizable widgets in edit mode only. The hook is
+         painted FIT_END within this target rather than filling it, so the touch area clears the
+         44dp minimum while the mark itself stays small enough not to cover the widget whose corner
+         it traces. (A companion ares_widget_resize_chevron_size went with the chevron treatment
+         the hook replaced.) -->
     <dimen name="ares_widget_resize_touch_size">48dp</dimen>
     <!-- Inset from the widget's bottom-end corner. -->
     <dimen name="ares_widget_resize_margin">4dp</dimen>
