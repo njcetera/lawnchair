@@ -39,6 +39,7 @@ import com.android.launcher3.AppFilter;
 import com.android.launcher3.Flags;
 import com.android.launcher3.compat.AlphabeticIndexCompat;
 import com.android.launcher3.dagger.LauncherAppSingleton;
+import com.android.launcher3.icons.BitmapInfo;
 import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.model.data.AppInfo;
 import com.android.launcher3.model.data.AppsListData;
@@ -324,10 +325,26 @@ public class AllAppsList {
             if (info.user.equals(user) && packages.contains(info.componentName.getPackageName())) {
                 CharSequence oldTitle = info.title;
                 String oldSectionName = info.sectionName;
+                // ARES (ledger row 61): capture the ICON too, not just the label. See below.
+                BitmapInfo oldBitmap = info.bitmap;
                 mIconCache.updateTitleAndIcon(info);
                 info.sectionName = mIndex.computeSectionName(info.title == null ? "" : info.title);
-                if (!TextUtils.equals(oldTitle, info.title) 
-                        || !TextUtils.equals(oldSectionName, info.sectionName)) {
+                // AresLauncher, measured 2026-09-03: upstream raised mDataChanged only when the TITLE
+                // or the SECTION NAME moved. `updateTitleAndIcon` refreshes the ICON as well --
+                // `applyCacheEntry` assigns a fresh BitmapInfo -- and a THEME change moves exactly
+                // that and nothing else. So the flag stayed false, `bindApplicationsIfNeeded()`
+                // no-opped on its `getAndResetChangeFlag()`, and the app list was never re-bound:
+                // a light->dark switch left it rendering the previous theme's icons beside an
+                // already-dark home grid, indefinitely (owner report; 2 minutes with no interaction
+                // and no change, while the home grid flipped at t=4s). Scrolling it or restarting
+                // the launcher was the only cure, because both force a fresh onBindViewHolder.
+                //
+                // Identity comparison, not equals(): applyCacheEntry hands over the cache entry's
+                // BitmapInfo, so a regenerated icon is a different object. Comparing pixels here
+                // would cost a full bitmap compare per app on every cache update.
+                if (!TextUtils.equals(oldTitle, info.title)
+                        || !TextUtils.equals(oldSectionName, info.sectionName)
+                        || info.bitmap != oldBitmap) {
                     mDataChanged = true;
                 }
             }
