@@ -454,6 +454,24 @@ object AresTestInfo {
      * asserts alignment therefore passes without ever exercising the seam. Forcing the state is what
      * lets the invariant be made to FAIL, and it is also the control any future fix has to beat.
      */
+    /**
+     * Ledger row 89: how many desktop rows exist versus how many the home list actually BOUND.
+     *
+     * `bound=<n>|rows=<n>|gap=<n>`, where `rows` counts `container=CONTAINER_DESKTOP` straight from
+     * the Favorites provider and `bound` is the home adapter's item count. A healthy launcher has
+     * `gap=0`; the owner's 2026-09-04 report was `bound=8` against `rows=16`, with the weather and
+     * calendar widgets simply absent and no way to tell from inside the app that anything was wrong.
+     *
+     * The DB is read rather than the model deliberately: the model had loaded those items (their
+     * widget hosts were created), so a model-vs-list comparison would have shown nothing. The
+     * question is whether what is STORED reached the screen.
+     *
+     * `--arg drop` removes one bound item WITHOUT touching its database row, manufacturing exactly
+     * that gap. It is the negative control -- an invariant on `gap == 0` is not coverage until it
+     * has been made to fail, and this defect does not reproduce on demand.
+     */
+    const val REQUEST_HOME_BIND = "ares-home-bind"
+
     const val REQUEST_PANE_PAD = "ares-pane-pad"
 
     /**
@@ -645,6 +663,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_HOME_BIND -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> homeBind(launcher, arg) },
+        )
         REQUEST_PANE_PAD -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> panePad(launcher, arg) },
@@ -733,6 +755,54 @@ object AresTestInfo {
      * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
      */
     /** See [REQUEST_PANE_PAD]. */
+    /** See [REQUEST_HOME_BIND]. `bound=<n>|rows=<n>|gap=<n>`. */
+    private fun homeBind(launcher: Launcher, arg: String?): String {
+        val list = launcher.workspace?.aresHomeList ?: return "no-list"
+        val adapter = list.aresAdapter
+        if (arg == "drop") {
+            // Drop the LAST bound item and leave its row in the database, which is the shape of the
+            // defect: stored but never bound. Deliberately not a database delete -- that would be a
+            // different bug and the invariant would be right to ignore it.
+            val victim = adapter.snapshot().lastOrNull()
+            if (victim == null) return "nothing-to-drop"
+            adapter.removeItems { it.id == victim.id }
+        }
+        if (arg == "check") {
+            // Run the PRODUCT guard's own comparison against the grid as it stands right now. This
+            // is what makes the guard falsifiable: `--arg drop` then `--arg check` reproduces a
+            // partial bind and drives the real code path, so a violation showing up in
+            // `ares-invariants` is evidence about AresBindGuard rather than about this channel.
+            AresBindGuard.checkAfterBind(
+                com.android.launcher3.LauncherAppState.getInstance(launcher),
+                adapter.snapshot(),
+            )
+        }
+        // Counted the way AresBindGuard counts it, on purpose. An inline-expanded WP folder puts its
+        // children in the adapter, and they are not desktop rows -- using itemCount here would make
+        // the channel and the guard disagree exactly when a folder is open, which is precisely when
+        // someone would be reaching for the channel to explain a guard result.
+        val bound = adapter.snapshot().count { it.container == Favorites.CONTAINER_DESKTOP }
+        // There is no Favorites CONTENT_URI in this Launcher3 version; the table is reached through
+        // ModelDbController. That method is @WorkerThread and this channel answers on the UI thread,
+        // which is a deliberate trade for a DEBUG-ONLY read of ~16 rows: routing it off-thread would
+        // mean answering asynchronously, and the number is worthless unless it is sampled at the
+        // same instant as the adapter count it is being compared against. runCatching because a
+        // query failure must report -1 rather than take the channel (and its caller) down.
+        val rows = runCatching {
+            com.android.launcher3.LauncherAppState.getInstance(launcher)
+                .model
+                .modelDbController
+                .query(
+                    arrayOf(Favorites._ID),
+                    "${Favorites.CONTAINER}=${Favorites.CONTAINER_DESKTOP}",
+                    null,
+                    null,
+                )
+                .use { it.count }
+        }.getOrDefault(-1)
+        return "bound=$bound|rows=$rows|gap=${rows - bound}"
+    }
+
     private fun panePad(launcher: Launcher, arg: String?): String {
         val pane = launcher.workspace?.aresAppListPane ?: return "no-pane"
         when (arg) {

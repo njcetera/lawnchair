@@ -33,6 +33,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
+import app.lawnchair.areslauncher.AresBindGuard
 import app.lawnchair.areslauncher.AresDragWatch
 import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
@@ -530,6 +531,12 @@ class LawnchairLauncher : QuickstepLauncher() {
         // is applied, so calling playFrozen first told the transition to start resolving and only then
         // rebuilt the tiles underneath it.
         workspace?.aresHomeList?.aresAdapter?.finishSoftRebind()
+        // Ledger row 89: the grid is final NOW, so this is the one instant at which "did every
+        // desktop row make it onto the screen?" is a fair question. Asked here rather than in a
+        // test because the defect appeared during the owner's ordinary use and no test provoked it.
+        workspace?.aresHomeList?.aresAdapter?.let {
+            AresBindGuard.checkAfterBind(LauncherAppState.getInstance(this), it.snapshot())
+        }
         // Bind-complete = the reloaded icons are on the grid. If an icon-pack pick froze the old grid
         // (AresEditCarousel), wipe to the finished new one now; a no-op otherwise.
         AresIconTransition.playFrozen(this, workspace?.aresHomeList)

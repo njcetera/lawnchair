@@ -1328,6 +1328,52 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * AresLauncher (ledger row 92): re-attach the {@link ItemInfo} that the widget host dropped.
+     *
+     * <p>{@code Launcher.bindInflatedItems} hands a widget through
+     * {@code LauncherWidgetHolder.attachViewToHostAndGetAttachedView}, which may {@code
+     * recycleExistingView} and return a <em>different</em> view instance than the one the inflater
+     * tagged. That replacement carries no tag. Stock survives it because its {@code addInScreen}
+     * only needs the tag for a view id; Strategy D does not -- {@link #addInScreen} reads the tag to
+     * decide WHICH ITEM to hand the home adapter, so a null tag is not a degraded add, it is a
+     * silent DROP.
+     *
+     * <p>Measured on the owner's Pixel 2026-09-04: eight
+     * {@code "Attempted to add null item to Ares home list"} lines per launcher process, and exactly
+     * eight desktop rows -- every one of them {@code itemType=4} -- present in the database and
+     * absent from the grid. Identical in two consecutive processes, so this is deterministic and
+     * not a race. The owner saw it as *"most of my widgets are missing"* and then as *"home state is
+     * not saving correctly"*: the state was saving perfectly, it was never being read back.
+     *
+     * <p>The repair is done HERE rather than inside {@link #addInScreen} because this is the only
+     * bind-path entry that still HAS the authoritative {@code info}; by the time {@code addInScreen}
+     * runs, the tag is the sole remaining source and it is already gone. Setting the tag rather than
+     * routing around it also fixes the non-desktop containers, which had the same latent hole.
+     */
+    @Override
+    public void addInScreenFromBind(View child, ItemInfo info) {
+        if (child != null && info != null && child.getTag() == null) {
+            if (!ARES_BIND_TAG_REPAIR) {
+                // Control arm for the one-build A/B. Without this branch a guard that has quietly
+                // stopped engaging is indistinguishable in a log from one whose condition never
+                // arose -- and this guard's failure mode is invisible on the screen.
+                Log.i(TAG, "AresBindTag: DECLINED (debug.ares.bind_tag_repair=0) for " + info);
+            } else {
+                Log.i(TAG, "AresBindTag: restoring dropped tag for " + info);
+                child.setTag(info);
+            }
+        }
+        WorkspaceLayoutManager.super.addInScreenFromBind(child, info);
+    }
+
+    /**
+     * Control switch for {@link #addInScreenFromBind}'s tag repair. Read once: the arms must not be
+     * able to change under a running process, or an A/B measures a mixture of both.
+     */
+    private static final boolean ARES_BIND_TAG_REPAIR =
+            !"0".equals(android.os.SystemProperties.get("debug.ares.bind_tag_repair", "1"));
+
+    /**
      * AresLauncher Strategy D redirect point. CONTAINER_DESKTOP items (real home-screen
      * apps/shortcuts/folders/widgets) are appended to {@link #mAresHomeList} instead of
      * being placed into a CellLayout grid cell -- CellLayout's grid math
@@ -1356,7 +1402,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (container == CONTAINER_DESKTOP) {
             ItemInfo info = (ItemInfo) child.getTag();
             if (info == null) {
-                Log.e(TAG, "Attempted to add null item to Ares home list");
+                // Name the child. A bare "null item" line cost the owner every widget on their home
+                // screen for an unknown number of days (ledger row 89/92): the message was in the
+                // log the whole time, eight times per process, and said nothing about WHAT was
+                // dropped, so it read as noise rather than as "eight widgets just vanished".
+                Log.e(TAG, "Attempted to add null item to Ares home list, child="
+                        + child.getClass().getSimpleName() + " screenId=" + screenId
+                        + " at (" + x + "," + y + ")");
                 return;
             }
             // The already-inflated child is discarded: the adapter is data-backed and re-inflates
