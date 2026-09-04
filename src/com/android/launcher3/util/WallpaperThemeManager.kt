@@ -74,6 +74,17 @@ class WallpaperThemeManager(private val activity: Activity) :
     }
 
     fun recreateToUpdateTheme() {
+        // Ledger row 77: this is the path a SYSTEM night switch takes, and it is what rebuilds the
+        // launcher -- not the missing `uiMode` in configChanges, which was measured not to matter.
+        if (app.lawnchair.areslauncher.AresThemeReapply.interceptRecreate(
+                "WallpaperThemeManager",
+                activity,
+            )
+        ) {
+            themeRes = Themes.getActivityThemeRes(activity)
+            activity.setTheme(themeRes)
+            return
+        }
         recreateToUpdateTheme = true
         activity.recreate()
     }
