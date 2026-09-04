@@ -152,6 +152,10 @@
          44dp minimum while the mark itself stays small enough not to cover the widget whose corner
          it traces. (A companion ares_widget_resize_chevron_size went with the chevron treatment
          the hook replaced.) -->
+    <!-- Gap between popup-menu segments. Small on purpose: enough to read the rows as
+         separate containers, not so much that the menu grows a scroll. -->
+    <dimen name="ares_popup_segment_gap">4dp</dimen>
+
     <dimen name="ares_widget_resize_touch_size">48dp</dimen>
     <!-- Inset from the widget's bottom-end corner. -->
     <dimen name="ares_widget_resize_margin">4dp</dimen>

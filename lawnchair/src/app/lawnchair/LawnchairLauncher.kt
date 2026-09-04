@@ -334,17 +334,22 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
+    // "Pin to home" is appended LAST, after every stock and Lawnchair entry (owner 2026-09-04:
+    // "make it the last item in the list"). The popup renders these in stream order, so position
+    // here IS the position on screen.
     override fun getSupportedShortcuts(container: Int): Stream<SystemShortcut.Factory<*>> = Stream.concat(
-        super.getSupportedShortcuts(container),
         Stream.concat(
-            Stream.of(
-                app.lawnchair.areslauncher.AresAddToHome.SHORTCUT,
-                LawnchairShortcut.UNINSTALL,
-                LawnchairShortcut.CUSTOMIZE,
-                LawnchairShortcut.OPEN_IN_STORE,
+            super.getSupportedShortcuts(container),
+            Stream.concat(
+                Stream.of(
+                    LawnchairShortcut.UNINSTALL,
+                    LawnchairShortcut.CUSTOMIZE,
+                    LawnchairShortcut.OPEN_IN_STORE,
+                ),
+                if (LawnchairApp.isRecentsEnabled) Stream.of(LawnchairShortcut.PAUSE_APPS) else Stream.empty(),
             ),
-            if (LawnchairApp.isRecentsEnabled) Stream.of(LawnchairShortcut.PAUSE_APPS) else Stream.empty(),
         ),
+        Stream.of(app.lawnchair.areslauncher.AresAddToHome.SHORTCUT),
     )
 
     fun updateTheme() {

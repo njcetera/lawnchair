@@ -263,24 +263,52 @@ public abstract class ArrowPopup<T extends Context & ActivityContext>
                 }
 
                 if (view instanceof ViewGroup && isShortcutContainer(view)) {
+                    // Segmented style (owner 2026-09-04): the container paints its own
+                    // popup_background slab behind the rows, in the SAME colour the rows use. With
+                    // per-row rounding alone the gaps are filled by that slab and the menu still
+                    // reads as one fused block -- which is exactly what the first attempt looked
+                    // like on screen. Drop the slab and let each row carry the rounding.
+                    //
+                    // Ordering matters: setChildColor above has already read this view's background
+                    // to seed the arrow colour, so clearing it here costs nothing.
+                    view.setBackground(null);
                     assignMarginsAndBackgrounds((ViewGroup) view, backgroundColor);
                     continue;
                 }
 
                 if (isShortcutOrWrapper(view)) {
-                    if (totalVisibleShortcuts == 1) {
-                        // Lawnchair-TODO-High: view.setBackgroundResource is use instead
-                        view.setBackground(DrawableTokens.SingleItemPrimary.resolve(getContext()));
-                    } else if (totalVisibleShortcuts > 1) {
-                        if (numVisibleShortcut == 0) {
-                            view.setBackground(mRoundedTop.getConstantState().newDrawable());
-                        } else if (numVisibleShortcut == (totalVisibleShortcuts - 1)) {
-                            view.setBackground(mRoundedBottom.getConstantState().newDrawable());
-                        } else {
-                            view.setBackground(DrawableTokens.MiddleItemPrimary.resolve(getContext()));
-                        }
-                        numVisibleShortcut++;
+                    // AresLauncher, owner 2026-09-04: "can we update the popup menu to have the
+                    // newer material you style? where each item is kinda segmented".
+                    //
+                    // Stock fuses the items into ONE block: rounded top on the first, rounded bottom
+                    // on the last, SQUARE in between, and no gap. The M3 segmented treatment gives
+                    // every row its own fully-rounded container separated by a small gap, so the
+                    // rows read as discrete targets rather than bands of one slab.
+                    //
+                    // SingleItemPrimary is exactly the fully-rounded background stock already uses
+                    // when there is only one item, so a segment is just "every row treated as if it
+                    // were the only one" -- no new drawable, and it keeps following the theme.
+                    // mRoundedTop/mRoundedBottom/MiddleItemPrimary are consequently unused here now;
+                    // they remain for the widget/taskbar popups that still call the stock path.
+                    view.setBackground(DrawableTokens.SingleItemPrimary.resolve(getContext()));
+                    if (numVisibleShortcut < totalVisibleShortcuts - 1) {
+                        // The gap belongs BETWEEN segments only; a trailing one is dead space.
+                        mlp.bottomMargin = getResources()
+                                .getDimensionPixelSize(R.dimen.ares_popup_segment_gap);
                     }
+                    numVisibleShortcut++;
+                    // COLOUR THE SEGMENT, then skip the transparent pass below.
+                    //
+                    // This is the whole reason the first two attempts looked wrong on screen. Stock
+                    // paints the menu as ONE slab drawn by the container and deliberately clears
+                    // every row: the trailing setChildColor runs with backgroundColor ==
+                    // Color.TRANSPARENT, so a background set on a row here is animated to
+                    // transparent one line later. Attempt 1 (round each row) therefore changed
+                    // nothing visible; attempt 2 (also drop the container slab) left the rows with
+                    // no background at all and the menu floated as bare text on the wallpaper.
+                    // A segment has to carry the colour ITSELF, which means opting out of the wipe.
+                    setChildColor(view, colors != null ? colors[0] : backgroundColor, colorAnimator);
+                    continue;
                 }
 
                 setChildColor(view, backgroundColor, colorAnimator);

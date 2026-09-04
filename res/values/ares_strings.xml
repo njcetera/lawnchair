@@ -29,6 +29,11 @@
     <string name="ares_open_item_menu_generic">More options</string>
 
     <!-- Spoken label for the resize chevron. %1$s is the widget's own name, e.g. "Analog". -->
+    <!-- Owner 2026-09-04: "Pin to home", not the stock "Add to home screen". Its own string
+         because @string/action_add_to_workspace also labels the ACCESSIBILITY action, where the
+         longer, more literal wording is the right one for a screen reader. -->
+    <string name="ares_pin_to_home">Pin to home</string>
+
     <string name="ares_resize_item">Resize <xliff:g id="item_name" example="Analog">%1$s</xliff:g></string>
 
     <!-- §17 app-list search hint. "Search" (not "Search apps"): the field now searches

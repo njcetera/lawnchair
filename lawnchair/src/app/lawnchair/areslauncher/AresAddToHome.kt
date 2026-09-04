@@ -53,7 +53,7 @@ object AresAddToHome {
         originalView: View?,
     ) : SystemShortcut<Launcher>(
         R.drawable.ic_home_screen,
-        R.string.action_add_to_workspace,
+        R.string.ares_pin_to_home,
         launcher,
         itemInfo,
         originalView,
