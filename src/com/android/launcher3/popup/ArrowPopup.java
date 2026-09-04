@@ -290,7 +290,23 @@ public abstract class ArrowPopup<T extends Context & ActivityContext>
                     // were the only one" -- no new drawable, and it keeps following the theme.
                     // mRoundedTop/mRoundedBottom/MiddleItemPrimary are consequently unused here now;
                     // they remain for the widget/taskbar popups that still call the stock path.
-                    view.setBackground(DrawableTokens.SingleItemPrimary.resolve(getContext()));
+                    // ONE LIST, SLICED -- not a stack of separate pills. Owner 2026-09-04, after
+                    // seeing the first cut: "what you have now is like a list of individual pills
+                    // but I do want it a single list just with the spacing between each item."
+                    //
+                    // So keep stock's POSITIONAL radii, which already express exactly that: large
+                    // corners on the outside of the group, popup_smaller_radius at every internal
+                    // cut. Rounding every row equally (the first cut) is what made them read as
+                    // independent pills. The only additions are the gap and the per-row colour.
+                    if (totalVisibleShortcuts == 1) {
+                        view.setBackground(DrawableTokens.SingleItemPrimary.resolve(getContext()));
+                    } else if (numVisibleShortcut == 0) {
+                        view.setBackground(mRoundedTop.getConstantState().newDrawable());
+                    } else if (numVisibleShortcut == (totalVisibleShortcuts - 1)) {
+                        view.setBackground(mRoundedBottom.getConstantState().newDrawable());
+                    } else {
+                        view.setBackground(DrawableTokens.MiddleItemPrimary.resolve(getContext()));
+                    }
                     if (numVisibleShortcut < totalVisibleShortcuts - 1) {
                         // The gap belongs BETWEEN segments only; a trailing one is dead space.
                         mlp.bottomMargin = getResources()
