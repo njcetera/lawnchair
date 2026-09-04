@@ -3,8 +3,6 @@ package app.lawnchair.arestests
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
-import com.android.app.viewcapture.data.ExportedData
-import com.android.launcher3.util.viewcapture_analysis.ViewCaptureAnalyzer
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.After
@@ -124,14 +122,23 @@ class AresSwapGeometryTest {
         Log.i(TAG, "swap-geometry bottom-row: ${dragged.title}@${dragged.position} -> ${target.title}@${target.position}")
 
         val orderBefore = ares.homeOrder()
-        // PER-FRAME, from a ViewCapture -- not per-sample from a channel poll. Ledger row 68a: the
-        // old 40ms sampler actually returned gaps of 44-115ms (3-7 frames at 60fps), so it summed
-        // several frames of legitimate edge auto-scroll into one apparent teleport and failed a
-        // launcher that was behaving. A capture records every onDraw, so consecutive entries really
-        // are consecutive frames and "in one layout pass" becomes a question the instrument can
-        // actually answer.
-        ares.viewCapture("reset")
-        ares.viewCapture("start")
+        // PER DRAWN FRAME, from an in-product recorder -- not a channel poll and not a ViewCapture.
+        //
+        // The poll was tried and aliases: ledger row 68a measured a "40ms" sampler actually returning
+        // 44-115ms gaps (3-7 frames at 60fps), summing several frames of legitimate edge auto-scroll
+        // into one apparent teleport and failing a launcher that was behaving.
+        //
+        // The ViewCapture that replaced it was then standing red for weeks WITHOUT EVER DESCRIBING A
+        // REAL DEFECT, because ViewCapture cannot see a ViewPropertyAnimator translation at all
+        // (ledger row 75): an in-product probe reading the Views' own translationX/Y mid-flight found
+        // tiles at exactly HALF their armed value at t=100ms of a 200ms animation, while the capture
+        // of those same tiles showed 20+ flat frames and then a single-frame 762px jump. Every reflow
+        // therefore read as a teleport. Owner decision 2026-09-03: assert on the number itself.
+        //
+        // AresScrollTrace samples the masonry's own scroll offset on the grid's onDraw, so a frame
+        // the grid skipped is simply absent rather than interpolated, and nothing has to be visible
+        // to an external instrument.
+        ares.scrollTrace("start")
         ares.enterEditModeAndDrag(
             fromIndex = dragged.position,
             toIndex = target.position,
@@ -139,8 +146,9 @@ class AresSwapGeometryTest {
             travelMs = 900,
             hangMs = HANG_MS,
         )
-        val export = ares.viewCapture("export")
-        Log.i(TAG, "swap-geometry bottom-row: export=$export")
+        ares.scrollTrace("stop")
+        val trace = ares.scrollTraceDump()
+        Log.i(TAG, "swap-geometry bottom-row: $trace")
 
         // Precondition: the SWAP actually happened. A drag that armed edit mode but never displaced
         // anything would pass everything below vacuously -- its sibling test asserts
@@ -148,39 +156,90 @@ class AresSwapGeometryTest {
         // is the direct witness.
         assertThat(ares.homeOrder()).isNotEqualTo(orderBefore)
 
-        assumeTrue("export produced no frames: $export", export.contains("|frames="))
-        val path = export.substringBefore("|")
-        val frames = export.substringAfter("|frames=").substringBefore("|").toIntOrNull() ?: 0
-        // A floor, ASSERTED: a capture of three frames describes no drag, and a "nothing jumped"
-        // answer over it is the vacuous green this suite exists to avoid. The drag alone is ~1.6s.
-        assertThat(frames).isAtLeast(MIN_FRAMES)
+        // A floor, ASSERTED: a trace of a handful of frames describes no drag, and a "nothing
+        // jumped" answer over it is the vacuous green this suite exists to avoid. The drag alone is
+        // ~1.6s, so a real recording is ~90+ frames.
+        assertWithMessage("scroll trace recorded almost nothing: $trace")
+            .that(trace.frames).isAtLeast(MIN_FRAMES)
 
-        val bytes = ares.readCapturedProto(path)
-        assumeTrue("capture at $path could not be read across the UID boundary", bytes != null)
-        val data = runCatching { ExportedData.parseFrom(bytes) }.getOrNull()
-        assumeTrue("capture at $path did not parse as ExportedData", data != null)
-
-        // ASSERT THROUGH THE DETECTORS, not a hand-rolled per-node metric. Three attempts at the
-        // latter gave three different answers on the same healthy drag -- translation alone counted
-        // the frame where animateNextRelayout ARMS (translation jumps, top moves the opposite way,
-        // nothing moves on screen); layout+translation then counted legitimate edge auto-scroll,
-        // because this list scrolls by translation so every tile moves together every frame. A
-        // per-node number cannot separate "scrolled" from "teleported" without reconstructing window
-        // coordinates through the tree -- which PositionJumpDetector already does, calibrated, and
-        // which the folder test next door already relies on.
-        val anomalies = ViewCaptureAnalyzer.getAnomalies(data!!)
-        anomalies.forEach { (p, m) -> Log.w(TAG, "ANOMALY $p -> $m") }
-        Log.i(TAG, "swap-geometry bottom-row: ${anomalies.size} anomaly/anomalies over $frames frames")
+        // THE ASSERTION: over how many DRAWN FRAMES was the motion distributed?
+        //
+        // Row 27's defect is `scrollToPosition`, an ABSOLUTE seek: the whole distance lands in a
+        // single frame. A healthy scroll is an interpolated ramp and necessarily draws several. That
+        // is the difference, and it is the ONLY formulation of it that survived measurement.
+        //
+        // Two earlier formulations did not, both calibrated here and both discarded on data:
+        //
+        //  - `maxStep <= 231px`. Five runs on HEALTHY code measured 234/246/267/275/297 and it
+        //    failed every one. The first frame of an ease-out is legitimately large, and it scales
+        //    with how far the grid has to travel, so no pixel constant can be right for two drags.
+        //  - `maxStep / total <= 0.5`. Better, but not robust: healthy runs measured 0.25, 0.26,
+        //    0.27, 0.28, 0.46 and then 0.82 -- against a teleport's 1.00, leaving no gap at all. The
+        //    cause is sampling, not the product: when the emulator drew 151 frames instead of 283
+        //    the same 21-frame ramp collapsed into ~5 steps and each covered far more ground. It is
+        //    the aliasing that killed the original channel poll (ledger row 68a), returning in a
+        //    per-draw sampler on a host that drops draws.
+        //
+        // The frame COUNT is the quantity dropped frames cannot inflate -- they can only push a
+        // healthy run DOWN toward the defect, so the check errs strict rather than vacuous. Measured
+        // in exactly that degraded regime (~160 frames drawn, the emulator's bad days): healthy runs
+        // gave 9/11/10/12/9/9 and the teleport control gave 1, six times out of six.
         assertWithMessage(
-            "ViewCapture detectors reported ${anomalies.size} anomaly/anomalies over $frames frames " +
-                "of a bottom-row swap drag:\n" +
-                anomalies.entries.joinToString("\n") { (p, m) -> "  $p\n    $m" },
-        ).that(anomalies).isEmpty()
+            "the home grid moved over only ${trace.movingFrames} drawn frames (${trace.totalPx}px " +
+                "total, largest single step ${trace.maxStepPx}px at +${trace.maxStepAtMs}ms, " +
+                "${trace.frames} frames recorded). An interpolated scroll is spread over many " +
+                "frames; landing it in one or two is the ledger row 27 `scrollToPosition` seek.",
+        ).that(trace.movingFrames).isAtLeast(MIN_MOVING_FRAMES)
+    }
+
+    /**
+     * NEGATIVE CONTROL for the check above: the metric must REPORT a teleport, not merely fail to
+     * find one. Without this, a green from `swapIntoTheBottomRowDoesNotJumpTheGrid` is
+     * indistinguishable from a green off an instrument that stopped recording -- the exact way the
+     * previous ViewCapture-based check went bad, and the reason the project rule says an assertion
+     * is not coverage until it has been made to fail.
+     *
+     * `ares-scroll-trace teleport` drives a real `RecyclerView.scrollToPosition`, which is the
+     * defect's own mechanism rather than a simulation of it.
+     */
+    @Test
+    fun theTraceDetectsATeleport() {
+        // Start from the top so a seek to the LAST item has a long way to travel -- no edit mode
+        // needed, `scrollToPosition` is an ordinary RecyclerView call.
+        ares.scrollGridToTop()
+        ares.scrollTrace("start")
+        Thread.sleep(300)
+        Log.i(TAG, "teleport control: ${ares.scrollTrace("teleport")}")
+        Thread.sleep(600)
+        ares.scrollTrace("stop")
+        val trace = ares.scrollTraceDump()
+        Log.i(TAG, "teleport control: $trace")
+
+        assertWithMessage("the control did not move the grid at all: $trace")
+            .that(trace.totalPx).isAtLeast(MIN_TRAVEL_PX)
+        assertWithMessage(
+            "a `scrollToPosition` seek lands in ONE frame, so the trace must show it moving over " +
+                "fewer than $MIN_MOVING_FRAMES drawn frames -- but it reported ${trace.movingFrames} " +
+                "($trace). The metric the sibling test relies on is not seeing the defect it exists " +
+                "for, so a green from that test would mean nothing.",
+        ).that(trace.movingFrames).isLessThan(MIN_MOVING_FRAMES)
     }
 
     private companion object {
         const val HANG_MS = 1_200L
-        const val MAX_STEP_PX = 231
+        /**
+         * The fewest DRAWN FRAMES a legitimate scroll of the home grid may be spread over.
+         *
+         * Not tuned: 4 is the middle of the empty band between an interpolated scroll (measured 9
+         * to 12, in the frame-dropping regime where the number is at its lowest) and an absolute
+         * `scrollToPosition` seek (1 by construction, measured 1 six times out of six). Same design
+         * as `AresFoldGuard.MAX_PANEL_ASPECT`: pick the gap between the two populations, not a
+         * number that happens to pass on one device.
+         */
+        const val MIN_MOVING_FRAMES = 4
+
+        /** Below this the grid did not really scroll and there is no motion to characterise. */
+        const val MIN_TRAVEL_PX = 200
 
         /** A capture of a few frames describes no drag; the drag alone runs ~1.6s (~96 frames). */
         const val MIN_FRAMES = 20

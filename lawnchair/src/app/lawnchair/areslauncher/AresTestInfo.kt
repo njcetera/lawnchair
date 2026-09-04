@@ -426,6 +426,17 @@ object AresTestInfo {
     const val REQUEST_VIEW_INTEGRITY = "ares-view-integrity"
 
     /**
+     * Per-DRAWN-FRAME home-grid scroll offsets: `start`, `stop`, `dump`.
+     *
+     * The instrument ledger row 27 actually needs. A channel poll aliases (row 68a: a "40ms"
+     * sampler really returned 44-115ms gaps and summed several frames of legitimate auto-scroll
+     * into one apparent teleport), and a ViewCapture cannot see a ViewPropertyAnimator translation
+     * at all (row 75), which is why the detector-based check on this surface has been standing red
+     * without ever describing a real defect. See [AresScrollTrace].
+     */
+    const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
+
+    /**
      * Drives and reads the edit-mode icon sparkle ([AresIconTransition]) so a test can prove the
      * overlay actually MOUNTS on the current device and posture, instead of silently failing to
      * appear — the "the settings animation isn't happening" class (owner report 2026-09-03). This
@@ -570,6 +581,25 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> viewIntegrity(launcher) },
         )
+        REQUEST_SCROLL_TRACE -> when (arg) {
+            // `dump` deliberately does NOT need the UI thread: it reads a finished recording, and
+            // routing it through getLauncherUIProperty would make the read contend with the very
+            // drags it is measuring.
+            "dump" -> respond(AresScrollTrace.dump())
+            // The positive control. Takes the UI thread because it drives a real scroll.
+            "teleport" -> TestInformationHandler.getLauncherUIProperty(
+                { b, key, value -> b.putString(key, value) },
+                { launcher -> AresScrollTrace.teleport(launcher) },
+            )
+            "start", "stop" -> TestInformationHandler.getLauncherUIProperty(
+                { b, key, value -> b.putString(key, value) },
+                { launcher ->
+                    if (arg == "start") AresScrollTrace.start(launcher)
+                    else AresScrollTrace.stop(launcher)
+                },
+            )
+            else -> respond("unknown-subcommand:$arg")
+        }
         REQUEST_ICON_TRANSITION -> iconTransition(arg)
         else -> null
     }

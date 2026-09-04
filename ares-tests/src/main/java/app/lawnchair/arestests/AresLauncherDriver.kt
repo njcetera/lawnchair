@@ -85,6 +85,37 @@ class AresLauncherDriver {
     /** The launcher's pid, or "" if it is not running. Empty AND a changed value both mean death. */
     fun launcherPid(): String = shell("pidof $launcherPackage").trim()
 
+    /** Per-drawn-frame home-grid scroll offsets. See `AresTestInfo.REQUEST_SCROLL_TRACE`. */
+    fun scrollTrace(sub: String): String =
+        call("ares-scroll-trace", sub)?.getString("response") ?: "null"
+
+    /**
+     * `frames`, `maxStep`, `total` parsed out of a [scrollTrace] `dump`.
+     *
+     * Assert on `maxStepPx / totalPx`, never on `maxStepPx` alone: the first frame of any
+     * decelerating scroll is legitimately large and scales with how far the grid has to travel.
+     */
+    data class ScrollTrace(
+        val frames: Int,
+        val maxStepPx: Int,
+        val maxStepAtMs: Long,
+        val movingFrames: Int,
+        val totalPx: Int,
+    )
+
+    fun scrollTraceDump(): ScrollTrace {
+        val raw = scrollTrace("dump")
+        fun field(name: String): Long =
+            raw.substringAfter("$name=", "").substringBefore('|').toLongOrNull() ?: -1L
+        return ScrollTrace(
+            frames = field("frames").toInt(),
+            maxStepPx = field("maxStep").toInt(),
+            maxStepAtMs = field("maxStepAtMs"),
+            movingFrames = field("movingFrames").toInt(),
+            totalPx = field("total").toInt(),
+        )
+    }
+
     fun openTestChannel() {
         device.executeShellCommand(
             "pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS",
