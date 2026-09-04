@@ -47,27 +47,29 @@ import app.lawnchair.preferences2.PreferenceManager2
  * path deliberately: the Pixel has ~459 apps and evicting all of them would trade a 10s straggle
  * for a much longer regeneration, which is the opposite of the point.
  *
- * ## STATUS: UNPROVEN, and the A/B that was meant to prove it is INVALID
+ * ## STATUS: measured to work on the Pixel, 3 runs per arm, awaiting the owner's feel-gate
  *
- * Measured on the Pixel 2026-09-04, two runs per arm, counting cells that settle between t=5s and
- * t=18s (the window the lazy revalidation lands in):
+ * Late settle = grid cells that change between t=5s and t=20s after the switch. That number IS the
+ * defect. Natural alternating dark<->light fixture, one build, prop flipped between arms:
  *
  * ```
- *                run 1   run 2
- *   lazy (control)   13      10
- *   eager (fix)       3      13
+ *   lazy (debug.ares.eager_icon_refresh=0)   13  13  13
+ *   eager (default)                            0   0   0
  * ```
  *
- * The one good run did not replicate, and the DESIGN is why: alternating dark<->light repeatedly
- * warms the disk cache for BOTH states, so after the first pass neither state is stale and the
- * defect being fixed is no longer present to fix. A valid fixture has to make exactly one state
- * stale per run -- delete `databases/app_icons.db`, let the launcher populate for the current
- * state, THEN switch -- which is the same "delete the DB between arms" rule the icon-wash A/B
- * already learned. Until that fixture exists, this stays gated off and must not be described as a
- * fix.
+ * Total re-theme is unchanged (243/241/241 vs 263/246/246 cells against the pre-switch screen), so
+ * the eager arm is not reaching zero by skipping work. The fix reports "regenerated 24 home
+ * packages" ~4s after the switch, ahead of the ~12s lazy revalidation it replaces.
  *
- * The MECHANISM is still the best explanation on the table: the straggling cells are themed icons,
- * and eviction is exactly what the icon-pack pill needed for the same lazy revalidation.
+ * ## Two fixtures that were WRONG, recorded so they are not retried
+ *
+ *  - **Alternating without a working fix.** The first Pixel A/B (13,10 vs 3,13) compared the control
+ *    against a fix that never executed -- `enqueueModelUpdateTask` silently discards the task when
+ *    the model is not loaded. Both arms were the control.
+ *  - **Wiping `app_icons.db` per run.** Intended to guarantee staleness; it does the opposite. The
+ *    row is keyed by component with the state in `freshnessId`, so deleting it leaves NOTHING to
+ *    serve stale and the icon is generated eagerly by the ordinary path. Measured: the control's
+ *    late settle collapsed to 13,0,0 -- the fixture removed the defect it was built to expose.
  *
  * Gated on the icon state ACTUALLY changing — [AresIconTint.stateFragment], which folds in the night
  * bit — so an ordinary cold start does not pay for a regeneration nothing asked for.
@@ -76,14 +78,18 @@ object AresThemeIconRefresh {
 
     private const val TAG = "AresThemeIconRefresh"
 
-    /** `setprop debug.ares.eager_icon_refresh 1` to arm it. Off = the shipped lazy behaviour. */
+    /**
+     * ON by default. `setprop debug.ares.eager_icon_refresh 0` restores the old lazy behaviour,
+     * which is what the control arm of the A/B above uses -- keeping the escape hatch means the
+     * comparison stays reproducible from one build instead of needing a revert.
+     */
     private const val PROP = "debug.ares.eager_icon_refresh"
 
     private const val STORE = "ares_icon_state"
     private const val KEY_LAST = "last_state_fragment"
 
     @JvmStatic
-    fun enabled(): Boolean = Utilities.getSystemProperty(PROP, "") == "1"
+    fun enabled(): Boolean = Utilities.getSystemProperty(PROP, "") != "0"
 
     /**
      * Called from `onCreate`. Cheap and non-blocking: the comparison is a string equality against a
