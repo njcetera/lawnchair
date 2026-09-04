@@ -846,6 +846,76 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         updateSearchResultsVisibility();
     }
 
+
+    /**
+     * AresLauncher: derives and applies the app list's top padding. Ledger row 86.
+     *
+     * <p><b>This is INSTRUMENTATION, not a fix.</b> The extraction from {@link #setupHeader()} is
+     * behaviour-preserving; the log is the point. Two fixes for the underlying defect were built
+     * and BOTH made it worse -- see the ledger row, and do not re-propose either without new
+     * evidence:
+     *
+     * <ol>
+     *   <li>Re-deriving in {@link #onDeviceProfileChanged}: that fires mid-fold with a half-built
+     *       profile ({@code insetsTop=152 wsPadTop=0} against a settled {@code 136/67}, measured on
+     *       emulator-5554 by this very log), so it LATCHES transient values and left the pane 51px
+     *       out -- the exact defect it was meant to cure.</li>
+     *   <li>Re-syncing from the pane's onMeasure, posted: one-build A/B against rotation, control
+     *       arm {@code delta 0 -> 0}, fix arm {@code delta 0 -> -14}. It introduced a misalignment
+     *       where the control had none.</li>
+     * </ol>
+     *
+     * <p>The defect itself is real and diagnosed: the padding is derived from {@code dp.insets.top +
+     * dp.workspacePadding.top} (see {@link AresAllApps#appListTopPaddingPx}) and is computed ONLY
+     * here. {@link #onDeviceProfileChanged} swaps adapters, clears the pool and updates colours but
+     * never re-derives it, so after a profile change the pane can keep the PREVIOUS profile's
+     * numbers for as long as the process lives. What is NOT yet known is which signal fires late
+     * enough to be trustworthy -- both attempts above ran too early.
+     *
+     * Measured on the owner's Pixel 2026-09-04, unfolded:
+     * <pre>
+     *   home:  recon = 161 + 67 + 261 = 489   homeChild = 489   (home correct)
+     *   pane:  rvPad = 422                                      (67px short)
+     *   delta(pane - home) = -70
+     * </pre>
+     * 422 is {@code insets.top + homeListPad} with the workspace-padding term missing, i.e. a
+     * profile whose numbers no longer matched the window. A force-stop and relaunch moved rvPad to
+     * 489 and the delta to 0, which is what identified this as STALE rather than miscalculated --
+     * the formula was right all along.
+     *
+     * @param scrollToTop preserved from setupHeader; every current caller passes true.
+     * @param why tag for the log, so a recurrence names the path that set the value.
+     */
+    private void aresApplyTopPadding(int stockPadding, boolean scrollToTop, String why) {
+        // AresLauncher §11c: the stock value is room reserved under a search bar we do not draw,
+        // and it put the app list's first row 88px below where the home grid's first row starts.
+        // Scoped to our own pane; the Taskbar's all-apps sheet and the secondary-display host share
+        // this class, still show a search bar, and keep the stock padding.
+        int padding = AresAllApps.appListTopPaddingPx(
+                mActivityContext, isAresWorkspacePanel(), stockPadding)
+                // Edge-to-edge: fold the relocated top inset (removed from this container's padding in
+                // setInsets) into the recycler's own top padding, so the resting first row stays put
+                // while the recycler fills the full window and content flows behind the status bar.
+                + aresRelocatedTopInset();
+        if (AresAllApps.isAresAppListPane(mActivityContext)) {
+            DeviceProfile dp = mActivityContext.getDeviceProfile();
+            int was = mAH.get(AdapterHolder.MAIN).mPadding.top;
+            // Logged on EVERY call, not only when it changes: a value that silently stops being
+            // recomputed is indistinguishable in a log from one whose inputs never moved, and that
+            // is exactly the failure this method exists to fix.
+            android.util.Log.i("AresPaneAlign", "topPadding[" + why + "] " + was + " -> " + padding
+                    + " (insetsTop=" + dp.getInsets().top + " wsPadTop=" + dp.workspacePadding.top
+                    + " stock=" + stockPadding + ")");
+        }
+        mAH.forEach(adapterHolder -> {
+            adapterHolder.mPadding.top = padding;
+            adapterHolder.applyPadding();
+            if (scrollToTop && adapterHolder.mRecyclerView != null) {
+                adapterHolder.mRecyclerView.scrollToTop();
+            }
+        });
+    }
+
     void setupHeader() {
         mAdditionalHeaderRows.forEach(row -> mHeader.onPluginDisconnected(row));
 
@@ -861,23 +931,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 tabsHidden);
 
         int stockPadding = (hideSearchBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
-        // AresLauncher §11c: the stock value is room reserved under a search bar we do not draw,
-        // and it put the app list's first row 88px below where the home grid's first row starts.
-        // Scoped to our own pane; the Taskbar's all-apps sheet and the secondary-display host share
-        // this class, still show a search bar, and keep the stock padding.
-        int padding = AresAllApps.appListTopPaddingPx(
-                mActivityContext, isAresWorkspacePanel(), stockPadding)
-                // Edge-to-edge: fold the relocated top inset (removed from this container's padding in
-                // setInsets) into the recycler's own top padding, so the resting first row stays put
-                // while the recycler fills the full window and content flows behind the status bar.
-                + aresRelocatedTopInset();
-        mAH.forEach(adapterHolder -> {
-            adapterHolder.mPadding.top = padding;
-            adapterHolder.applyPadding();
-            if (adapterHolder.mRecyclerView != null) {
-                adapterHolder.mRecyclerView.scrollToTop();
-            }
-        });
+        aresApplyTopPadding(stockPadding, true /* scrollToTop */, "setupHeader");
         // AresLauncher: the unfolded app-list pane has no inset-dispatching parent (its parent is a
         // ShortcutAndWidgetContainer, not an InsettableFrameLayout), so setInsets() -- and with it
         // applyAdapterSideAndBottomPaddings(), the ONLY place the recycler's bottom padding is set --
