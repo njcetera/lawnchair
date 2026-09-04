@@ -142,7 +142,21 @@ object AresTestInfo {
     const val REQUEST_CHILD_CENSUS = "ares-child-census"
 
     /**
-     * Removes the first home item matching `arg` (`"widget"` or `"icon"`), returning its id or -1.
+     * Removes a home item. `arg` is `"widget"`, `"icon"`, or `"id:<n>"`; returns its id, or -1.
+     *
+     * ## Why `id:` exists (ledger row 14 / S3)
+     *
+     * S3 is the defect where `ItemTouchHelper.clearView` fires on a holder DETACH -- a rebind,
+     * a package update, an uninstall -- with no touch event at all, and the pre-fix code treated
+     * that indistinguishably from a release, filing an armed dwell into a folder while the finger
+     * was still down. The fix gates on how the gesture ended, and row 14 has stood at `FIXED?`
+     * BUILD-ONLY ever since with one blocker recorded against it: to exercise the detach you must
+     * be able to retire *the item currently being dragged*, and the `"widget"`/`"icon"` selectors
+     * cannot name it -- they take the FIRST match, which is whatever sits at the top of the grid,
+     * not the one under the finger.
+     *
+     * So `id:` is not a convenience over the other two. It is the only form that can produce the
+     * scenario, because the scenario is defined by *which* holder goes away.
      *
      * Calls [AresHomeListView.removeFromHome] — the same function the × badge's click listener
      * calls, and the whole point of routing through it rather than poking the adapter. The W1 bug
@@ -1144,6 +1158,20 @@ object AresTestInfo {
     private fun removeFirst(launcher: Launcher, arg: String?): Int {
         val list = launcher.workspace?.aresHomeList ?: return -1
         val adapter = list.aresAdapter
+        if (arg != null && arg.startsWith("id:")) {
+            val want = arg.removePrefix("id:").trim().toIntOrNull() ?: return -1
+            // Matched over the adapter rather than the database on purpose: the point of this form
+            // is to retire a HOLDER, and only an item the adapter is showing has one. An id that is
+            // in the database but not bound would answer -1 here, which is the honest answer -- and
+            // is also exactly the partial-bind condition AresBindGuard reports separately.
+            for (i in 0 until adapter.itemCount) {
+                val info = adapter.itemAt(i) ?: continue
+                if (info.id != want) continue
+                list.removeFromHome(info)
+                return info.id
+            }
+            return -1
+        }
         val wantWidget = arg == "widget"
         for (i in 0 until adapter.itemCount) {
             val info = adapter.itemAt(i) ?: continue
