@@ -444,6 +444,19 @@ object AresTestInfo {
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**
+     * The pane's top padding against what the LIVE profile says it should be — ledger row 86.
+     *
+     * `have=<n>|want=<n>|stale=<bool>` with no arg. `stale` forces a wrong value (the defect),
+     * `reset` re-derives from the live profile.
+     *
+     * The `stale` verb exists because the emulator does not reproduce this defect on its own: three
+     * fold cycles and a rotation on unmodified code all read `delta=0`. A test that folds and then
+     * asserts alignment therefore passes without ever exercising the seam. Forcing the state is what
+     * lets the invariant be made to FAIL, and it is also the control any future fix has to beat.
+     */
+    const val REQUEST_PANE_PAD = "ares-pane-pad"
+
+    /**
      * The two §9 wallpaper-dim terms and whether they are STACKING.
      *
      * `progress=<f>|unfolded=<bool>|twoPanel=<bool>|state=<name>|stacked=<bool>`
@@ -632,6 +645,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_PANE_PAD -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> panePad(launcher, arg) },
+        )
         REQUEST_DIM_STATE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> dimState(launcher) },
@@ -715,6 +732,20 @@ object AresTestInfo {
      * The walk is over the DragLayer's DIRECT children, which is where `DragView.show()` adds
      * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
      */
+    /** See [REQUEST_PANE_PAD]. */
+    private fun panePad(launcher: Launcher, arg: String?): String {
+        val pane = launcher.workspace?.aresAppListPane ?: return "no-pane"
+        when (arg) {
+            // -67 is not arbitrary: it is the exact shortfall measured on the owner's Pixel
+            // (rvPad 422 against a correct 489), i.e. the workspacePadding.top term going missing.
+            "stale" -> pane.aresForceTopPadding(pane.aresWantedTopPadding() - 67)
+            "reset" -> pane.aresRecomputeTopPadding()
+        }
+        val have = pane.aresCurrentTopPadding()
+        val want = pane.aresWantedTopPadding()
+        return "have=$have|want=$want|stale=${have != want}"
+    }
+
     /** See [REQUEST_DIM_STATE]. */
     private fun dimState(launcher: Launcher): String {
         val root = launcher.rootView ?: return "no-root"

@@ -916,6 +916,69 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         });
     }
 
+    /**
+     * AresLauncher, TEST-ONLY (ledger row 86, task #105): the top padding the pane HAS versus what
+     * the LIVE DeviceProfile says it should be.
+     *
+     * These exist because the emulator does not reproduce the defect. Three fold cycles and a
+     * rotation on unmodified code all read `delta=0`, so a test that merely folds and asserts
+     * alignment passes for the wrong reason -- it is not exercising the seam at all. Forcing the
+     * stale value is what makes the invariant falsifiable here, and it doubles as the control a
+     * future fix has to beat.
+     */
+    public int aresCurrentTopPadding() {
+        return mAH.get(AdapterHolder.MAIN).mPadding.top;
+    }
+
+    /** What {@link #aresApplyTopPadding} would compute right now from the live profile. */
+    public int aresWantedTopPadding() {
+        boolean hideBar = isAppDrawerSearchBarHidden();
+        int stockPadding = (hideBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+        return AresAllApps.appListTopPaddingPx(mActivityContext, isAresWorkspacePanel(), stockPadding)
+                + aresRelocatedTopInset();
+    }
+
+    /**
+     * TEST-ONLY: pins the padding to a deliberately wrong value, reproducing the stale state the
+     * owner hit on 2026-09-04 (rvPad 422 against a correct 489). Nothing in the product calls this.
+     */
+    public void aresForceTopPadding(int px) {
+        android.util.Log.i("AresPaneAlign", "topPadding[FORCED-STALE] "
+                + aresCurrentTopPadding() + " -> " + px);
+        mAH.forEach(adapterHolder -> {
+            adapterHolder.mPadding.top = px;
+            adapterHolder.applyPadding();
+        });
+        aresRequestPaneLayout();
+    }
+
+    /** TEST-ONLY: re-derive and apply from the live profile, undoing {@link #aresForceTopPadding}. */
+    public void aresRecomputeTopPadding() {
+        boolean hideBar = isAppDrawerSearchBarHidden();
+        int stockPadding = (hideBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+        aresApplyTopPadding(stockPadding, false /* scrollToTop */, "testRecompute");
+        aresRequestPaneLayout();
+    }
+
+    /**
+     * Forces a layout pass on the pane and its recyclers.
+     *
+     * MEASURED 2026-09-04, and it is a finding for the fix rather than a test detail: restoring the
+     * padding VALUE does not restore the rendered position. After forcing a stale padding and then
+     * recomputing the correct one, `rvPad` read the right number (464) while the first row was still
+     * drawn 67px high -- the recycler kept its laid-out child positions. So whatever eventually fixes
+     * row 86 has to drive a layout too; a correct recompute on its own is not enough to recover a
+     * pane that has already been laid out wrong.
+     */
+    private void aresRequestPaneLayout() {
+        mAH.forEach(adapterHolder -> {
+            if (adapterHolder.mRecyclerView != null) {
+                adapterHolder.mRecyclerView.requestLayout();
+            }
+        });
+        requestLayout();
+    }
+
     void setupHeader() {
         mAdditionalHeaderRows.forEach(row -> mHeader.onPluginDisconnected(row));
 
