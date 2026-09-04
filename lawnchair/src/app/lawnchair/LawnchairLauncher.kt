@@ -285,10 +285,6 @@ class LawnchairLauncher : QuickstepLauncher() {
 
         reloadIconsIfNeeded()
 
-        // Ledger row 77: regenerate the HOME icons now rather than letting the icon cache's lazy
-        // ~12s revalidation deliver them. Gated off by default.
-        AresThemeIconRefresh.refreshIfIconStateChanged(this)
-
         AppDatabase.INSTANCE.get(this).checkpointSync()
     }
 
@@ -501,6 +497,12 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun finishBindingItems(pagesBoundFirst: com.android.launcher3.util.IntSet?) {
         super.finishBindingItems(pagesBoundFirst)
+
+        // Ledger row 77. Deliberately HERE and not in onCreate: `enqueueModelUpdateTask` drops the
+        // task on the floor when `isModelLoaded()` is false, with no log, and on a theme-switch
+        // recreate onCreate runs before the loader finishes. Measured 2026-09-04 -- the whole first
+        // Pixel A/B compared the control against a fix that never executed.
+        AresThemeIconRefresh.refreshIfIconStateChanged(this)
         // Apply the soft rebind FIRST: it is what makes the grid final. A rebind whose row set is
         // unchanged (a fold/unfold, which always triggers one) costs nothing and the grid never
         // flickers; one that genuinely changed falls back to the full rebuild, which tears every tile

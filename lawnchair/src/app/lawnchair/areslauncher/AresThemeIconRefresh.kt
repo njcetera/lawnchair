@@ -6,6 +6,7 @@ import android.util.Log
 import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.Utilities
+import com.android.launcher3.util.Executors
 import com.android.launcher3.model.CacheDataUpdatedTask
 import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.model.data.ItemInfo
@@ -111,6 +112,37 @@ object AresThemeIconRefresh {
         Log.i(TAG, "icon state changed: $last -> $now")
 
         val iconCache = LauncherAppState.getInstance(launcher).iconCache
+        // WAIT for the model rather than assuming a callback implies it. `enqueueModelUpdateTask`
+        // silently returns without running the task when `isModelLoaded()` is false, so calling it
+        // too early is indistinguishable from a launch where nothing needed regenerating -- measured
+        // 2026-09-04, that swallowed the fix twice: first from `onCreate`, then from
+        // `finishBindingItems`, which still runs BEFORE `LoaderTask` commits the model.
+        awaitModelThenRun(launcher, attempt = 0) { enqueue(launcher, iconCache) }
+    }
+
+    /**
+     * Retries on the model executor until the model is loaded, bounded and LOUD on give-up.
+     *
+     * Bounded because an unbounded retry against a model that never loads is a leak; loud because a
+     * silent give-up is the exact failure this whole routine already hit twice.
+     */
+    private fun awaitModelThenRun(launcher: Launcher, attempt: Int, body: () -> Unit) {
+        if (launcher.isDestroyed) return
+        if (launcher.model.isModelLoaded()) {
+            body()
+            return
+        }
+        if (attempt >= MAX_WAIT_ATTEMPTS) {
+            Log.w(TAG, "model still not loaded after ${MAX_WAIT_ATTEMPTS * WAIT_STEP_MS}ms; icons stay lazy")
+            return
+        }
+        Executors.MODEL_EXECUTOR.handler.postDelayed(
+            { awaitModelThenRun(launcher, attempt + 1, body) },
+            WAIT_STEP_MS,
+        )
+    }
+
+    private fun enqueue(launcher: Launcher, iconCache: com.android.launcher3.icons.IconCache) {
         launcher.model.enqueueModelUpdateTask { taskController, dataModel, apps ->
             val byUser = HashMap<UserHandle, HashSet<String?>>()
             fun add(info: ItemInfo) {
@@ -140,4 +172,8 @@ object AresThemeIconRefresh {
             Log.i(TAG, "regenerated $n home packages across ${byUser.size} user(s)")
         }
     }
+
+    /** ~6s of patience in 250ms steps: comfortably past a cold load, nowhere near a leak. */
+    private const val WAIT_STEP_MS = 250L
+    private const val MAX_WAIT_ATTEMPTS = 24
 }
