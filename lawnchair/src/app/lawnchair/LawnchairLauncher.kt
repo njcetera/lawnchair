@@ -33,6 +33,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
+import app.lawnchair.areslauncher.AresDragWatch
 import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.areslauncher.AresIconTransition
@@ -502,6 +503,10 @@ class LawnchairLauncher : QuickstepLauncher() {
         // task on the floor when `isModelLoaded()` is false, with no log, and on a theme-switch
         // recreate onCreate runs before the loader finishes. Measured 2026-09-04 -- the whole first
         // Pixel A/B compared the control against a fix that never executed.
+        // Read-only drag recorder (ledger row 84). Registered here rather than in onCreate so it
+        // binds to the DragController of the activity that will actually take the gestures, and
+        // re-registers idempotently after the recreate a theme switch or a fold causes.
+        AresDragWatch.register(this)
         AresThemeIconRefresh.refreshIfIconStateChanged(this)
         // Apply the soft rebind FIRST: it is what makes the grid final. A rebind whose row set is
         // unchanged (a fold/unfold, which always triggers one) costs nothing and the grid never
@@ -797,6 +802,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         // relays into a detached grid, or a ghost icon outlives the activity. Both clears are safe
         // to call when nothing is in flight (guarded / no-op).
         AresFolderExitHandoff.onLauncherDestroyed(this)
+        AresDragWatch.onLauncherDestroyed(this)
         AresFolderPreview.onLauncherDestroyed(this)
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled

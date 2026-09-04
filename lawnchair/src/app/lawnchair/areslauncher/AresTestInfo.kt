@@ -704,6 +704,7 @@ object AresTestInfo {
         // non-zero (run the reorder suite and poll) reports `dragging=false` for the whole run and
         // proves nothing. Until a DragController drag has actually been caught in the act, `children`
         // is what shows the walk is enumerating the real DragLayer rather than an empty container.
+        if (arg == "history") return AresDragWatch.summary()
         if (arg == "children") {
             val names = (0 until layer.childCount)
                 .mapNotNull { layer.getChildAt(it)?.javaClass?.simpleName }
