@@ -138,6 +138,13 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         super.onAttachedToWindow()
         windowRegistered = true
         android.util.Log.i("AresAttach", "PANE REGISTERED dpListeners=" + paneListenerCount())
+        // Ledger row 86: the pane is torn out and re-added on every fold/rotation WITHOUT setupHeader
+        // running, which is how it comes back holding the previous profile's top padding. Measured on the
+        // owner's Pixel 2026-09-04: a rotation logged PANE DETACHED/ATTACHED/REGISTERED and not one
+        // topPadding line, with rvPad stuck at 422 across the whole cycle. Debounced, so this fires
+        // against the settled profile rather than the mid-fold one -- see the field doc on
+        // ActivityAllAppsContainerView.ARES_PAD_RESYNC_DELAY_MS.
+        aresScheduleTopPaddingResync("paneAttached")
         // Each container constructs its own AllAppsStore, so this one starts empty and would stay
         // empty until the next model bind. Seed it from the launcher's already-populated store on
         // attach; ModelCallbacks.bindAllApplications keeps both in step from then on.

@@ -930,6 +930,91 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         return mAH.get(AdapterHolder.MAIN).mPadding.top;
     }
 
+    /**
+     * AresLauncher, ledger row 86 -- re-derive the pane's top padding once the profile has SETTLED.
+     *
+     * <p>THE DEFECT. The padding is derived from {@code dp.insets.top + dp.workspacePadding.top} and
+     * was computed only in {@link #setupHeader()}. Nothing recomputed it on a profile change, so the
+     * pane kept the previous profile's numbers for the life of the process. Measured on the owner's
+     * Pixel: {@code rvPad=422} against a correct {@code 489}, the app list resting 67px above the
+     * home grid in BOTH postures, cured only by a force-stop.
+     *
+     * <p>WHY IT IS DEBOUNCED, AND WHY THAT IS THE WHOLE FIX. Two earlier attempts recomputed
+     * PROMPTLY and both made things worse -- re-deriving straight inside {@code
+     * onDeviceProfileChanged} ended 51px out on the emulator, and a posted re-sync from the pane's
+     * {@code onMeasure} took rotation from {@code delta 0} to {@code delta -14} in a one-build A/B.
+     * Neither was a wrong recompute; both applied a profile caught MID-FOLD, where
+     * {@code workspacePadding.top} reads 0 and {@code insets.top} reads 152 against a settled 67 and
+     * 136. That is ledger rows 69/69a's trap again: nothing on the profile that describes the screen
+     * is posture-independent while the posture is changing. So the recompute is delayed, every new
+     * trigger cancels the pending one (last writer wins over a burst of transients), and a profile
+     * that still reads invalid is REJECTED and retried rather than latched.
+     *
+     * <p>WHY IT CAN AFFORD TO ARRIVE LATE. Measured 2026-09-04 with {@code ares-pane-pad --arg
+     * stale}: forcing the 67px shortfall and then recomputing WITH {@code scrollToTop} takes the
+     * measured misalignment from {@code delta=-67} straight back to {@code delta=0}. Recovery from a
+     * pane already laid out wrong is complete, so this does not have to win a race -- it only has to
+     * eventually run against a good profile. (An earlier note here said restoring the value did not
+     * restore the layout; that was measured with {@code scrollToTop=false}, and repositioning the
+     * children is the half that was missing.)
+     *
+     * <p>The decline branch logs, deliberately -- CLAUDE.md: a guard that can silently stop engaging
+     * needs a log where it declines, not just where it fires, or a guard that has quietly stopped
+     * working is indistinguishable from one whose condition never arose.
+     *
+     * <p>{@code setprop debug.ares.pane_pad_resync 0} disables it, giving a one-build A/B whose
+     * control arm is the pre-fix behaviour from identical bytes.
+     */
+    private static final int ARES_PAD_RESYNC_DELAY_MS = 350;
+
+    /** ~2.8s of retries. A fold that has not settled by then is not going to. */
+    private static final int ARES_PAD_RESYNC_MAX_TRIES = 8;
+
+    private final Runnable mAresPadResyncTask = this::aresRunPadResync;
+    private String mAresPadResyncWhy = "";
+    private int mAresPadResyncTries;
+
+    /** Schedules a settled-profile padding re-derive; cancels any pending one. See the field doc. */
+    public void aresScheduleTopPaddingResync(String why) {
+        if (!AresAllApps.isAresAppListPane(mActivityContext)) {
+            return;
+        }
+        if ("0".equals(Utilities.getSystemProperty("debug.ares.pane_pad_resync", ""))) {
+            android.util.Log.i("AresPaneAlign", "resync[" + why
+                    + "] DECLINED: off via debug.ares.pane_pad_resync (control arm)");
+            return;
+        }
+        mAresPadResyncWhy = why;
+        mAresPadResyncTries = 0;
+        removeCallbacks(mAresPadResyncTask);
+        postDelayed(mAresPadResyncTask, ARES_PAD_RESYNC_DELAY_MS);
+    }
+
+    private void aresRunPadResync() {
+        DeviceProfile dp = mActivityContext.getDeviceProfile();
+        int have = mAH.get(AdapterHolder.MAIN).mPadding.top;
+        int want = aresWantedTopPadding();
+        // Mid-fold this reads 0 against a settled 67, and applying it is precisely how attempt 1
+        // regressed. Reject the frame and come back; do not latch it.
+        boolean settled = dp.workspacePadding.top > 0 && getWindowToken() != null;
+        if (!settled || have == want) {
+            android.util.Log.i("AresPaneAlign", "resync[" + mAresPadResyncWhy + "] DECLINED "
+                    + (settled ? "already in sync" : "profile not settled")
+                    + " have=" + have + " want=" + want
+                    + " (insetsTop=" + dp.getInsets().top
+                    + " wsPadTop=" + dp.workspacePadding.top
+                    + " try=" + mAresPadResyncTries + ")");
+            if (!settled && ++mAresPadResyncTries < ARES_PAD_RESYNC_MAX_TRIES) {
+                postDelayed(mAresPadResyncTask, ARES_PAD_RESYNC_DELAY_MS);
+            }
+            return;
+        }
+        boolean hideBar = isAppDrawerSearchBarHidden();
+        int stockPadding = (hideBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+        aresApplyTopPadding(stockPadding, true /* scrollToTop */, "resync:" + mAresPadResyncWhy);
+        aresRequestPaneLayout();
+    }
+
     /** What {@link #aresApplyTopPadding} would compute right now from the live profile. */
     public int aresWantedTopPadding() {
         boolean hideBar = isAppDrawerSearchBarHidden();
@@ -956,19 +1041,29 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     public void aresRecomputeTopPadding() {
         boolean hideBar = isAppDrawerSearchBarHidden();
         int stockPadding = (hideBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
-        aresApplyTopPadding(stockPadding, false /* scrollToTop */, "testRecompute");
+        // scrollToTop=TRUE: measured 2026-09-04 that restoring the VALUE alone leaves the rendered
+        // position wrong -- rvPad read correct while the first row stayed 67px high, even with an
+        // explicit requestLayout. setupHeader has always passed true here, and repositioning the
+        // children is what actually recovers the pane.
+        aresApplyTopPadding(stockPadding, true /* scrollToTop */, "testRecompute");
         aresRequestPaneLayout();
     }
 
     /**
      * Forces a layout pass on the pane and its recyclers.
      *
-     * MEASURED 2026-09-04, and it is a finding for the fix rather than a test detail: restoring the
-     * padding VALUE does not restore the rendered position. After forcing a stale padding and then
-     * recomputing the correct one, `rvPad` read the right number (464) while the first row was still
-     * drawn 67px high -- the recycler kept its laid-out child positions. So whatever eventually fixes
-     * row 86 has to drive a layout too; a correct recompute on its own is not enough to recover a
-     * pane that has already been laid out wrong.
+     * MEASURED 2026-09-04: a correct recompute alone does NOT recover a pane already laid out wrong,
+     * so the fix has to drive a layout as well. Forcing a stale padding and then restoring the right
+     * value left `rvPad` reading the right number (464) while the first row stayed drawn 67px high --
+     * the recycler kept its laid-out child positions.
+     *
+     * CORRECTION, same day: that was measured with {@code scrollToTop=false}. With
+     * {@code scrollToTop=true} -- which is what {@link #setupHeader()} has always passed -- the
+     * recompute takes the pane from {@code delta=-67} back to {@code delta=0} outright. So
+     * repositioning the children, not the layout request, is the half that was missing, and recovery
+     * from an already-wrong layout is COMPLETE. That is what lets the row-86 resync be debounced:
+     * it does not have to win a race against the fold, only to eventually run against a settled
+     * profile.
      */
     private void aresRequestPaneLayout() {
         mAH.forEach(adapterHolder -> {
@@ -1370,16 +1465,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         // (in which case recomputing on the final one is sound) or whether the settled profile
         // never reaches this callback at all. That is a question about ordering, and the only way
         // to answer it is to watch every call without acting on any of them.
-        if (AresAllApps.isAresAppListPane(mActivityContext)) {
-            boolean hideBarShadow = isAppDrawerSearchBarHidden();
-            int stockShadow = (hideBarShadow && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
-            int wouldBe = AresAllApps.appListTopPaddingPx(
-                    mActivityContext, isAresWorkspacePanel(), stockShadow) + aresRelocatedTopInset();
-            android.util.Log.i("AresPaneAlign", "shadow[profileChanged] have="
-                    + mAH.get(AdapterHolder.MAIN).mPadding.top + " wouldBe=" + wouldBe
-                    + " (insetsTop=" + dp.getInsets().top + " wsPadTop=" + dp.workspacePadding.top
-                    + " panel=" + isAresWorkspacePanel() + " stock=" + stockShadow + ")");
-        }
+        aresScheduleTopPaddingResync("profileChanged");
 
         boolean needsInvalidate = false;
         int navBarScrimColor = Themes.getNavBarScrimColor(mActivityContext);
