@@ -84,9 +84,24 @@ object AresFolderExitHandoff : DragController.DragListener {
      * itself, so the hold only ever suppresses a redundant cancel, never replaces a needed one.
      */
     @JvmStatic
-    fun ownsDwellTeardown(): Boolean = list != null || teardownHold
+    fun ownsDwellTeardown(): Boolean =
+        list != null || android.os.SystemClock.uptimeMillis() < teardownHoldUntil
 
-    private var teardownHold = false
+    /**
+     * Deadline for the settle hold, as a CLOCK value rather than a boolean cleared by a callback.
+     *
+     * The previous form was `teardownHold = true` plus `grid.postDelayed({ teardownHold = false })`,
+     * which binds the RESET to the grid's handler. A `View`'s posted runnable is queued against its
+     * attach info: detach the grid and never re-attach it -- a rebind that drops the view, a fold
+     * that lands mid-handoff -- and the runnable never runs, so the flag stays true for the rest of
+     * the process and [ownsDwellTeardown] permanently suppresses `AresFolderDrop.cancel()`.
+     *
+     * That is exactly the shape this whole seam keeps failing in, and the one the state-seam
+     * proposal names: a latch SET by one pipeline whose RESET is bound to a terminal callback the
+     * other pipeline can preempt, skip or race (ledger row 36 was the same defect in `declined`).
+     * A deadline needs no callback and no live view, so there is nothing left to strand it.
+     */
+    private var teardownHoldUntil = 0L
 
     /**
      * Takes over [d]'s drag if it qualifies: an item with a database row, dragged from outside
@@ -223,8 +238,7 @@ object AresFolderExitHandoff : DragController.DragListener {
         val grid = list ?: run { declinedFor = null; return }
         val last = grid.lastHandoffPoint()
         // Hold dwell-teardown ownership through the settle window; see [ownsDwellTeardown].
-        teardownHold = true
-        grid.postDelayed({ teardownHold = false }, TEARDOWN_HOLD_MS)
+        teardownHoldUntil = android.os.SystemClock.uptimeMillis() + TEARDOWN_HOLD_MS
         relay(
             if (dropped) MotionEvent.ACTION_UP else MotionEvent.ACTION_CANCEL,
             last[0],
@@ -251,7 +265,7 @@ object AresFolderExitHandoff : DragController.DragListener {
         list = null
         host = null
         dropped = false
-        teardownHold = false
+        teardownHoldUntil = 0L
         declinedFor = null
     }
 
