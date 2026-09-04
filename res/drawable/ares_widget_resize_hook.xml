@@ -31,7 +31,7 @@
     android:height="22dp"
     android:viewportWidth="22"
     android:viewportHeight="22"
-    android:tint="@color/ares_edit_badge_icon">
+    android:tint="@color/ares_edit_badge_container">
 
     <path
         android:pathData="M10,19 H13 A6,6 0 0 0 19,13 V10"
