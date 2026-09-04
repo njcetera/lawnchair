@@ -76,7 +76,42 @@ object AresThemeReapply {
             // `expected` above is what the theme SHOULD be, not what the theme HOLDS.
             "|colorBackground=${attr(activity, android.R.attr.colorBackground)}" +
             "|textColorPrimary=${attr(activity, android.R.attr.textColorPrimary)}" +
-            "|windowBackground=${attr(activity, android.R.attr.windowBackground)}"
+            "|textColorSecondary=${attr(activity, android.R.attr.textColorSecondary)}" +
+            // The SAME attribute resolved through the home list's own Context rather than the
+            // activity's. onCreateViewHolder builds each row container from `parent.context` (the
+            // RecyclerView's), notifyDataSetChanged reuses holders so that Context object persists
+            // for the list's whole life, and ItemInflater inflates via `LayoutInflater
+            // .from(parent.context)`. If that Context is a ContextThemeWrapper its theme was built
+            // once and does not follow the activity -- which would explain re-inflated rows coming
+            // back in the old colour. If the two agree, this is NOT the cause and the next
+            // hypothesis is Lawnchair's computed palette.
+            "|listCtx=${listContext(activity)}" +
+            "|listTextColorSecondary=${listAttr(activity, android.R.attr.textColorSecondary)}"
+    }
+
+    private fun homeListContext(activity: Activity): android.content.Context? =
+        (activity as? com.android.launcher3.Launcher)?.workspace?.aresHomeList?.context
+
+    /** Simple name of the home list's Context, to show whether it is the Activity or a wrapper. */
+    private fun listContext(activity: Activity): String {
+        val c = homeListContext(activity) ?: return "none"
+        val same = c === activity
+        return "${c.javaClass.simpleName}${if (same) "(==activity)" else "(WRAPPER)"}"
+    }
+
+    /** [attr], but resolved through the home list's Context instead of the activity's. */
+    private fun listAttr(activity: Activity, attrId: Int): String {
+        val c = homeListContext(activity) ?: return "none"
+        val tv = android.util.TypedValue()
+        if (!c.theme.resolveAttribute(attrId, tv, true)) return "unresolved"
+        return when {
+            tv.type >= android.util.TypedValue.TYPE_FIRST_COLOR_INT &&
+                tv.type <= android.util.TypedValue.TYPE_LAST_COLOR_INT -> "#%08x".format(tv.data)
+            tv.resourceId != 0 ->
+                runCatching { "#%08x".format(c.resources.getColor(tv.resourceId, c.theme)) }
+                    .getOrElse { "res:0x${Integer.toHexString(tv.resourceId)}" }
+            else -> "type${tv.type}"
+        }
     }
 
     /** One theme attribute as `#aarrggbb`, or a reason it could not be read. */
