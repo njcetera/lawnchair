@@ -434,6 +434,9 @@ object AresTestInfo {
      * at all (row 75), which is why the detector-based check on this surface has been standing red
      * without ever describing a real defect. See [AresScrollTrace].
      */
+    /** Night-mode and theme-res state of the launcher activity. See [AresThemeReapply.state]. */
+    const val REQUEST_THEME_STATE = "ares-theme-state"
+
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**
@@ -580,6 +583,10 @@ object AresTestInfo {
         REQUEST_VIEW_INTEGRITY -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> viewIntegrity(launcher) },
+        )
+        REQUEST_THEME_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> AresThemeReapply.state(launcher) },
         )
         REQUEST_SCROLL_TRACE -> when (arg) {
             // `dump` deliberately does NOT need the UI thread: it reads a finished recording, and
