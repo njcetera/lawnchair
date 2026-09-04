@@ -36,7 +36,6 @@ import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.areslauncher.AresIconTransition
-import app.lawnchair.areslauncher.AresThemeReapply
 import app.lawnchair.compat.LawnchairQuickstepCompat
 import app.lawnchair.data.AppDatabase
 import app.lawnchair.data.wallpaper.service.WallpaperService
@@ -343,13 +342,6 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     fun updateTheme() {
         if (themeProvider.colorScheme != colorScheme) {
-            // Ledger row 77: the launcher's OWN theme-preference path. Distinct trigger from the
-            // system night switch, which arrives via WallpaperThemeManager -- gated separately so
-            // the log says which one fired.
-            if (AresThemeReapply.interceptRecreate("LawnchairLauncher", this)) {
-                colorScheme = themeProvider.colorScheme
-                return
-            }
             recreate()
         } else {
             mWallpaperThemeManager.updateTheme()
