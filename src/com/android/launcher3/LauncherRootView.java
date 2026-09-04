@@ -233,6 +233,11 @@ public class LauncherRootView extends InsettableFrameLayout {
         }
     }
 
+
+    /** §9 unfolded dim state, for [AresTestInfo.REQUEST_DIM_STATE]. */
+    public boolean isAresUnfoldedWallpaperDim() {
+        return mAresUnfoldedWallpaperDim;
+    }
     public float getAresWallpaperDimProgress() {
         return mAresWallpaperDimProgress;
     }

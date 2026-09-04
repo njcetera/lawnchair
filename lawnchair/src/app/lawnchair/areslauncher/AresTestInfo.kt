@@ -444,6 +444,23 @@ object AresTestInfo {
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**
+     * The two §9 wallpaper-dim terms and whether they are STACKING.
+     *
+     * `progress=<f>|unfolded=<bool>|twoPanel=<bool>|state=<name>|stacked=<bool>`
+     *
+     * Owner report 2026-09-04: *"it seems like the wallpaper is being dimmed extra?"* There are two
+     * independent dims drawn in `LauncherRootView.dispatchDraw`, and the code comments assert they
+     * cannot both be on -- the ALL_APPS-driven one is documented as never firing unfolded, because
+     * unfolded the launcher stays in NORMAL. That is an ASSUMPTION about state, not an invariant the
+     * code enforces: nothing zeroes `mAresWallpaperDimProgress` when the unfolded term turns on, and
+     * the two `drawColor` calls composite. If the launcher ever reaches ALL_APPS while two-panel, or
+     * the progress term is left non-zero by an interrupted transition, the wallpaper takes both.
+     *
+     * `stacked` is the whole point: it is the condition the comment says is impossible.
+     */
+    const val REQUEST_DIM_STATE = "ares-dim-state"
+
+    /**
      * Stranded `DragView`s, and whether the folder-exit handoff is still latched.
      *
      * `dragging=<bool>|handoffActive=<bool>|dragViews=<n>[|alpha=<a> vis=<v> at=<l>,<t> <w>x<h>]...`
@@ -615,6 +632,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_DIM_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> dimState(launcher) },
+        )
         REQUEST_DRAG_STATE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> dragState(launcher, arg) },
@@ -694,6 +715,17 @@ object AresTestInfo {
      * The walk is over the DragLayer's DIRECT children, which is where `DragView.show()` adds
      * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
      */
+    /** See [REQUEST_DIM_STATE]. */
+    private fun dimState(launcher: Launcher): String {
+        val root = launcher.rootView ?: return "no-root"
+        val progress = root.aresWallpaperDimProgress
+        val unfolded = root.isAresUnfoldedWallpaperDim
+        val twoPanel = (launcher.deviceProfile?.panelCount ?: 1) > 1
+        val state = launcher.stateManager?.state?.javaClass?.name?.substringAfterLast('.') ?: "?"
+        return "progress=$progress|unfolded=$unfolded|twoPanel=$twoPanel|state=$state|" +
+            "stacked=${progress > 0f && unfolded}"
+    }
+
     private fun dragState(launcher: Launcher, arg: String?): String {
         val dragging = launcher.dragController?.isDragging ?: false
         val handoffActive = AresFolderExitHandoff.isActive()

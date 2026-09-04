@@ -1300,6 +1300,24 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         }
         updateBackgroundVisibility(dp);
 
+        // AresLauncher (ledger row 86): SHADOW computation -- logs what the top padding WOULD be if
+        // it were re-derived here, and deliberately applies nothing. Re-deriving here was fix
+        // attempt 1 and it regressed: this callback fires mid-fold with a half-built profile, so it
+        // latches transients. The open question is whether a TRUSTWORTHY call ever arrives last
+        // (in which case recomputing on the final one is sound) or whether the settled profile
+        // never reaches this callback at all. That is a question about ordering, and the only way
+        // to answer it is to watch every call without acting on any of them.
+        if (AresAllApps.isAresAppListPane(mActivityContext)) {
+            boolean hideBarShadow = isAppDrawerSearchBarHidden();
+            int stockShadow = (hideBarShadow && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
+            int wouldBe = AresAllApps.appListTopPaddingPx(
+                    mActivityContext, isAresWorkspacePanel(), stockShadow) + aresRelocatedTopInset();
+            android.util.Log.i("AresPaneAlign", "shadow[profileChanged] have="
+                    + mAH.get(AdapterHolder.MAIN).mPadding.top + " wouldBe=" + wouldBe
+                    + " (insetsTop=" + dp.getInsets().top + " wsPadTop=" + dp.workspacePadding.top
+                    + " panel=" + isAresWorkspacePanel() + " stock=" + stockShadow + ")");
+        }
+
         boolean needsInvalidate = false;
         int navBarScrimColor = Themes.getNavBarScrimColor(mActivityContext);
         if (mNavBarScrimPaint.getColor() != navBarScrimColor) {
