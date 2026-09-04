@@ -43,9 +43,14 @@ import app.lawnchair.preferences2.PreferenceManager2
  *
  * ## Scope, and why it is not "evict everything"
  *
- * Only the packages actually on the home grid, folder contents included. The drawer keeps the lazy
- * path deliberately: the Pixel has ~459 apps and evicting all of them would trade a 10s straggle
- * for a much longer regeneration, which is the opposite of the point.
+ * Only the packages actually on the home grid, folder contents included. The ~435 packages that are
+ * NOT on the grid keep the lazy path deliberately: the Pixel has ~459 apps and evicting all of them
+ * would trade a 10s straggle for a much longer regeneration, which is the opposite of the point.
+ *
+ * Note the scoping is by PACKAGE, not by surface: `removeIconsForPkg` deletes a package-scoped disk
+ * row shared by every surface, and `CacheDataUpdatedTask` also refreshes those packages' drawer
+ * `AppInfo`s. So for the ~24 packages on the grid the drawer is refreshed too. That is wanted (it is
+ * row 61's direction) but it is not "the drawer is excluded".
  *
  * ## STATUS: measured to work on the Pixel, 3 runs per arm, awaiting the owner's feel-gate
  *
@@ -72,7 +77,9 @@ import app.lawnchair.preferences2.PreferenceManager2
  *    late settle collapsed to 13,0,0 -- the fixture removed the defect it was built to expose.
  *
  * Gated on the icon state ACTUALLY changing — [AresIconTint.stateFragment], which folds in the night
- * bit — so an ordinary cold start does not pay for a regeneration nothing asked for.
+ * bit. NOTE it does open on the FIRST launch after an install or a clear-data, when there is no
+ * stored fragment to compare against -- a one-time regeneration of the home packages, not the
+ * steady-state cost.
  */
 object AresThemeIconRefresh {
 
@@ -88,13 +95,22 @@ object AresThemeIconRefresh {
     private const val STORE = "ares_icon_state"
     private const val KEY_LAST = "last_state_fragment"
 
+    // Cached: this is read from `finishBindingItems`, which runs on EVERY model bind (a fold
+    // triggers one), and `getSystemProperty` is an uncached Class.forName + reflective invoke.
+    // `AresIconTint` caches its own `debug.ares.*` reads the same way and for the same reason.
+    private val enabledCached: Boolean by lazy { Utilities.getSystemProperty(PROP, "") != "0" }
+
     @JvmStatic
-    fun enabled(): Boolean = Utilities.getSystemProperty(PROP, "") != "0"
+    fun enabled(): Boolean = enabledCached
 
     /**
-     * Called from `onCreate`. Cheap and non-blocking: the comparison is a string equality against a
-     * `SharedPreferences` value, and the work is enqueued as a model task so it runs on the loader
-     * thread once the model is available.
+     * Called from `finishBindingItems` -- NOT `onCreate`, which is too early:
+     * `enqueueModelUpdateTask` silently discards the task while `isModelLoaded()` is false.
+     *
+     * The comparison itself is a `SharedPreferences` string equality, but reaching it costs a
+     * DataStore `firstBlocking` inside `AresIconTint.stateFragment`, so this is not free -- see the
+     * note on [enabledCached]. The regeneration is enqueued as a model task and runs on the loader
+     * thread.
      */
     @JvmStatic
     fun refreshIfIconStateChanged(launcher: Launcher) {
@@ -133,7 +149,14 @@ object AresThemeIconRefresh {
      * silent give-up is the exact failure this whole routine already hit twice.
      */
     private fun awaitModelThenRun(launcher: Launcher, attempt: Int, body: () -> Unit) {
-        if (launcher.isDestroyed) return
+        if (launcher.isDestroyed) {
+            // The one abort branch that used to be silent. The state fragment is already persisted
+            // by this point, so a launch that dies in this window leaves the store saying the work
+            // was done -- the next launch then matches and stands down, and row 77's straggle comes
+            // back permanently for that state pair, logging exactly like a healthy no-op. Say so.
+            Log.w(TAG, "activity destroyed before the model loaded; icons stay lazy this launch")
+            return
+        }
         if (launcher.model.isModelLoaded()) {
             body()
             return
@@ -152,6 +175,12 @@ object AresThemeIconRefresh {
         launcher.model.enqueueModelUpdateTask { taskController, dataModel, apps ->
             val byUser = HashMap<UserHandle, HashSet<String?>>()
             fun add(info: ItemInfo) {
+                // APPLICATIONS only. `CacheDataUpdatedTask` OP_CACHE_UPDATE re-reads exactly the
+                // items whose itemType is ITEM_TYPE_APPLICATION, so collecting anything else --
+                // a deep shortcut, say -- deletes its disk entry and then regenerates NOTHING,
+                // leaving it worse off than if this had never run: it falls back to the same lazy
+                // path, minus the cached bitmap it used to have.
+                if (info.itemType != com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_APPLICATION) return
                 val pkg = info.targetComponent?.packageName ?: return
                 byUser.getOrPut(info.user) { HashSet() }.add(pkg)
             }

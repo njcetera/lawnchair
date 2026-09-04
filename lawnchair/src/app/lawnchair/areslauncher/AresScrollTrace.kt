@@ -40,11 +40,23 @@ object AresScrollTrace {
 
     private val offsets = IntArray(MAX_SAMPLES)
     private val timesMs = LongArray(MAX_SAMPLES)
-    private var count = 0
-    private var recording = false
+    // Written on the UI thread (the draw listener), read from the binder thread by `dump`, which is
+    // deliberately NOT routed through the UI thread so the read cannot contend with the drag it is
+    // measuring. Volatile so `count` cannot be published ahead of the slot it counts.
+    @Volatile private var count = 0
+    @Volatile private var recording = false
 
     private var listener: ViewTreeObserver.OnDrawListener? = null
-    private var host: com.android.launcher3.Launcher? = null
+
+    /**
+     * The view the listener was registered ON, not the Launcher it was reached through.
+     *
+     * `stop` used to re-resolve `launcher.workspace?.aresHomeList`, which is a DIFFERENT view after
+     * an activity recreate -- so `removeOnDrawListener` was a no-op on the new list while the old
+     * one kept the listener, and nulling `listener` made it unremovable for the rest of the process.
+     * Holding the registration target directly is what makes stop() actually stop.
+     */
+    private var registeredOn: android.view.View? = null
 
     /** Begins recording. Idempotent: a second start restarts cleanly rather than double-listening. */
     @JvmStatic
@@ -53,7 +65,6 @@ object AresScrollTrace {
         val list = launcher.workspace?.aresHomeList ?: return "no-home-list"
         val lm = list.layoutManager as? AresMasonryLayoutManager ?: return "no-masonry"
         recording = true
-        host = launcher
         // SEED sample 0 with the offset as it is RIGHT NOW, rather than waiting for the first draw.
         // A static screen does not redraw, so without this the recording begins at whatever the next
         // draw happens to show -- and an instantaneous seek produces exactly ONE draw, already at its
@@ -71,10 +82,14 @@ object AresScrollTrace {
                 offsets[count] = lm.scrollOffsetPx()
                 timesMs[count] = android.os.SystemClock.uptimeMillis()
                 count++
+                // Self-disarm at the cap. Without this a trace whose `stop` never arrives -- a test
+                // that threw between start and stop -- keeps sampling for the life of the process.
+                if (count >= MAX_SAMPLES) recording = false
             }
         }
         list.viewTreeObserver.addOnDrawListener(l)
         listener = l
+        registeredOn = list
         return "started"
     }
 
@@ -104,9 +119,12 @@ object AresScrollTrace {
     fun stop(launcher: Launcher): String {
         recording = false
         val l = listener ?: return "not-recording"
-        launcher.workspace?.aresHomeList?.viewTreeObserver?.removeOnDrawListener(l)
-        listener = null
-        host = null
+        try {
+            registeredOn?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnDrawListener(l)
+        } finally {
+            listener = null
+            registeredOn = null
+        }
         return "stopped|frames=$count"
     }
 
