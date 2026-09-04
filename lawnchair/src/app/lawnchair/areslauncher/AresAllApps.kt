@@ -1,6 +1,8 @@
 package app.lawnchair.areslauncher
 
 import android.content.Context
+import android.view.View
+import android.view.ViewParent
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
 import com.android.launcher3.views.ActivityContext
@@ -28,6 +30,34 @@ object AresAllApps {
      */
     @JvmStatic
     fun isAresAppListPane(context: ActivityContext?): Boolean = context is Launcher
+
+    /**
+     * True when [view] sits inside the UNFOLDED app-list pane.
+     *
+     * Needed because the pane is a legitimate all-apps surface that the launcher does NOT consider
+     * to be in [LauncherState.ALL_APPS]: unfolded, the app list is workspace page 1, so the state is
+     * NORMAL. Stock guards that gate all-apps behaviour on `isInState(ALL_APPS)` therefore decline
+     * everything here while working perfectly on the folded sheet.
+     *
+     * Measured 2026-09-04 on emulator-5554, which is what sent the owner's report:
+     * `AresLongPress: DECLINED state= ordinal=0 (needs ALL_APPS or OVERVIEW)` on every long-press of
+     * an app-list row unfolded, and none folded. Owner: *"unfolded, I can't hold an app in the app
+     * list for it's menu to pop up or drag it to add it to the home page ... this works when
+     * folded."*
+     *
+     * Asks the VIEW rather than the state, because "is this touch on the app list" is a question
+     * about where the finger landed, and that stays true regardless of which posture or state the
+     * launcher believes it is in.
+     */
+    @JvmStatic
+    fun isInAppListPane(view: View?): Boolean {
+        var p: ViewParent? = view?.parent
+        while (p != null) {
+            if (p is AresPanelAllAppsContainerView) return true
+            p = p.parent
+        }
+        return false
+    }
 
     /**
      * Top padding for the app-list pane's recycler, so its first row's icon box lines up with the

@@ -15,6 +15,8 @@
  */
 package com.android.launcher3.touch;
 
+import app.lawnchair.areslauncher.AresAllApps;
+
 import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
 
@@ -147,7 +149,23 @@ public class ItemLongClickListener {
         Launcher launcher = Launcher.getLauncher(v.getContext());
         if (!canStartDrag(launcher)) return false;
         // When we have exited all apps or are in transition, disregard long clicks
-        if (!launcher.isInState(ALL_APPS) && !launcher.isInState(OVERVIEW)) return false;
+        // AresLauncher: the UNFOLDED app-list pane is a real all-apps surface that the launcher does
+        // not report as ALL_APPS -- it is workspace page 1, so the state is NORMAL. Without the pane
+        // clause this guard declines every long-press there, which took both the popup menu AND the
+        // drag-to-home with it (Workspace.beginDragShared raises the popup via startLongPressAction,
+        // so one rejection kills both). Owner 2026-09-04: "unfolded, I can't hold an app in the app
+        // list for it's menu to pop up or drag it to add it to the home page ... this works when
+        // folded" -- folded IS an ALL_APPS sheet, which is exactly why only one posture was broken.
+        if (!launcher.isInState(ALL_APPS) && !launcher.isInState(OVERVIEW)
+                && !AresAllApps.isInAppListPane(v)) {
+            // AresLauncher: logged because this branch is INVISIBLE from the outside -- a declined
+            // long-press is indistinguishable from a surface with no long-press handler, which is
+            // what made ledger row 84's drag probe uninterpretable for a day.
+            android.util.Log.i("AresLongPress", "DECLINED state=" + launcher.getStateManager()
+                    .getState().getClass().getSimpleName() + " ordinal=" + launcher.getStateManager()
+                    .getState().ordinal + " (needs ALL_APPS or OVERVIEW)");
+            return false;
+        }
         if (launcher.getWorkspace().isSwitchingState()) return false;
 
         StatsLogger logger = launcher.getStatsLogManager().logger();
