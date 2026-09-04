@@ -1370,6 +1370,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        AresThemeReapply.noteBind()
         val info = items[position]
         // Re-assert the widget recycling opt-out on every bind, because onCreateViewHolder is not
         // on every path to one. releaseForRemoval balances the opt-out before a holder leaves --

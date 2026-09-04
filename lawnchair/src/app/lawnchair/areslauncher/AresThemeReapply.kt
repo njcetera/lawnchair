@@ -67,7 +67,31 @@ object AresThemeReapply {
             android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
         val expected = com.android.launcher3.util.Themes.getActivityThemeRes(activity)
-        return "uiModeNight=${if (night) "yes" else "no"}|expected=0x${Integer.toHexString(expected)}"
+        return "uiModeNight=${if (night) "yes" else "no"}" +
+            "|expected=0x${Integer.toHexString(expected)}" +
+            // The values the VIEWS would actually get. This is the fork that decides where the
+            // in-place path is broken: if these move on a switch, the theme is fine and the defect
+            // is that nothing re-reads them; if they do not, `setTheme` never took and no amount of
+            // re-inflation would help. Resolving them is the only way to tell those apart --
+            // `expected` above is what the theme SHOULD be, not what the theme HOLDS.
+            "|colorBackground=${attr(activity, android.R.attr.colorBackground)}" +
+            "|textColorPrimary=${attr(activity, android.R.attr.textColorPrimary)}" +
+            "|windowBackground=${attr(activity, android.R.attr.windowBackground)}"
+    }
+
+    /** One theme attribute as `#aarrggbb`, or a reason it could not be read. */
+    private fun attr(activity: Activity, attrId: Int): String {
+        val tv = android.util.TypedValue()
+        if (!activity.theme.resolveAttribute(attrId, tv, true)) return "unresolved"
+        return when {
+            tv.type >= android.util.TypedValue.TYPE_FIRST_COLOR_INT &&
+                tv.type <= android.util.TypedValue.TYPE_LAST_COLOR_INT ->
+                "#%08x".format(tv.data)
+            tv.resourceId != 0 ->
+                runCatching { "#%08x".format(activity.resources.getColor(tv.resourceId, activity.theme)) }
+                    .getOrElse { "res:0x${Integer.toHexString(tv.resourceId)}" }
+            else -> "type${tv.type}"
+        }
     }
 
     @JvmStatic
@@ -99,50 +123,87 @@ object AresThemeReapply {
     /**
      * Re-applies the new theme to the surfaces a recreate would have rebuilt.
      *
-     * ## THIS DOES NOT WORK YET. Measured 2026-09-03, and left in place as a recorded refutation.
+     * ## THIS DOES NOT WORK YET. Measured 2026-09-03, kept as a recorded narrowing.
      *
-     * Two levers were tried here — re-subscribing the widget host, and `LauncherModel
-     * .rebindCallbacks()` — on the theory that a model rebind re-inflates the grid rows and a
-     * re-subscribe re-inflates the widget's `RemoteViews`. Both run without error. Neither
-     * re-themes anything:
+     * Every comparison below is against what the RECREATE produces, never against the previous
+     * frame. That matters: the first attempt's two captures DID differ by md5, entirely because of
+     * one clock digit, and read as success.
      *
      * ```
-     *   in-place, day vs night          1 cell of 576 differs   (nothing re-themed)
-     *   in-place night vs recreate night   95 cells differ      (still showing the DAY screen)
+     *   attempt 1  widget host re-subscribe + LauncherModel.rebindCallbacks()
+     *              day vs night 1/576 cells   vs recreate-night 95/576
+     *   attempt 2  homeList.adapter.notifyDataSetChanged() directly
+     *              day vs night 0/576 cells   vs recreate-night 102/576
      * ```
      *
-     * The second map is cell-for-cell the same as the recreate's own day-vs-night map, which is the
-     * proof: the in-place screen has not moved off the old theme at all. A byte difference in the
-     * PNGs is NOT evidence here — the two captures did differ, entirely because of one clock digit,
-     * and reading that as success is exactly the trap this comment exists to stop.
+     * ## Four hypotheses tested and REFUTED, in order
      *
-     * What that rules out, and what it leaves. A model rebind is not the missing piece: the grid
-     * rows come back with the previous theme's colours, so either the rows are not re-inflated or
-     * they resolve against a theme that has not actually changed. `Activity.setTheme` OVERLAYS via
-     * `Resources.Theme.applyStyle` rather than replacing, so a stale attribute can survive it — that
-     * is the next hypothesis to TEST, not to assume. Likewise the widget: `stopListening` /
-     * `startListening` does not oblige a provider to push fresh `RemoteViews`.
+     *  1. *The system relaunches because `uiMode` is missing from `configChanges`.* No: with
+     *     `uiMode` declared the activity still recreated 4/4. The recreate is self-inflicted.
+     *  2. *The `-night` resources are stale without a recreate, so re-applying is pointless.* No:
+     *     `resources.configuration.uiMode` flips to night with no recreate AND with `uiMode` absent,
+     *     and `Themes.getActivityThemeRes` follows (`0x7f13001f` -> `0x7f13001d`).
+     *  3. *`setTheme` overlays via `Resources.Theme.applyStyle` and never really takes.* No: the
+     *     activity theme's own attributes move exactly as they do under a recreate —
+     *     `colorBackground` `#fff1f0f6` -> `#ff1a1b20`, `textColorPrimary` `#de000000` -> `#fff1f0f6`.
+     *  4. *The rebind never reaches the adapter.* No: instrumented, `onBindViewHolder` ran **28**
+     *     times during the in-place path, and non-widget rows take the `removeAllViews()` +
+     *     `itemInflater.inflateItem(...)` branch, i.e. they are genuinely re-inflated.
      *
-     * The set of surfaces needing re-apply is known and small (measured over one night switch on the
-     * unfolded 2076x2152 display): one widget, tile `701/type4` at `0,928,1016,1624`, plus scattered
-     * label-text cells in the grid rows. Icon bitmaps did not move in either arm because icon
-     * theming is off in that fixture; a device with themed icons also needs the cache regenerated,
-     * which is row 61's path and is deliberately not duplicated here.
+     * ## Where that leaves it
      *
-     * One thing this did establish, and it removes an assumed blocker: the `-night` resources a
-     * re-inflation would resolve against ARE correct by the time this runs. `resources.configuration
-     * .uiMode` flips to night without the activity being recreated and without `uiMode` in
-     * `configChanges`, and `Themes.getActivityThemeRes` moves with it (`0x7f13001f` -> `0x7f13001d`).
-     * So the problem is re-application, not resource resolution.
+     * Rows are re-inflated, against a theme whose attributes have demonstrably changed, and come
+     * back the same colour. So the label colour does not derive from the activity theme attributes
+     * that were checked. The changed cells were mapped back to real tiles via `ares-tile-metrics`:
+     * the block at `0,928,1016,1624` is widget `701/type4`, and the scattered cells at y>1624 are
+     * the LABELS of ordinary icon tiles (`715..722`, Chrome/Photos/Camera/Messages/...). So there
+     * are two distinct populations, and only one of them is a widget.
+     *
+     * Two candidate sources remain, neither yet tested — this project's rule is that a mechanism
+     * read off the source is a hypothesis, not a finding:
+     *
+     *  - Lawnchair's own palette (`ThemeProvider.colorScheme`, `ColorTokens`), which is a computed
+     *    Material You scheme rather than an `?android` attribute. `LawnchairLauncher.colorScheme` is
+     *    cached at `onCreate` and is NOT refreshed on the `WallpaperThemeManager` path, so anything
+     *    resolving through it keeps the old palette across an in-place switch.
+     *  - `BubbleTextView`'s own text colour, whichever way it is set.
+     *
+     * Widgets are a separate problem with a known cause: `onBindViewHolder`'s `reuseHost` branch
+     * deliberately reuses a live `AppWidgetHostView` rather than re-inflating, to break a flicker
+     * loop, so no adapter-level rebind can ever re-theme one. That is a decision to revisit
+     * explicitly, not to work around here.
+     *
+     * Icon bitmaps did not move in either arm because icon theming is off in this fixture; a device
+     * with themed icons also needs the cache regenerated, which is row 61's path.
      */
+    /**
+     * Bind counter, so "the adapter was told" can be told apart from "the adapter acted".
+     *
+     * Not volatile and does not need to be: `onBindViewHolder` and [reapply] both run on the UI
+     * thread, so this is a plain increment in the bind path rather than a memory barrier.
+     */
+    private var binds = 0
+
+    @JvmStatic
+    fun noteBind() { binds++ }
+
     private fun reapply(launcher: com.android.launcher3.Launcher) {
-        // Widgets first: the round-trip is asynchronous, so starting it early overlaps it with the
-        // model rebind rather than serialising the two.
-        runCatching {
-            launcher.appWidgetHolder.stopListening()
-            launcher.appWidgetHolder.startListening()
-        }.onFailure { Log.w(TAG, "widget host re-subscribe failed", it) }
-        runCatching { launcher.model.rebindCallbacks() }
-            .onFailure { Log.w(TAG, "model rebind failed", it) }
+        val before = binds
+        // Re-bind the grid rows DIRECTLY rather than via the model. `AresHomeAdapter's`
+        // onBindViewHolder does `removeAllViews()` then `itemInflater.inflateItem(...)`, so a plain
+        // notifyDataSetChanged re-INFLATES each row against the activity theme -- which is measured
+        // to hold the new colours by this point. Going through `LauncherModel.rebindCallbacks()`
+        // instead was tried first and moved 1 cell of 576; it never reached the adapter.
+        val list = launcher.workspace?.aresHomeList
+        runCatching { list?.adapter?.notifyDataSetChanged() }
+            .onFailure { Log.w(TAG, "home list rebind failed", it) }
+        // The app-list pane is deliberately NOT touched yet. It is workspace page 1, absent from the
+        // capture this was scoped against, and it holds its own AllAppsStore -- adding it now would
+        // put two unproven changes in one measurement. It matters for the owner's report ("app list
+        // takes longer than home page to update") and follows once the home path is established.
+        Log.i(TAG, "reapply: homeList=${list != null} items=${list?.adapter?.itemCount ?: -1}")
+        list?.post {
+            Log.i(TAG, "reapply: binds during rebind = ${binds - before}")
+        }
     }
 }
