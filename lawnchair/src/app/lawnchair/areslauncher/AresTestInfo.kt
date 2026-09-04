@@ -444,6 +444,37 @@ object AresTestInfo {
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**
+     * Stranded `DragView`s, and whether the folder-exit handoff is still latched.
+     *
+     * `dragging=<bool>|handoffActive=<bool>|dragViews=<n>[|alpha=<a> vis=<v> at=<l>,<t> <w>x<h>]...`
+     *
+     * ## Why a channel and not a read of the code
+     *
+     * Task #8 is a defect ROOT-CAUSED BY READING and never measured, which is the shape this
+     * project keeps paying for. The claim: after a folder-exit handoff, a release that is NOT
+     * consumed by the grid strands the `DragController`'s `DragView` — hidden at handoff by
+     * `AresFolderExitHandoff.maybeTakeOver`'s `d.dragView?.alpha = 0f` and never disposed, because
+     * `onDragEnd` neither keeps the `DragObject` nor touches the view.
+     *
+     * Reading the controller does NOT settle it, and reading it more carefully makes it less
+     * certain rather than more. `cancelDrag()` and a REJECTED drop both set
+     * `deferDragViewCleanupPostAnimation = false`, and `endDrag()` then removes the view itself, so
+     * those endings are clean. The exposed ending is an ACCEPTED drop whose target never starts a
+     * `DragLayer` drop animation: `mDropView` stays null, `clearAnimatedView` has nothing to
+     * finish, `onDeferredEndDrag` never runs — and that path removes the view AND calls
+     * `callOnDragEnd`, so the same gap would ALSO mean [AresFolderExitHandoff.onDragEnd] never
+     * fires and `list` stays non-null for the rest of the process.
+     *
+     * So this reports BOTH numbers, because the interesting outcome is whether they move together:
+     * a stranded view WITH `handoffActive=true` is the deferred-cleanup gap, a stranded view with
+     * `handoffActive=false` is something else entirely, and neither moving refutes the row.
+     *
+     * At rest, on a launcher that has never dragged, the answer must be `dragViews=0` — which is
+     * also the control that proves a later non-zero reading means something.
+     */
+    const val REQUEST_DRAG_STATE = "ares-drag-state"
+
+    /**
      * Drives and reads the edit-mode icon sparkle ([AresIconTransition]) so a test can prove the
      * overlay actually MOUNTS on the current device and posture, instead of silently failing to
      * appear — the "the settings animation isn't happening" class (owner report 2026-09-03). This
@@ -584,6 +615,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_DRAG_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> dragState(launcher, arg) },
+        )
         REQUEST_VIEW_INTEGRITY -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> viewIntegrity(launcher) },
@@ -653,6 +688,42 @@ object AresTestInfo {
      * Deliberately walks from the DECOR VIEW and not from the DragLayer: the crashing walk starts
      * there, and a check that begins lower could miss the corrupt container entirely.
      */
+    /**
+     * See [REQUEST_DRAG_STATE]. Read-only: walks the DragLayer for `DragView` children.
+     *
+     * The walk is over the DragLayer's DIRECT children, which is where `DragView.show()` adds
+     * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
+     */
+    private fun dragState(launcher: Launcher, arg: String?): String {
+        val dragging = launcher.dragController?.isDragging ?: false
+        val handoffActive = AresFolderExitHandoff.isActive()
+        val layer = launcher.dragLayer ?: return "no-drag-layer"
+        // SELF-CHECK, and the reason it exists: `dragViews=0` is indistinguishable from a walk that
+        // is looking in the wrong place. A home-grid reorder does NOT go through the DragController
+        // at all -- it is an ItemTouchHelper drag -- so the obvious way to make this probe report a
+        // non-zero (run the reorder suite and poll) reports `dragging=false` for the whole run and
+        // proves nothing. Until a DragController drag has actually been caught in the act, `children`
+        // is what shows the walk is enumerating the real DragLayer rather than an empty container.
+        if (arg == "children") {
+            val names = (0 until layer.childCount)
+                .mapNotNull { layer.getChildAt(it)?.javaClass?.simpleName }
+                .joinToString(",")
+            return "dragLayerChildren=${layer.childCount}|$names"
+        }
+        val found = StringBuilder()
+        var n = 0
+        for (i in 0 until layer.childCount) {
+            val child = layer.getChildAt(i) ?: continue
+            if (child !is com.android.launcher3.dragndrop.DragView<*>) continue
+            n++
+            found.append(
+                "|alpha=${child.alpha} vis=${child.visibility} " +
+                    "at=${child.left},${child.top} ${child.width}x${child.height}",
+            )
+        }
+        return "dragging=$dragging|handoffActive=$handoffActive|dragViews=$n$found"
+    }
+
     private fun viewIntegrity(launcher: Launcher): String {
         val root = launcher.window?.decorView ?: return "no-decor"
         val bad = StringBuilder()
