@@ -36,6 +36,7 @@ import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.areslauncher.AresIconTransition
+import app.lawnchair.areslauncher.AresThemeIconRefresh
 import app.lawnchair.compat.LawnchairQuickstepCompat
 import app.lawnchair.data.AppDatabase
 import app.lawnchair.data.wallpaper.service.WallpaperService
@@ -283,6 +284,10 @@ class LawnchairLauncher : QuickstepLauncher() {
         showQuickstepWarningIfNecessary()
 
         reloadIconsIfNeeded()
+
+        // Ledger row 77: regenerate the HOME icons now rather than letting the icon cache's lazy
+        // ~12s revalidation deliver them. Gated off by default.
+        AresThemeIconRefresh.refreshIfIconStateChanged(this)
 
         AppDatabase.INSTANCE.get(this).checkpointSync()
     }
