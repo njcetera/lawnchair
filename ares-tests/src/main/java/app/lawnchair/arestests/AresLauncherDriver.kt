@@ -82,6 +82,9 @@ class AresLauncherDriver {
      * permission, so `pm grant` can hand it to this test APK -- which declares it in its own
      * manifest -- and without it every provider call is refused.
      */
+    /** The launcher's pid, or "" if it is not running. Empty AND a changed value both mean death. */
+    fun launcherPid(): String = shell("pidof $launcherPackage").trim()
+
     fun openTestChannel() {
         device.executeShellCommand(
             "pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS",
@@ -502,7 +505,14 @@ class AresLauncherDriver {
 
     fun pressBack() = device.pressBack()
 
-    private fun shell(cmd: String): String = device.executeShellCommand(cmd)
+    /**
+     * Run a shell command as the instrumentation's shell identity.
+     *
+     * NOT for `run-as <pkg> sqlite3 ...`, which silently returns nothing through
+     * `UiAutomation.executeShellCommand` (measured, every quoting variant) while working fine over
+     * `adb shell`. Seed database fixtures from the runner instead.
+     */
+    fun shell(cmd: String): String = device.executeShellCommand(cmd)
 
     /**
      * Fails loudly if the two-widget fixture is not present.
