@@ -165,6 +165,18 @@ class AresLauncherDriver {
     fun homeOrder(): List<String> =
         call("ares-home-order")?.getStringArray("response")?.toList() ?: emptyList()
 
+    /**
+     * `AresDragWatch`'s counters, or null when the channel cannot answer. See ledger row 84.
+     *
+     * NULLABLE, for the same reason [homeColumns] is: defaulting a missing answer to a number lets
+     * a caller read "the launcher was not there" as a measurement.
+     */
+    fun dragWatch(): String? = call("ares-drag-state", "history")?.getString("response")
+
+    /** Parses `starts=<n>` out of [dragWatch]. -1 when the field is absent. */
+    fun dragStarts(): Int =
+        Regex("""starts=(\d+)""").find(dragWatch() ?: "")?.groupValues?.get(1)?.toIntOrNull() ?: -1
+
     fun isEditMode(): Boolean = call("ares-edit-mode")?.getBoolean("response") ?: false
 
     /**
