@@ -472,6 +472,23 @@ object AresTestInfo {
      */
     const val REQUEST_HOME_BIND = "ares-home-bind"
 
+    /**
+     * The hotseat's actual presence: `vis|children|bounds|alpha|height`.
+     *
+     * Exists because "is the hotseat reachable under Strategy D?" decides whether
+     * `AresFolderExitHandoff` still has ANY live origin, and neither available instrument could
+     * answer it. `uiautomator dump` shows no hotseat node in either posture, but an accessibility
+     * tree omits a view for several reasons that are not "it does not exist", so absence there is
+     * not proof. The layout still inflates `@id/hotseat` and nothing in the fork hides it, so
+     * reading the source says the opposite. This reports what the VIEW says about itself.
+     *
+     * `vis` is `VISIBLE`/`INVISIBLE`/`GONE`, `children` counts the icons actually laid out in it,
+     * and `bounds` is on-screen, so a hotseat that exists but sits below the display bottom is
+     * distinguishable from one that is `GONE` and from one that is simply empty. Those three cases
+     * imply different things about the handoff and the source cannot tell them apart.
+     */
+    const val REQUEST_HOTSEAT = "ares-hotseat"
+
     const val REQUEST_PANE_PAD = "ares-pane-pad"
 
     /**
@@ -663,6 +680,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_HOTSEAT -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> hotseatState(launcher) },
+        )
         REQUEST_HOME_BIND -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> homeBind(launcher, arg) },
@@ -756,6 +777,23 @@ object AresTestInfo {
      */
     /** See [REQUEST_PANE_PAD]. */
     /** See [REQUEST_HOME_BIND]. `bound=<n>|rows=<n>|gap=<n>`. */
+    /** See [REQUEST_HOTSEAT]. */
+    private fun hotseatState(launcher: Launcher): String {
+        val hotseat = launcher.hotseat ?: return "no-hotseat-view"
+        val vis = when (hotseat.visibility) {
+            android.view.View.VISIBLE -> "VISIBLE"
+            android.view.View.INVISIBLE -> "INVISIBLE"
+            else -> "GONE"
+        }
+        val kids = hotseat.shortcutsAndWidgets?.childCount ?: -1
+        val at = IntArray(2)
+        hotseat.getLocationOnScreen(at)
+        val screenH = launcher.resources.displayMetrics.heightPixels
+        return "vis=$vis|children=$kids|top=${at[1]}|height=${hotseat.height}" +
+            "|alpha=${hotseat.alpha}|screenH=$screenH" +
+            "|offscreen=${at[1] >= screenH}"
+    }
+
     private fun homeBind(launcher: Launcher, arg: String?): String {
         val list = launcher.workspace?.aresHomeList ?: return "no-list"
         val adapter = list.aresAdapter
