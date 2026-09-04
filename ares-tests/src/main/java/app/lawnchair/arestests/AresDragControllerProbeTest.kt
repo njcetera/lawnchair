@@ -50,20 +50,27 @@ import org.junit.runner.RunWith
  * ## THIS TEST IS CURRENTLY RED, ON PURPOSE, AND THAT IS THE FINDING
  *
  * First run on emulator-5554 (uptime ~5h, well inside the healthy window): it FOUND an app-list
- * icon — so it did not skip — dragged it, and `starts` stayed at **0**. A follow-up plain
- * `input swipe` long-press on the same icon produced **no popup and no visible response at all**.
+ * icon — so it did not skip — dragged it, and `starts` stayed at **0**.
  *
- * That is the third independent route to a `DragController` drag that has come back empty, after
- * the reorder-suite poll and `input draganddrop`. Together with the static picture — the only
- * `beginDragShared` callers carrying an item that already has a DB row are the OVERLAY `Folder`
- * (removed by the WP migration) and the hotseat — the accumulating evidence is that the
- * `DragController` is largely unused on the Ares home surface, and that row 84's ghost may be on a
- * dead path.
+ * **A follow-up observation that was WRONG, kept here because the mistake is instructive.** This doc
+ * first said a plain `input swipe` long-press on the same icon produced "no popup and no visible
+ * response at all", and treated that as corroboration. The coordinate had been read off a
+ * screenshot by eye and MISSED the item. At the true centre — `[1078,1055][2018,1182]` from the
+ * accessibility tree — the identical gesture **launches the app**. It is landing as a TAP, which is
+ * CLAUDE.md's *"a failed long-press is a TAP"* trap, and it says nothing about whether the rail
+ * has a long-press handler at all (the tree reports the item `long-clickable="true"`). Retracted in
+ * ledger row 85.
  *
- * **NOT concluded.** Whether this fork's app-list rail is even supposed to start a drag is
- * unverified, and a failure to arm is indistinguishable from a surface that never drags. Leaving
- * the test red rather than deleting or `@Ignore`-ing it keeps the open question visible, which is
- * the point: it is a control that has not yet been achieved, not a defect in the product.
+ * What still stands: the reorder-suite poll (45/45 `dragging=false`) is structural rather than a
+ * sampling miss, and the static picture is unchanged — the only `beginDragShared` callers carrying
+ * an item that already has a DB row are the OVERLAY `Folder` (removed by the WP migration) and the
+ * hotseat. So row 84's ghost may still be on a dead path.
+ *
+ * **NOT concluded, and now less strongly supported than the first draft claimed.** A synthetic
+ * long-press that degrades to a tap is indistinguishable from a surface with no long-press handler,
+ * and the home grid arming under the identical method proves only that the HOME grid's custom touch
+ * handling accepts it. Leaving the test red rather than deleting or `@Ignore`-ing it keeps the open
+ * question visible: it is a control not yet achieved, not a defect in the product.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
