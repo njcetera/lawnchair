@@ -425,18 +425,22 @@ object AresTestInfo {
      */
     const val REQUEST_VIEW_INTEGRITY = "ares-view-integrity"
 
+    /** Night-mode and theme-res state of the launcher activity. See [AresThemeReapply.state]. */
+    const val REQUEST_THEME_STATE = "ares-theme-state"
+
     /**
-     * Per-DRAWN-FRAME home-grid scroll offsets: `start`, `stop`, `dump`.
+     * Per-DRAWN-FRAME home-grid scroll offsets: `start`, `stop`, `teleport`, `dump`.
      *
      * The instrument ledger row 27 actually needs. A channel poll aliases (row 68a: a "40ms"
      * sampler really returned 44-115ms gaps and summed several frames of legitimate auto-scroll
      * into one apparent teleport), and a ViewCapture cannot see a ViewPropertyAnimator translation
      * at all (row 75), which is why the detector-based check on this surface has been standing red
      * without ever describing a real defect. See [AresScrollTrace].
+     *
+     * `teleport` is the POSITIVE CONTROL -- it performs the absolute seek row 27 is about, so the
+     * assertion built on `dump` can be made to FAIL rather than only asserted to pass. Assert on
+     * `movingFrames`, never on `maxStep`; see [AresScrollTrace.dump].
      */
-    /** Night-mode and theme-res state of the launcher activity. See [AresThemeReapply.state]. */
-    const val REQUEST_THEME_STATE = "ares-theme-state"
-
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**

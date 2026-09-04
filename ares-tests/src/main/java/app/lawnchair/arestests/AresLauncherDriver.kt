@@ -92,8 +92,11 @@ class AresLauncherDriver {
     /**
      * `frames`, `maxStep`, `total` parsed out of a [scrollTrace] `dump`.
      *
-     * Assert on `maxStepPx / totalPx`, never on `maxStepPx` alone: the first frame of any
-     * decelerating scroll is legitimately large and scales with how far the grid has to travel.
+     * Assert on [movingFrames], NOT on `maxStepPx` and NOT on `maxStepPx / totalPx`. Both were
+     * measured and discarded: the pixel count failed 5/5 healthy runs, and the FRACTION spanned
+     * 0.25 to 0.82 on healthy code against a teleport's 1.00 -- no gap -- because a per-draw
+     * sampler aliases on a host that drops draws. A frame COUNT cannot be inflated that way.
+     * See `AresSwapGeometryTest.MIN_MOVING_FRAMES`.
      */
     data class ScrollTrace(
         val frames: Int,
@@ -511,12 +514,24 @@ class AresLauncherDriver {
     fun foldCycleAndRecover(): Boolean {
         val states = shell("cmd device_state print-states")
         if (!states.contains("OPENED") || !states.contains("CLOSED")) return false
-        for (state in listOf(0, 2)) {
-            shell("cmd device_state state $state")
+        try {
+            for (state in listOf(0, 2)) {
+                shell("cmd device_state state $state")
+                device.pressKeyCode(android.view.KeyEvent.KEYCODE_WAKEUP)
+                shell("wm dismiss-keyguard")
+                goHome()
+                waitFor("home grid to rebind after fold state $state") { homeOrder().isNotEmpty() }
+            }
+        } finally {
+            // RELEASE the override, always. `cmd device_state state N` PINS the posture: without
+            // this it outlives the test and every later class measures in a posture it did not
+            // choose. On the owner's hardware it is also the state the standing rule says to
+            // restore, and a pinned override auto-releases into a recorded "phantom second cycle",
+            // so leaving it set is worse than neutral.
+            shell("cmd device_state state reset")
             device.pressKeyCode(android.view.KeyEvent.KEYCODE_WAKEUP)
             shell("wm dismiss-keyguard")
             goHome()
-            waitFor("home grid to rebind after fold state $state") { homeOrder().isNotEmpty() }
         }
         return true
     }

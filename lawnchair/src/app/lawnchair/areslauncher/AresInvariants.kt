@@ -123,9 +123,23 @@ object AresInvariants {
      * will not render them if the folder is already open" (2026-08-24) -- which is evidence the
      * splice really can disagree with the model rather than being a theoretical worry.
      *
-     * NOT a tautology over the code that fills the run: the expected count comes from
-     * `FolderInfo.getContents()` (the model) and the actual from a scan of the adapter's own list
-     * (the render), so the two operands come from different sides of the seam.
+     * ## What it actually covers, which is LESS than an earlier version of this doc claimed
+     *
+     * That earlier text said this is "not a tautology ... the two operands come from different sides
+     * of the seam". That is FALSE at the only call site there is. `checkExpandedRun` runs inside
+     * `expandWpFolder`, on the line after `items.addAll(at, children)`, with `expected =
+     * children.size` -- both operands are the same model-side list, one of them counted back out of
+     * the ArrayList it was just poured into. Nothing between them can disagree, so on the expand
+     * path this can only fire if `ArrayList.addAll` or `indexOfFirst` misbehaved.
+     *
+     * And row 40's WP shape happens AFTER the check returns: the rows are in the adapter, and the
+     * failure is that they never reach the screen -- a bind, a layout, or a packer that mis-measures
+     * the run. The checkpoint is upstream of the defect it names.
+     *
+     * It is kept because it is free and it does cover the OTHER mutators of the same run --
+     * `addChildToExpandedRun`, the collapse flush, an in-folder reorder -- if they are ever routed
+     * through it. Catching row 40 needs a check on the RENDER side (children attached / laid out /
+     * inside the packer's run), which does not exist yet; see the ledger.
      *
      * An EMPTY folder expanding with no children is legal and must not fire -- `expandWpFolder`
      * returns early for it on purpose -- which is why this compares against the model's count rather

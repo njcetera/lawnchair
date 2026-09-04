@@ -62,6 +62,16 @@ class AresPaneAlignTest {
         ares.exitEditMode()
     }
 
+    @org.junit.After
+    fun releaseFoldOverride() {
+        // The fold cycle PINS a posture. Releasing it here as well as in the driver is deliberate
+        // belt-and-braces: an assertion failure mid-cycle skips the rest of the test body, and the
+        // next class must not inherit a posture this one chose.
+        if (!::ares.isInitialized) return
+        runCatching { ares.shell("cmd device_state state reset") }
+        runCatching { ares.exitEditMode() }
+    }
+
     /** At rest, unfolded: the two panes' first rows line up within the accepted header offset. */
     @Test
     fun firstRowsAlignWhenUnfolded() {

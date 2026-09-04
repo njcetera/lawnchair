@@ -333,7 +333,7 @@ class AresAnimationAnomalyTest {
 
     private companion object {
         /** One home cell, the unit a reflow moves by; measured 254x232px on emulator-5554. */
-        const val CELL_PX = 200f
+        const val CELL_PX = 200f // deliberately UNDER one cell
 
         const val TAG = "AresAnimAnomaly"
 

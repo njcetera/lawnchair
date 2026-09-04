@@ -109,6 +109,19 @@ class AresFolderHoldTest {
 
         val orderAfter = ares.homeOrder()
         Log.i(TAG, "after hold: editMode=${ares.isEditMode()} order=$orderAfter")
+
+        // THE PRECONDITION, asserted. folder-spec, "Why scripted input has been unreliable here":
+        // *any folder test must assert that the state it intends to create actually exists before
+        // asserting anything about behaviour.* Without this the test passes when the synthetic hold
+        // silently degrades to a TAP -- which CLAUDE.md records happening on an aged emulator, where
+        // folder long-press arming fails 0-for-5 while grid long-presses in the same suite still
+        // work. A build where a bare hold DID pull the child out would then read green, because
+        // nothing happened at all. The predecessor of this test carried the same check and its
+        // comment called it load-bearing; the port dropped it.
+        check(ares.isEditMode()) {
+            "the bare hold never armed edit mode, so nothing about D4 was measured -- " +
+                "this is the aged-emulator arming decay, not a product result"
+        }
         assertWithMessage("a bare hold on a folder child re-ranked the grid, i.e. it pulled the child out")
             .that(orderAfter).isEqualTo(orderBefore)
 

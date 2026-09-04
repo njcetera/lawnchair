@@ -135,9 +135,11 @@ object AresScrollTrace {
      * turns on. `total` is reported alongside it precisely so the two cannot be confused: a long
      * gentle auto-scroll has a large total and a small maxStep, and the defect is the reverse.
      *
-     * Measured 2026-09-03, and the reason the threshold built on this is a FRACTION rather than a
-     * pixel count: ten runs on healthy code put the largest step at a consistent ~250px, because the
-     * first frame of the drop's decelerating scroll legitimately covers a quarter of the travel.
+     * `maxStep` is reported for diagnosis only -- do NOT build a threshold on it, or on
+     * `maxStep / total`. Measured 2026-09-03: ten healthy runs put the largest step at a consistent
+     * ~250px (the first frame of a decelerating scroll legitimately covers a quarter of the travel),
+     * and the fraction spanned 0.25-0.82 against a teleport's 1.00. `movingFrames` is the quantity
+     * that separated cleanly; see `AresSwapGeometryTest.MIN_MOVING_FRAMES`.
      */
     @JvmStatic
     fun dump(): String {

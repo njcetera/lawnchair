@@ -1016,9 +1016,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * Post-condition of an inline expand: the run rendered matches the model (ledger row 71).
      *
      * See [AresInvariants.WP_EXPAND_RUN_MISMATCH] for why this predicate and not the old
-     * declined-open one. Counts the items sitting immediately after the folder row whose container
-     * is this folder -- the same scan [expandedRunRange] uses, so a disagreement here is exactly a
-     * run the packer would also mis-measure.
+     * declined-open one -- AND for the limit of what it covers: called from [expandWpFolder] one
+     * line after the splice, with `expected` taken from the same list, it cannot disagree on that
+     * path. It measures the ADAPTER, never the render.
+     *
+     * Counts the items sitting immediately after the folder row whose container is this folder --
+     * the same scan [expandedRunRange] uses, so a disagreement here is exactly a run the packer
+     * would also mis-measure.
      */
     private fun checkExpandedRun(folderInfo: FolderInfo, expected: Int) {
         val folderRow = items.indexOfFirst { it.id == folderInfo.id }
