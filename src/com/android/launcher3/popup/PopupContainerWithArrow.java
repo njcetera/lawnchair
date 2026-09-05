@@ -589,9 +589,16 @@ public class PopupContainerWithArrow<T extends Context & ActivityContext>
                 || !app.lawnchair.areslauncher.AresWidgetAdd.isAresHome(launcher)) {
             return false;
         }
-        return mOriginalIcon != null && mOriginalIcon.getTag() instanceof ItemInfo info
-                && info.container == com.android.launcher3.LauncherSettings.Favorites
-                        .CONTAINER_ALL_APPS;
+        // Every all-apps-hosted container, not just CONTAINER_ALL_APPS: a predicted app carries
+        // CONTAINER_ALL_APPS_PREDICTION and takes the same long-press path, and ItemLongClickListener
+        // no longer restores visibility for ANY all-apps drag on an Ares home -- so a container
+        // missed here is an icon hidden for good (nightly review 2026-09-05, F1).
+        if (mOriginalIcon == null || !(mOriginalIcon.getTag() instanceof ItemInfo info)) {
+            return false;
+        }
+        return info.container == com.android.launcher3.LauncherSettings.Favorites.CONTAINER_ALL_APPS
+                || info.container == com.android.launcher3.LauncherSettings.Favorites
+                        .CONTAINER_ALL_APPS_PREDICTION;
     }
 
     /**
