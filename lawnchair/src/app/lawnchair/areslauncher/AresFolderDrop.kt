@@ -643,7 +643,20 @@ object AresFolderDrop {
         // otherwise resolve to CREATE and flash the overlay create ring/preview mid-extract -- the
         // very overlay WP folders must never raise (MJ-2). AresHomeReorder owns the extract drag;
         // the dwell has no business in it.
-        if (source.container != Favorites.CONTAINER_DESKTOP) return Kind.NONE
+        //
+        // Written as "any non-desktop source", that guard also rejected every APP-LIST drag: an
+        // AppInfo carries CONTAINER_ALL_APPS (a predicted one CONTAINER_ALL_APPS_PREDICTION), so
+        // holding an app from the list over a home folder armed nothing -- measured 2026-09-05
+        // (nightly review F3, ledger row 99: 4.5 s over the "Stuff" folder, zero dwell lines) --
+        // and §17's "the folder behaves the same whichever surface the icon came from" was false
+        // for the surface that adds most apps. Owner, 2026-09-05: "we should be able to add it to
+        // a folder if we dwell over a folder icon." So the guard now names what it is FOR: a
+        // spliced child's container is its folder's id, and that is the only source it excludes.
+        // Desktop tiles and all-apps sources are both foldable, exactly as a home tile is.
+        val sourceIsFoldableOrigin = source.container == Favorites.CONTAINER_DESKTOP ||
+            source.container == Favorites.CONTAINER_ALL_APPS ||
+            source.container == Favorites.CONTAINER_ALL_APPS_PREDICTION
+        if (!sourceIsFoldableOrigin) return Kind.NONE
         if (!Folder.willAccept(source)) return Kind.NONE
         if (target is FolderInfo) {
             return if (FolderInfo.willAcceptItemType(source.itemType)) Kind.ADD else Kind.NONE
