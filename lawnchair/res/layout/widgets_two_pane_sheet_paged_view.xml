@@ -92,6 +92,22 @@
                     android:tint="?attr/widgetPickerWidgetOptionsMenuColor" />
             </FrameLayout>
 
+            <!-- AresLauncher: the sticky suggestions header stock's two-pane layout carries and this
+                 overlay had dropped. WidgetsTwoPaneSheet.setupSuggestedWidgets does
+                 findViewById(R.id.suggestions_header).addView(...), so without it the work-profile
+                 (paged) picker would NPE the moment recommendations bound. Same class of defect as
+                 the ClassCastException in widgets_two_pane_sheet_recyclerview.xml (ledger row 94);
+                 this half is by construction only; neither test device has a work profile. -->
+            <FrameLayout
+                android:id="@+id/suggestions_header"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginHorizontal="@dimen/widget_list_horizontal_margin_two_pane"
+                android:paddingBottom="16dp"
+                android:background="?attr/widgetPickerPrimarySurfaceColor"
+                launcher:layout_sticky="true">
+            </FrameLayout>
+
             <!-- Shown when there are recommendations to display -->
             <LinearLayout
                 android:id="@+id/widget_recommendations_container"

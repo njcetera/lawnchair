@@ -68,16 +68,21 @@
                     android:tint="?attr/widgetPickerWidgetOptionsMenuColor" />
             </LinearLayout>
 
-            <LinearLayout
+            <!-- AresLauncher: a FrameLayout, as in stock's res/layout copy. WidgetsTwoPaneSheet
+                 declares the field as FrameLayout and casts the findViewById result, so the
+                 LinearLayout this overlay used to declare threw ClassCastException the moment
+                 recommended widgets bound: opening the picker UNFOLDED crashed the launcher and
+                 cleared the home-app preference. Measured 2026-09-04 on emulator-5554 (twice) and
+                 present once in the Pixel's dropbox. Ledger row 94. -->
+            <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:id="@+id/suggestions_header"
                 android:layout_marginHorizontal="@dimen/widget_list_horizontal_margin_two_pane"
-                android:orientation="horizontal"
                 android:paddingBottom="16dp"
                 android:background="?attr/widgetPickerPrimarySurfaceColor"
                 launcher:layout_sticky="true">
-            </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <com.android.launcher3.widget.picker.WidgetsRecyclerView
