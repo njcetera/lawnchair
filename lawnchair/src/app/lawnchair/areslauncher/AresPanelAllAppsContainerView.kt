@@ -2,7 +2,10 @@ package app.lawnchair.areslauncher
 
 import android.content.Context
 import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
+import kotlin.math.hypot
 import com.android.launcher3.DeviceProfile
 import com.android.launcher3.Launcher
 import com.android.launcher3.allapps.ActivityAllAppsContainerView
@@ -42,6 +45,51 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * check. Returning true is correct for a panel that is never dismissed.
      */
     override fun isInAllApps(): Boolean = true
+
+    // ---- Inactive while a WP folder is inline-expanded (ledger row 100) -----------------------
+    //
+    // Owner, 2026-09-05: "when unfolded if a folder is open, the app list should be dim and inactive
+    // like the rest of the home screen. if its tapped, the folder should close first." The DIM half
+    // is the home list's folder wash, which paints this pane too (AresHomeListView.paintFolderWash).
+    // This is the INACTIVE half: while a folder is expanded every touch on the pane is intercepted
+    // here, a stationary tap collapses the folder (and does nothing else -- the row under the finger
+    // does not launch), and a scroll is swallowed. Mirrors the grid's own rule, where a tap outside
+    // the open folder closes it and is consumed (AresHomeListView's UP handling), and where a
+    // scroll with a folder open is neither a close nor a launch.
+
+    private var folderGateActive = false
+    private var folderGateDownX = 0f
+    private var folderGateDownY = 0f
+
+    private fun expandedWpFolderOpen(): Boolean =
+        (mActivityContext.workspace?.aresHomeList?.aresAdapter?.expandedWpFolder() ?: -1) != -1
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) folderGateActive = expandedWpFolderOpen()
+        return if (folderGateActive) true else super.onInterceptTouchEvent(ev)
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        if (!folderGateActive) return super.onTouchEvent(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                folderGateDownX = ev.x
+                folderGateDownY = ev.y
+            }
+            MotionEvent.ACTION_UP -> {
+                val slop = ViewConfiguration.get(context).scaledTouchSlop
+                val tap = hypot(ev.x - folderGateDownX, ev.y - folderGateDownY) <= slop
+                android.util.Log.i(
+                    "AresPaneFolderGate",
+                    "touch on the pane with a folder open: ${if (tap) "tap -> collapsing" else "not a tap -> swallowed"}",
+                )
+                if (tap) mActivityContext.workspace?.aresHomeList?.aresAdapter?.collapseWpFolder()
+                folderGateActive = false
+            }
+            MotionEvent.ACTION_CANCEL -> folderGateActive = false
+        }
+        return true
+    }
 
     /**
      * No-op. The bottom-sheet background is chrome for a sheet that slides over the workspace; this

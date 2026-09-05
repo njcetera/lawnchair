@@ -541,11 +541,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 if (strength > 0.001f) freezeTile(child) // no-op outside edit mode
             }
         }
+        paneForWash()?.let { applyTileWash(it, strength) }
     }
+
+    /**
+     * The unfolded app-list pane while it is attached, so it takes the folder wash with the rest of
+     * the home screen (ledger row 100; owner 2026-09-05: "when unfolded if a folder is open, the app
+     * list should be dim and inactive like the rest of the home screen"). The INACTIVE half lives
+     * in [AresPanelAllAppsContainerView]'s touch gate. Null folded, where the pane is detached.
+     */
+    private fun paneForWash(): View? = launcher.workspace?.aresAppListPane
 
     private fun clearAllTileWash() {
         washStrength = 0f
         washPaint = null
+        paneForWash()?.let { applyTileWash(it, 0f) }
         for (i in 0 until childCount) {
             val child = getChildAt(i) ?: continue
             if (child.layerType == LAYER_TYPE_HARDWARE) child.setLayerType(LAYER_TYPE_NONE, null)
