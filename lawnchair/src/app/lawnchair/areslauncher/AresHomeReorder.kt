@@ -817,7 +817,12 @@ object AresHomeReorder {
             // synthetic UP/CANCEL ends the lift and nothing else -- AresHomeDrop commits or refuses
             // the real item and renumbers, and the external dwell resolves there. Persisting here
             // would write the slot-free order a moment before that renumber rewrites it.
-            if (list.aresAdapter.isDropSlot(item)) return
+            if (list.aresAdapter.isDropSlot(item)) {
+                // Logged because this branch was DEAD for a day without anyone noticing (nightly
+                // review 2026-09-05, F2): the identity test it used was nulled before clearView ran.
+                Log.i("AresHomeDropPreview", "slot released (end=$end): no commit, no persist here")
+                return
+            }
             // WP folders reorder-inside (design/wp-phase2-spike.md): a child dragged among its
             // siblings must write FOLDER-LOCAL ranks, never the desktop persistOrder (which skips
             // non-DESKTOP rows and would silently drop the reorder -- the reviewers' Scenario C).

@@ -1268,7 +1268,12 @@ class AresHomeAdapter(private val launcher: Launcher) :
     private var dropSlot: ItemInfo? = null
 
     /** True when [info] is the gap rather than a real item. */
-    fun isDropSlot(info: ItemInfo?): Boolean = info != null && info === dropSlot
+    fun isDropSlot(info: ItemInfo?): Boolean =
+        // By id as well as identity: ItemTouchHelper's clearView for the lifted slot fires at the
+        // END of its recover animation, after take()/clear() have already nulled [dropSlot] -- so an
+        // identity-only test answered false there and the "no commit, no persist" branch never ran
+        // (nightly review 2026-09-05, F2). The id is unique by construction (see showDropSlot).
+        info != null && (info === dropSlot || info.id == DROP_SLOT_ID)
 
     /**
      * Opens a gap at [index] and returns it.
@@ -1361,8 +1366,8 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     fun spanOf(position: Int): AresPacker.Span {
         val info = items.getOrNull(position) ?: return AresPacker.Span(1, 1)
-        // The drop slot is typed as an icon (it renders nothing) but carries the footprint of the
-        // item being held; a 4x2 widget in hand must open a 4x2 hole. Measured 2026-09-04 without
+        // The drop slot renders nothing but carries the footprint of the item being held (and its
+        // kind: a widget slot is typed APPWIDGET); a 4x2 widget in hand must open a 4x2 hole. Measured 2026-09-04 without
         // this branch: the Gmail Inbox widget's gap was one cell (254x232) and the widget landed
         // one index off the gap because the finger kept re-hitting the tile beside it (row 97).
         if (info === dropSlot) {
