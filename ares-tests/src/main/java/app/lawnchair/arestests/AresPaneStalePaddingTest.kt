@@ -73,11 +73,25 @@ class AresPaneStalePaddingTest {
      * A stale padding left behind would contaminate every later class in the suite, so restore
      * unconditionally when a test forced one -- even though the product now heals it, since a
      * FAILING run is exactly the run where it did not.
+     *
+     * Restore through the channel FIRST and kill the process only if that did not take. This class
+     * runs ahead of gesture classes in the standing suite, and CLAUDE.md records that a force-stop
+     * immediately before a synthetic long-press stops it registering -- a contamination that
+     * presents as the NEXT class failing its arming precondition (adversarial review 2026-09-05,
+     * F8b). The kill stays as the fallback because `reset` is the same product path this class
+     * exists to distrust.
      */
     @After
     fun restore() {
         if (!::ares.isInitialized || !forced) return
-        runCatching { ares.shell("am force-stop ${ares.launcherPackage}") }
+        runCatching { ares.panePad("reset") }
+        val after = runCatching { ares.panePad() }.getOrNull()
+        if (after == null || after == "no-pane" || staleOf(after)) {
+            Log.w(TAG, "channel reset did not restore the pane ($after); force-stopping")
+            runCatching { ares.shell("am force-stop ${ares.launcherPackage}") }
+            // Settle, so a long-press in the next class is not the first touch after a kill.
+            Thread.sleep(3_000)
+        }
         runCatching { ares.goHome() }
     }
 

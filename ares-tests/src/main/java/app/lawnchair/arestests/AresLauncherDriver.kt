@@ -166,18 +166,18 @@ class AresLauncherDriver {
         call("ares-home-order")?.getStringArray("response")?.toList() ?: emptyList()
 
     /**
-     * `AresDragWatch`'s counters, or null when the channel cannot answer. See ledger row 84.
-     *
-     * NULLABLE, for the same reason [homeColumns] is: defaulting a missing answer to a number lets
-     * a caller read "the launcher was not there" as a measurement.
-     */
-    /**
      * `ares-pane-pad`: the pane's top padding versus what the live profile implies (ledger row 86).
      * `arg` is null (read), `stale` (force the defect) or `reset`. Null when the channel is silent.
      */
     fun panePad(arg: String? = null): String? =
         call("ares-pane-pad", arg)?.getString("response")
 
+    /**
+     * `AresDragWatch`'s counters, or null when the channel cannot answer. See ledger row 84.
+     *
+     * NULLABLE, for the same reason [homeColumns] is: defaulting a missing answer to a number lets
+     * a caller read "the launcher was not there" as a measurement.
+     */
     fun dragWatch(): String? = call("ares-drag-state", "history")?.getString("response")
 
     /** Parses `starts=<n>` out of [dragWatch]. -1 when the field is absent. */

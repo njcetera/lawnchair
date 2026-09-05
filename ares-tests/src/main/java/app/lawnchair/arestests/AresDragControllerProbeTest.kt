@@ -36,41 +36,31 @@ import org.junit.runner.RunWith
  *
  * ## What it proves, and what it deliberately does NOT
  *
- * An app-list icon carries `ItemInfo.NO_ID`, so `AresFolderExitHandoff.maybeTakeOver` DECLINES it.
- * That is fine and intended: this test is not about the handoff. It only has to show that a
- * `DragController` drag can be started and counted on this device — i.e. that `starts` moving is
- * observable — so that a later `starts=0` over a folder gesture is evidence of absence rather than
- * evidence of a dead instrument.
+ * It only has to show that a `DragController` drag can be started and counted on this device —
+ * i.e. that `starts` moving is observable — so that a `starts=0` elsewhere is evidence of absence
+ * rather than evidence of a dead instrument. (It was written while the folder-exit handoff still
+ * existed; that helper declined app-list items and has since been deleted, task #107.)
  *
  * Deliberately NOT in the standing list in `run-ares-tests.sh`. It depends on synthetic long-press
  * arming, which CLAUDE.md records decaying with emulator uptime, and the regression programme's own
- * history says an intermittently-red check is worse than no check. Run it by name when row 84 needs
- * its control; promote it only if it proves steady.
+ * history says an intermittently-red check is worse than no check. Run it by name when the drag
+ * instruments need their control; promote it only once it has proved steady across a few nights.
  *
- * ## THIS TEST IS CURRENTLY RED, ON PURPOSE, AND THAT IS THE FINDING
+ * ## History: it was RED for a day, and the red was stale within two hours
  *
- * First run on emulator-5554 (uptime ~5h, well inside the healthy window): it FOUND an app-list
- * icon — so it did not skip — dragged it, and `starts` stayed at **0**.
+ * First run on emulator-5554 (2026-09-04 07:10, uptime ~5h): it FOUND an app-list icon, dragged it,
+ * and `starts` stayed at **0**. The doc then said "RED ON PURPOSE, AND THAT IS THE FINDING". At
+ * 12:24 the same day `64a06abc1b` found and fixed the actual cause — `onAllAppsItemLongClick`
+ * declined every long-press on the unfolded pane because the launcher is in `NORMAL` there, not
+ * `ALL_APPS` — and nobody re-ran this class. The adversarial review of 2026-09-05 (F4) caught the
+ * stale claim; re-run at ~18:10 on a fresh emulator process, unfolded, real injector:
+ * **`OK (1 test)` in 4.3s**. Ledger row 84a.
  *
- * **A follow-up observation that was WRONG, kept here because the mistake is instructive.** This doc
- * first said a plain `input swipe` long-press on the same icon produced "no popup and no visible
- * response at all", and treated that as corroboration. The coordinate had been read off a
- * screenshot by eye and MISSED the item. At the true centre — `[1078,1055][2018,1182]` from the
- * accessibility tree — the identical gesture **launches the app**. It is landing as a TAP, which is
- * CLAUDE.md's *"a failed long-press is a TAP"* trap, and it says nothing about whether the rail
- * has a long-press handler at all (the tree reports the item `long-clickable="true"`). Retracted in
- * ledger row 85.
- *
- * What still stands: the reorder-suite poll (45/45 `dragging=false`) is structural rather than a
- * sampling miss, and the static picture is unchanged — the only `beginDragShared` callers carrying
- * an item that already has a DB row are the OVERLAY `Folder` (removed by the WP migration) and the
- * hotseat. So row 84's ghost may still be on a dead path.
- *
- * **NOT concluded, and now less strongly supported than the first draft claimed.** A synthetic
- * long-press that degrades to a tap is indistinguishable from a surface with no long-press handler,
- * and the home grid arming under the identical method proves only that the HOME grid's custom touch
- * handling accepts it. Leaving the test red rather than deleting or `@Ignore`-ing it keeps the open
- * question visible: it is a control not yet achieved, not a defect in the product.
+ * Two lessons kept from the day it was red. (1) A plain `input swipe` long-press at the item's true
+ * centre **launches the app** — it lands as a TAP (CLAUDE.md's trap), so a shell swipe says nothing
+ * about whether a surface has a long-press handler; ledger row 85. (2) A declined long-press is
+ * indistinguishable from a missing handler from the outside, which is why `ItemLongClickListener`
+ * now logs its DECLINE branch.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
