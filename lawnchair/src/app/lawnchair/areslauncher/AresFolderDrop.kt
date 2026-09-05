@@ -544,7 +544,7 @@ object AresFolderDrop {
             list.removeCallbacks(liveArmFailsafe)
             list.postDelayed(liveArmFailsafe, LIVE_ARM_FAILSAFE_MS)
             val now = android.os.SystemClock.uptimeMillis()
-            list.dispatchSyntheticHandoffEvent(
+            list.dispatchSyntheticEvent(
                 android.view.MotionEvent.ACTION_UP, now, now, anchorX, anchorY,
             )
             Log.i(TAG, "live-create arming: ended the in-grid drag to form a folder on ${candidateInfo?.id}")
@@ -845,7 +845,7 @@ object AresFolderDrop {
         // Folder.addFolderContent -- but this method would still post adapter.removeItems for the
         // item's grid tile and return true, so the item loses its tile without ever entering a
         // folder: the app "disappears" from the home screen. Decline the whole commit; the item
-        // stays on the grid where AresFolderExitHandoff already placed it.
+        // stays on the grid where the drag-out already placed it.
         if (folder.isDestroyed) {
             Log.w(TAG, "addToFolder declined: folder ${folderInfo.id} is destroyed; " +
                 "item ${item.id} stays on the grid")
@@ -1092,8 +1092,8 @@ object AresFolderDrop {
      * The attach is the load-bearing line: `AresFolderEdit.attach` is what installs
      * [AresFolderDrag.DragStarter] on the folder's app tiles, and DragStarter is the ONLY thing that
      * calls `folder.startDrag`. Without it a folder opened by bare [Folder.animateOpen] has inert
-     * apps: nothing can be dragged out, `isFolderDrag` never becomes true, [AresFolderExitHandoff]
-     * never engages, and the folder never dissolves — §25's drag-out is unreachable (adversarial
+     * apps: nothing can be dragged out, `isFolderDrag` never becomes true, and the folder never
+     * dissolves — §25's drag-out is unreachable (adversarial
      * review 2026-08-21). A live-create dwell is always inside an in-grid drag, i.e. edit mode, so
      * attaching is correct here exactly as [AresFolderPreview.open] does it.
      *
@@ -1228,9 +1228,6 @@ object AresFolderDrop {
      */
     @JvmStatic
     fun onExternalDragOver(launcher: Launcher, d: DropTarget.DragObject) {
-        // A handed-off drag (rows 31/32) is an in-grid drag now; its dwell is fed by the in-grid
-        // pipeline like any other, and feeding it a second time from here would double-drive it.
-        if (AresFolderExitHandoff.isActive()) return
         val list = launcher.workspace?.aresHomeList ?: return
         val local = toListSpace(launcher, list, d.x.toFloat(), d.y.toFloat())
         onDragPoint(list, d.dragInfo, local[0], local[1], fromGrid = false)

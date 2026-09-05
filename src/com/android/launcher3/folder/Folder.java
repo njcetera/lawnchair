@@ -1966,7 +1966,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // AresLauncher WP folders (design/wp-folder-design.md): a Windows-Phone-style folder is
         // persistent -- it is created empty by the FAB and stays a legal folder at 0/1 items until
         // the owner explicitly deletes it. NEVER auto-dissolve one, whichever dissolve path arrives
-        // here (onRemove <=1, onDropCompleted, the eager AresFolderExitHandoff dissolve). This is the
+        // here (onRemove <=1, onDropCompleted). This is the
         // runtime half of the persistence exemption; the loader half is in
         // ModelDbController.deleteEmptyFolders()'s SQL.
         if (mInfo != null && mInfo.isAresWpFolder()) {
@@ -2005,27 +2005,6 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mDestroyed = mLauncherDelegate.replaceFolderWithFinalItem(this);
         android.util.Log.i("AresFolderFlow", "dissolve done folder="
                 + (mInfo != null ? mInfo.id : -1) + " mDestroyed=" + mDestroyed);
-    }
-
-    /**
-     * AresLauncher (owner decision 2026-08-23): dissolve this folder NOW if a drag-out has dropped
-     * it below the 2-item minimum, instead of waiting for onDropCompleted.
-     *
-     * Ares keeps the losing folder as a CLOSED grid icon (stock keeps it OPEN for the whole
-     * drag-out), so a deferred dissolve leaves a 1-item "zombie" folder the user can re-dwell on --
-     * the source of the jank, the failed put-back, and a near miss on the empty-folder crash.
-     * Stock's own {@code onRemove} dissolves a CLOSED folder immediately when {@code
-     * getItemCount() <= 1}; this does the same, called from AresFolderExitHandoff the instant the
-     * second-to-last member joins the grid. The survivor promotes to a real grid tile at once, so
-     * re-folding is a clean fresh create. Guarded to a closed, live, home folder genuinely at <= 1
-     * item, so it is a no-op on a 3+-item folder losing one, an open folder, or an app-drawer folder.
-     */
-    public void aresDissolveIfBelowMinimum() {
-        if (!mIsOpen && !mDestroyed && !isInAppDrawer() && getItemCount() <= 1) {
-            android.util.Log.i("AresFolderFlow", "eager-dissolve folder=" + mInfo.id
-                    + " (down to " + getItemCount() + " item)");
-            replaceFolderWithFinalItem();
-        }
     }
 
     public boolean isDestroyed() {
@@ -2207,7 +2186,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         // Pixel 2026-08-23) commits a dragged item back into a folder that already dissolved
         // mid-drag: the item then vanishes from the grid into a dead folder (the stranded ghost,
         // ledger row 8), and re-populating then re-emptying the folder drives the empty-dissolve
-        // crash below. The item is already placed on the desktop by AresFolderExitHandoff, so
+        // crash below. The drag-out has already placed the item on the desktop, so
         // refusing here leaves it correctly on the grid rather than lost in a destroyed folder.
         if (mDestroyed) {
             android.util.Log.w("AresFolderFlow", "addFolderContent REFUSED: folder "

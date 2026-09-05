@@ -35,7 +35,6 @@ import androidx.lifecycle.lifecycleScope
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.areslauncher.AresBindGuard
 import app.lawnchair.areslauncher.AresDragWatch
-import app.lawnchair.areslauncher.AresFolderExitHandoff
 import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.areslauncher.AresIconTransition
 import app.lawnchair.areslauncher.AresThemeIconRefresh
@@ -812,13 +811,11 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onDestroy() {
-        // state-seam P5 / ledger S5: drop any folder-drag state pinned to THIS activity before it
-        // goes. These are process-global singletons; a fold recreates the Launcher and, mid-drag,
-        // their per-drag terminal callbacks (onDragEnd / preview close) may never fire — leaving a
-        // dead Launcher and grid behind, so isActive() stays true and the next folder-exit drag
-        // relays into a detached grid, or a ghost icon outlives the activity. Both clears are safe
-        // to call when nothing is in flight (guarded / no-op).
-        AresFolderExitHandoff.onLauncherDestroyed(this)
+        // state-seam P5 / ledger S5: drop any drag / preview state pinned to THIS activity before
+        // it goes. These are process-global singletons; a fold recreates the Launcher and, mid-
+        // gesture, their per-drag terminal callbacks (onDragEnd / preview close) may never fire —
+        // leaving a dead Launcher registered, or a ghost icon that outlives the activity. Both
+        // clears are safe to call when nothing is in flight (guarded / no-op).
         AresDragWatch.onLauncherDestroyed(this)
         AresFolderPreview.onLauncherDestroyed(this)
         super.onDestroy()

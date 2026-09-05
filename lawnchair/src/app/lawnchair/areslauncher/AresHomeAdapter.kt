@@ -381,7 +381,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val list = launcher.workspace?.aresHomeList
         list?.animateNextRelayout(child.id.toLong())
         // Drop the spliced child row and re-add it as an ordinary desktop tile (container is now
-        // DESKTOP, so it sorts by rank and is ITH-draggable again). Mirrors AresFolderExitHandoff.
+        // DESKTOP, so it sorts by rank and is ITH-draggable again).
         removeItems { it.id == child.id }
         addItem(child)
         list?.playFolderChildEjected(child)

@@ -46,9 +46,6 @@ object AresDragWatch : DragController.DragListener {
     /** DragLayer `DragView` children counted at the last [onDragEnd]; -1 until one has happened. */
     @Volatile private var viewsAtLastEnd = -1
 
-    /** [AresFolderExitHandoff.isActive] at the last [onDragEnd] — see the class doc. */
-    @Volatile private var handoffAtLastEnd = false
-
     /** The launcher this is registered on, so a re-register cannot double-count. */
     private var registeredOn: Launcher? = null
 
@@ -91,12 +88,16 @@ object AresDragWatch : DragController.DragListener {
                 layer.getChildAt(it) is com.android.launcher3.dragndrop.DragView<*>
             }
         }
-        handoffAtLastEnd = AresFolderExitHandoff.isActive()
     }
 
-    /** `starts=<n>|ends=<n>|viewsAtLastEnd=<n>|handoffAtLastEnd=<bool>|registered=<bool>` */
+    /**
+     * `starts=<n>|ends=<n>|viewsAtLastEnd=<n>|registered=<bool>`
+     *
+     * `ends` can exceed `starts`: a drag that never leaves PRE-DRAG (the popup's pre-drag condition
+     * never met) is ended through `callOnDragEnd` without `onDragStart` ever dispatching. Measured
+     * 2026-09-04 on the folded app list -- three drags, `starts=0|ends=3`.
+     */
     @JvmStatic
     fun summary(): String =
-        "starts=$starts|ends=$ends|viewsAtLastEnd=$viewsAtLastEnd|" +
-            "handoffAtLastEnd=$handoffAtLastEnd|registered=${registeredOn != null}"
+        "starts=$starts|ends=$ends|viewsAtLastEnd=$viewsAtLastEnd|registered=${registeredOn != null}"
 }

@@ -181,23 +181,6 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         }
     }
 
-    /**
-     * Dissolve the folder [folderId] eagerly if a drag-out just dropped it below the 2-item minimum
-     * (owner decision 2026-08-23). Called from AresFolderExitHandoff the instant the second-to-last
-     * member joins the grid, so the folder never lingers as an interactive 1-item zombie. No-op if
-     * the folder is not on screen, or is a 3+-item / open / already-destroyed folder (the guard
-     * lives in Folder.aresDissolveIfBelowMinimum).
-     */
-    fun aresDissolveSourceFolder(folderId: Int) {
-        if (folderId < 0) return
-        for (i in 0 until childCount) {
-            val item = (getChildAt(i) as? ViewGroup)?.getChildAt(0)
-            if (item is FolderIcon && item.mInfo?.id == folderId) {
-                item.folder?.aresDissolveIfBelowMinimum()
-                return
-            }
-        }
-    }
 
     /** The attached holder container currently bound to [info], or null if it is not on screen. */
     private fun childForItem(info: ItemInfo): View? {
@@ -3004,38 +2987,29 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         dragGestureEnd = GESTURE_END_NONE
     }
 
-    // ------------------------------------------------------- folder-exit handoff (rows 31/32)
-
-    private var lastHandoffX = 0f
-    private var lastHandoffY = 0f
+    // ------------------------------------------------------------- synthetic event injection
 
     /**
-     * Feeds [AresFolderExitHandoff]'s relayed gesture into this view's ordinary dispatch, so the
-     * in-grid pipeline — ItemTouchHelper, the gesture-end latch, the empty-space tracker — sees a
-     * stream indistinguishable from a finger that started here. Deliberately through
-     * [dispatchTouchEvent], NOT `super`: the popup's synthetic CANCEL bypasses via `super`
-     * precisely so it cannot masquerade, and this relay is the opposite case — it must.
+     * Feeds a synthetic pointer event into this view's ordinary dispatch, so the in-grid pipeline —
+     * ItemTouchHelper, the gesture-end latch, the empty-space tracker — sees a stream
+     * indistinguishable from a finger that started here. Deliberately through [dispatchTouchEvent],
+     * NOT `super`: the popup's synthetic CANCEL bypasses via `super` precisely so it cannot
+     * masquerade, and this injection is the opposite case — it must.
+     *
+     * Born as the folder-exit handoff's relay (rows 31/32; the handoff itself was measured to have
+     * no reachable origin and deleted, task #107). Its remaining caller is the §25 live-create seam,
+     * which ends the in-grid drag with a synthetic UP before forming the folder.
      */
-    internal fun dispatchSyntheticHandoffEvent(
+    internal fun dispatchSyntheticEvent(
         action: Int,
         downTime: Long,
         eventTime: Long,
         x: Float,
         y: Float,
     ) {
-        lastHandoffX = x
-        lastHandoffY = y
         val ev = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
         dispatchTouchEvent(ev)
         ev.recycle()
-    }
-
-    /** Where the relay last placed the pointer, for ending a drag whose source has gone. */
-    internal fun lastHandoffPoint(): FloatArray = floatArrayOf(lastHandoffX, lastHandoffY)
-
-    /** Selects [holder] for the in-grid drag; the relayed MOVEs drive it from there. */
-    internal fun startHandoffDrag(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder) {
-        itemTouchHelper.startDrag(holder)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {

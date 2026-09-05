@@ -458,17 +458,6 @@ object AresTestInfo {
     const val REQUEST_SCROLL_TRACE = "ares-scroll-trace"
 
     /**
-     * The pane's top padding against what the LIVE profile says it should be — ledger row 86.
-     *
-     * `have=<n>|want=<n>|stale=<bool>` with no arg. `stale` forces a wrong value (the defect),
-     * `reset` re-derives from the live profile.
-     *
-     * The `stale` verb exists because the emulator does not reproduce this defect on its own: three
-     * fold cycles and a rotation on unmodified code all read `delta=0`. A test that folds and then
-     * asserts alignment therefore passes without ever exercising the seam. Forcing the state is what
-     * lets the invariant be made to FAIL, and it is also the control any future fix has to beat.
-     */
-    /**
      * Ledger row 89: how many desktop rows exist versus how many the home list actually BOUND.
      *
      * `bound=<n>|rows=<n>|gap=<n>`, where `rows` counts `container=CONTAINER_DESKTOP` straight from
@@ -489,9 +478,10 @@ object AresTestInfo {
     /**
      * The hotseat's actual presence: `vis|children|bounds|alpha|height`.
      *
-     * Exists because "is the hotseat reachable under Strategy D?" decides whether
-     * `AresFolderExitHandoff` still has ANY live origin, and neither available instrument could
-     * answer it. `uiautomator dump` shows no hotseat node in either posture, but an accessibility
+     * Exists because "is the hotseat reachable under Strategy D?" decided whether the folder-exit
+     * handoff still had ANY live origin (it did not; the helper was deleted, task #107), and
+     * neither available instrument could answer it. `uiautomator dump` shows no hotseat node in
+     * either posture, but an accessibility
      * tree omits a view for several reasons that are not "it does not exist", so absence there is
      * not proof. The layout still inflates `@id/hotseat` and nothing in the fork hides it, so
      * reading the source says the opposite. This reports what the VIEW says about itself.
@@ -503,6 +493,17 @@ object AresTestInfo {
      */
     const val REQUEST_HOTSEAT = "ares-hotseat"
 
+    /**
+     * The pane's top padding against what the LIVE profile says it should be — ledger row 86.
+     *
+     * `have=<n>|want=<n>|stale=<bool>` with no arg. `stale` forces a wrong value (the defect),
+     * `reset` re-derives from the live profile.
+     *
+     * The `stale` verb exists because the emulator does not reproduce this defect on its own: three
+     * fold cycles and a rotation on unmodified code all read `delta=0`. A test that folds and then
+     * asserts alignment therefore passes without ever exercising the seam. Forcing the state is what
+     * lets the invariant be made to FAIL, and it is also the control any future fix has to beat.
+     */
     const val REQUEST_PANE_PAD = "ares-pane-pad"
 
     /**
@@ -523,33 +524,27 @@ object AresTestInfo {
     const val REQUEST_DIM_STATE = "ares-dim-state"
 
     /**
-     * Stranded `DragView`s, and whether the folder-exit handoff is still latched.
+     * Stranded `DragView`s on the DragLayer, and whether a `DragController` drag is in flight.
      *
-     * `dragging=<bool>|handoffActive=<bool>|dragViews=<n>[|alpha=<a> vis=<v> at=<l>,<t> <w>x<h>]...`
+     * `dragging=<bool>|dragViews=<n>[|alpha=<a> vis=<v> at=<l>,<t> <w>x<h>]...`
+     *
+     * `--arg history` answers with [AresDragWatch.summary] instead; `--arg children` names the
+     * DragLayer's direct children (the self-check that the walk is looking at the real layer).
      *
      * ## Why a channel and not a read of the code
      *
-     * Task #8 is a defect ROOT-CAUSED BY READING and never measured, which is the shape this
-     * project keeps paying for. The claim: after a folder-exit handoff, a release that is NOT
-     * consumed by the grid strands the `DragController`'s `DragView` — hidden at handoff by
-     * `AresFolderExitHandoff.maybeTakeOver`'s `d.dragView?.alpha = 0f` and never disposed, because
-     * `onDragEnd` neither keeps the `DragObject` nor touches the view.
-     *
-     * Reading the controller does NOT settle it, and reading it more carefully makes it less
-     * certain rather than more. `cancelDrag()` and a REJECTED drop both set
-     * `deferDragViewCleanupPostAnimation = false`, and `endDrag()` then removes the view itself, so
-     * those endings are clean. The exposed ending is an ACCEPTED drop whose target never starts a
-     * `DragLayer` drop animation: `mDropView` stays null, `clearAnimatedView` has nothing to
-     * finish, `onDeferredEndDrag` never runs — and that path removes the view AND calls
-     * `callOnDragEnd`, so the same gap would ALSO mean [AresFolderExitHandoff.onDragEnd] never
-     * fires and `list` stays non-null for the rest of the process.
-     *
-     * So this reports BOTH numbers, because the interesting outcome is whether they move together:
-     * a stranded view WITH `handoffActive=true` is the deferred-cleanup gap, a stranded view with
-     * `handoffActive=false` is something else entirely, and neither moving refutes the row.
+     * Built for task #8 / ledger row 84, a defect ROOT-CAUSED BY READING and never measured: the
+     * claim was that the folder-exit handoff hid the `DragView` (`alpha = 0f`) and an unconsumed
+     * release then stranded it. The handoff has since been measured to have no reachable origin
+     * and deleted (task #107), which retires that specific claim -- but the instrument stays,
+     * because "is there a `DragView` nobody owns" is a question every `DragController` ending can
+     * raise, and reading the controller does NOT settle it: `cancelDrag()` and a REJECTED drop
+     * remove the view themselves, while an ACCEPTED drop whose target never starts a `DragLayer`
+     * drop animation leaves `onDeferredEndDrag` unrun.
      *
      * At rest, on a launcher that has never dragged, the answer must be `dragViews=0` — which is
-     * also the control that proves a later non-zero reading means something.
+     * also the control that proves a later non-zero reading means something. Caught in the act
+     * 2026-09-04 (folded app-list drag, `input motionevent`): `dragging=true|dragViews=1`.
      */
     const val REQUEST_DRAG_STATE = "ares-drag-state"
 
@@ -773,24 +768,6 @@ object AresTestInfo {
         else -> respond("unknown-subcommand:$arg")
     }
 
-    /**
-     * See [REQUEST_VIEW_INTEGRITY]. Reports containers whose child array has a hole.
-     *
-     * `ViewGroup.getChildAt(i)` returns `mChildren[i]` for any `i < mChildrenCount`, so a null
-     * return inside that range means the count and the array disagree -- which is precisely what
-     * makes `dispatchDetachedFromWindow` throw during `DecorView.clearContentView`.
-     *
-     * Deliberately walks from the DECOR VIEW and not from the DragLayer: the crashing walk starts
-     * there, and a check that begins lower could miss the corrupt container entirely.
-     */
-    /**
-     * See [REQUEST_DRAG_STATE]. Read-only: walks the DragLayer for `DragView` children.
-     *
-     * The walk is over the DragLayer's DIRECT children, which is where `DragView.show()` adds
-     * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
-     */
-    /** See [REQUEST_PANE_PAD]. */
-    /** See [REQUEST_HOME_BIND]. `bound=<n>|rows=<n>|gap=<n>`. */
     /** See [REQUEST_HOTSEAT]. */
     private fun hotseatState(launcher: Launcher): String {
         val hotseat = launcher.hotseat ?: return "no-hotseat-view"
@@ -808,6 +785,7 @@ object AresTestInfo {
             "|offscreen=${at[1] >= screenH}"
     }
 
+    /** See [REQUEST_HOME_BIND]. `bound=<n>|rows=<n>|gap=<n>|checks=<n>`. */
     private fun homeBind(launcher: Launcher, arg: String?): String {
         val list = launcher.workspace?.aresHomeList ?: return "no-list"
         val adapter = list.aresAdapter
@@ -852,9 +830,12 @@ object AresTestInfo {
                 )
                 .use { it.count }
         }.getOrDefault(-1)
-        return "bound=$bound|rows=$rows|gap=${rows - bound}"
+        // `checks` is the guard's own invocation count (see AresBindGuard.checks): the F3 liveness
+        // signal, so `ares-smoke` can tell "the guard found nothing" from "the guard never ran".
+        return "bound=$bound|rows=$rows|gap=${rows - bound}|checks=${AresBindGuard.checks}"
     }
 
+    /** See [REQUEST_PANE_PAD]. */
     private fun panePad(launcher: Launcher, arg: String?): String {
         val pane = launcher.workspace?.aresAppListPane ?: return "no-pane"
         when (arg) {
@@ -879,9 +860,14 @@ object AresTestInfo {
             "stacked=${progress > 0f && unfolded}"
     }
 
+    /**
+     * See [REQUEST_DRAG_STATE]. Read-only: walks the DragLayer for `DragView` children.
+     *
+     * The walk is over the DragLayer's DIRECT children, which is where `DragView.show()` adds
+     * itself (`dragLayer.addView(this)`), so a stranded one cannot hide deeper in the tree.
+     */
     private fun dragState(launcher: Launcher, arg: String?): String {
         val dragging = launcher.dragController?.isDragging ?: false
-        val handoffActive = AresFolderExitHandoff.isActive()
         val layer = launcher.dragLayer ?: return "no-drag-layer"
         // SELF-CHECK, and the reason it exists: `dragViews=0` is indistinguishable from a walk that
         // is looking in the wrong place. A home-grid reorder does NOT go through the DragController
@@ -907,9 +893,19 @@ object AresTestInfo {
                     "at=${child.left},${child.top} ${child.width}x${child.height}",
             )
         }
-        return "dragging=$dragging|handoffActive=$handoffActive|dragViews=$n$found"
+        return "dragging=$dragging|dragViews=$n$found"
     }
 
+    /**
+     * See [REQUEST_VIEW_INTEGRITY]. Reports containers whose child array has a hole.
+     *
+     * `ViewGroup.getChildAt(i)` returns `mChildren[i]` for any `i < mChildrenCount`, so a null
+     * return inside that range means the count and the array disagree -- which is precisely what
+     * makes `dispatchDetachedFromWindow` throw during `DecorView.clearContentView`.
+     *
+     * Deliberately walks from the DECOR VIEW and not from the DragLayer: the crashing walk starts
+     * there, and a check that begins lower could miss the corrupt container entirely.
+     */
     private fun viewIntegrity(launcher: Launcher): String {
         val root = launcher.window?.decorView ?: return "no-decor"
         val bad = StringBuilder()

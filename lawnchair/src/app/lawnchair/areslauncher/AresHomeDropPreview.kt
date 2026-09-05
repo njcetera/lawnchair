@@ -76,22 +76,6 @@ object AresHomeDropPreview : DragController.DragListener {
         if (!AresWidgetAdd.isAresHome(launcher)) return
         val grid = launcher.workspace?.aresHomeList ?: return
 
-        // An ACTIVE handoff drag IS the finger: it is driven by the synthetic MOVEs this method
-        // relays through maybeTakeOver, and that relay must keep running even while the reflow is
-        // frozen. The freeze below exists to hold the drop GAP still under a dwelling finger, but it
-        // must NOT also cut off the handoff's own feed -- doing so pins the dragged tile in place the
-        // instant a create dwell arms (dX locks), so the user can no longer pull the app back out to
-        // abort the create and releasing becomes the only exit (owner report 2026-08-23; AresFolderPin
-        // trace: dX froze the frame the dwell armed, handoff=true, with no further slip/target events).
-        // Relaying keeps dX live, so a pull-out moves past the dwell slop and disarms as it should.
-        // Handled before the freeze-return; the gap machinery below never ran for a handoff drag
-        // anyway (maybeTakeOver returns true for it), so nothing downstream changes for other drags.
-        if (AresFolderExitHandoff.isActive()) {
-            val handoffLocal = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
-            AresFolderExitHandoff.maybeTakeOver(launcher, grid, d, handoffLocal[0], handoffLocal[1])
-            return
-        }
-
         // A dwell that is aiming at a tile freezes the reflow so the target can be held still
         // (see AresFolderDrop.isFrozen). The gap is part of that reflow: sliding it about under a
         // finger that is trying to hold steady over a folder is exactly what the freeze exists to
@@ -100,12 +84,6 @@ object AresHomeDropPreview : DragController.DragListener {
         if (AresFolderDrop.isFrozen()) return
 
         val local = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
-
-        // Rows 31/32: a qualifying folder-exit drag is handed to the in-grid pipeline outright —
-        // the item becomes a real tile under the finger and ItemTouchHelper drives. The slot
-        // machinery below is then not mimicking anything; it simply never runs for this drag.
-        // (An already-active handoff took the early return above; this is the INITIAL takeover.)
-        if (AresFolderExitHandoff.maybeTakeOver(launcher, grid, d, local[0], local[1])) return
 
         var index = grid.dropIndexAt(local[0], local[1])
 

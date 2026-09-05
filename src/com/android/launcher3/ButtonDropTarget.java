@@ -238,7 +238,7 @@ public abstract class ButtonDropTarget extends TextView
         // controller happens to notify first.
         if (AresDragChrome.suppressesStockChrome(
                 mActivityContext instanceof Launcher ? (Launcher) mActivityContext : null,
-                dragObject.dragSource)) {
+                dragObject)) {
             mActive = false;
             setVisibility(View.GONE);
             mAccessibleDrag = false;

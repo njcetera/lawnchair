@@ -332,13 +332,13 @@ public class DropTargetBar extends FrameLayout
      */
     @Override
     public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
-        // AresLauncher: a folder- or app-list-sourced drag keeps this bar down. Removal from the
-        // home screen is the tile's x badge and uninstall is already in the long-press popup
-        // (LawnchairShortcut.UNINSTALL), so the bar is a second route to functions that have a
-        // first one. Raising it behind a still-open folder was also half of what the owner saw as
+        // AresLauncher: a folder-, app-list- or picker-sourced drag keeps this bar down. Removal
+        // from the home screen is the tile's x badge and uninstall is already in the long-press
+        // popup (LawnchairShortcut.UNINSTALL), so the bar is a second route to functions that have
+        // a first one. Raising it behind a still-open folder was also half of what the owner saw as
         // "it pops the screen out". See AresDragChrome; Workspace.onDragStart uses the same gate
         // for the SPRING_LOADED transition that is the other half.
-        if (AresDragChrome.suppressesStockChrome(mLauncher, dragObject.dragSource)) {
+        if (AresDragChrome.suppressesStockChrome(mLauncher, dragObject)) {
             return;
         }
         animateToVisibility(true);

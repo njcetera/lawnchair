@@ -852,10 +852,11 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     /**
      * AresLauncher: derives and applies the app list's top padding. Ledger row 86.
      *
-     * <p><b>This is INSTRUMENTATION, not a fix.</b> The extraction from {@link #setupHeader()} is
-     * behaviour-preserving; the log is the point. Two fixes for the underlying defect were built
-     * and BOTH made it worse -- see the ledger row, and do not re-propose either without new
-     * evidence:
+     * <p><b>History.</b> This was extracted from {@link #setupHeader()} as instrumentation only;
+     * the fix that finally held is the debounced re-derivation on a SETTLED profile
+     * ({@code aresScheduleTopPaddingResync}, 1612d7814a), which calls back into this method. Two
+     * earlier fixes for the underlying defect were built and BOTH made it worse -- see the ledger
+     * row, and do not re-propose either without new evidence:
      *
      * <ol>
      *   <li>Re-deriving in {@link #onDeviceProfileChanged}: that fires mid-fold with a half-built
@@ -885,11 +886,9 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
      * 489 and the delta to 0, which is what identified this as STALE rather than miscalculated --
      * the formula was right all along.
      *
-     * @param scrollToTop preserved from setupHeader; every current caller passes true.
-     * @param why tag for the log, so a recurrence names the path that set the value.
-     */
-    /**
-     * The pane's/sheet's top padding, derived in ONE place so the applied value and
+     * <p>The remainder of this doc describes the derivation itself.
+     *
+     * <p>The pane's/sheet's top padding, derived in ONE place so the applied value and
      * {@link #aresWantedTopPadding()} can never disagree.
      *
      * <p>THE FOLDED SHEET STARTS WHERE HOME STARTS. Owner 2026-09-04, cover display: "the app list
@@ -1500,13 +1499,12 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         }
         updateBackgroundVisibility(dp);
 
-        // AresLauncher (ledger row 86): SHADOW computation -- logs what the top padding WOULD be if
-        // it were re-derived here, and deliberately applies nothing. Re-deriving here was fix
-        // attempt 1 and it regressed: this callback fires mid-fold with a half-built profile, so it
-        // latches transients. The open question is whether a TRUSTWORTHY call ever arrives last
-        // (in which case recomputing on the final one is sound) or whether the settled profile
-        // never reaches this callback at all. That is a question about ordering, and the only way
-        // to answer it is to watch every call without acting on any of them.
+        // AresLauncher (ledger row 86): schedule a DEBOUNCED re-derivation of the top padding, and
+        // let the resync decide whether the profile it eventually reads is settled. Re-deriving
+        // synchronously HERE was fix attempt 1 and it regressed: this callback fires mid-fold with
+        // a half-built profile, so it latched transients. The debounce plus the panel-shape guard
+        // in aresScheduleTopPaddingResync is what 1612d7814a shipped; the earlier "shadow only,
+        // apply nothing" version of this line was the instrumentation that found it.
         aresScheduleTopPaddingResync("profileChanged");
 
         boolean needsInvalidate = false;

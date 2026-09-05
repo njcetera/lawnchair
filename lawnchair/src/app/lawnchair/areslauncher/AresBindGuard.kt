@@ -52,6 +52,23 @@ object AresBindGuard {
     const val ID = "home-bind-complete"
 
     /**
+     * How many times [checkAfterBind] has RUN in this process. Exposed through `ares-home-bind` as
+     * `checks=<n>` and asserted by `ares-smoke`.
+     *
+     * Adversarial review 2026-09-05, F3: this guard is invoked from `finishBindingItems`, which is
+     * queued on the SAME `pendingExecutor` as the deferred bind items -- and a `ViewOnDrawExecutor`
+     * that is cancelled DROPS its queue rather than running it (ledger row 92). So the one mechanism
+     * that could leave the grid partially bound would also leave this guard un-run, and a guard that
+     * never ran reports the same `total=0` as a clean bind. Nothing inside the guard can log its own
+     * absence; a counter read from outside can. `checks=0` on a launcher whose grid has items is the
+     * F3 blind spot made visible.
+     */
+    @JvmStatic
+    @Volatile
+    var checks: Int = 0
+        private set
+
+    /**
      * Checks the settled grid against the database. Call from `finishBindingItems`, AFTER the grid
      * is final (`finishSoftRebind`), on the UI thread.
      *
@@ -63,6 +80,7 @@ object AresBindGuard {
      */
     @JvmStatic
     fun checkAfterBind(app: LauncherAppState, items: List<ItemInfo>) {
+        checks++
         val bound = items.count { it.container == Favorites.CONTAINER_DESKTOP }
         Executors.MODEL_EXECUTOR.execute {
             val rows = runCatching {

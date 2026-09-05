@@ -751,13 +751,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // action for move/add to homescreen.
         // When a accessible drag is started by the folder, we only allow rearranging withing the
         // folder.
-        // AresLauncher: a folder-sourced or app-list-sourced drag must not bring stock's
+        // AresLauncher: a folder-, app-list- or picker-sourced drag must not bring stock's
         // workspace-level drag presentation with it -- no SPRING_LOADED zoom-out, no drop-target
         // bar, and no extra empty page. All three describe a paged CellLayout grid that Strategy D
         // does not have. See AresDragChrome for which drags qualify and why each one does; the
         // same predicate gates DropTargetBar and ButtonDropTarget.
-        boolean aresFolderDrag =
-                AresDragChrome.suppressesStockChrome(mLauncher, dragObject.dragSource);
+        boolean aresFolderDrag = AresDragChrome.suppressesStockChrome(mLauncher, dragObject);
 
         boolean addNewPage = !(options.isAccessibleDrag && dragObject.dragSource != this)
                 && !aresFolderDrag;
@@ -828,14 +827,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // AresLauncher: the dwell that arms a folder as a drop target (AresFolderDrop) cannot be
         // torn down in onDragExit -- DragController.drop calls that BEFORE onDrop, so the arm has
         // to survive it. This is the one hook that always runs and always runs last.
-        //
-        // UNLESS the drag was handed off to the in-grid pipeline (rows 31/32): its commit runs
-        // from ItemTouchHelper's clearView ~250ms of settle AFTER this hook, and cancelling here
-        // was measured wiping the armed target in that gap -- dwell armed, reflow froze, nothing
-        // committed. Every in-grid ending clears the dwell itself.
-        if (!app.lawnchair.areslauncher.AresFolderExitHandoff.ownsDwellTeardown()) {
-            AresFolderDrop.cancel();
-        }
+        // (Until task #107 this was skipped while AresFolderExitHandoff owned the teardown; that
+        // helper had no reachable origin and was deleted, so the cancel is unconditional again.)
+        AresFolderDrop.cancel();
+        app.lawnchair.areslauncher.AresExternalDragScroll.stop();
         mDragInfo = null;
         mDragSourceInternal = null;
     }
@@ -1344,9 +1339,11 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      * <p>Measured on the owner's Pixel 2026-09-04: eight
      * {@code "Attempted to add null item to Ares home list"} lines per launcher process, and exactly
      * eight desktop rows -- every one of them {@code itemType=4} -- present in the database and
-     * absent from the grid. Identical in two consecutive processes, so this is deterministic and
-     * not a race. The owner saw it as *"most of my widgets are missing"* and then as *"home state is
-     * not saving correctly"*: the state was saving perfectly, it was never being read back.
+     * absent from the grid. Identical in two consecutive processes -- and then a THIRD process
+     * bound all 17 cleanly, so it is INTERMITTENT, not deterministic (ledger row 92 carries the
+     * retraction; the repair below has not yet been observed firing on a live recurrence). The
+     * owner saw it as *"most of my widgets are missing"* and then as *"home state is not saving
+     * correctly"*: the state was saving perfectly, it was never being read back.
      *
      * <p>The repair is done HERE rather than inside {@link #addInScreen} because this is the only
      * bind-path entry that still HAS the authoritative {@code info}; by the time {@code addInScreen}
@@ -3299,6 +3296,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (ENFORCE_DRAG_EVENT_ORDER) {
             enforceDragParity("onDragExit", -1, 0);
         }
+        // AresLauncher: the pointer left the workspace, so the list must stop scrolling under it.
+        app.lawnchair.areslauncher.AresExternalDragScroll.stop();
 
         // Here we store the final page that will be dropped to, if the workspace in fact
         // receives the drop
@@ -3471,6 +3470,11 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // an in-grid drag does. Also observation-only from stock's point of view -- it adds an
         // entry to our own adapter and changes nothing below this line.
         AresHomeDropPreview.onExternalDragOver(mLauncher, d);
+        // AresLauncher: and the list scrolls when the drag is held against its top or bottom edge,
+        // the way ItemTouchHelper does for an in-grid drag. Owner 2026-09-04: with SPRING_LOADED
+        // gone the list sits at full scale and "doesn't scroll for placement". Observation-only
+        // from stock's point of view, like the two hooks above.
+        app.lawnchair.areslauncher.AresExternalDragScroll.onDragOver(mLauncher, d);
 
         final View child = (mDragInfo == null) ? null : mDragInfo.cell;
         if (setDropLayoutForDragObject(d, mDragViewVisualCenter[0], mDragViewVisualCenter[1])) {

@@ -373,8 +373,8 @@ object AresFolderPreview {
     /**
      * Tears down an uncommitted preview only when [launcher] is the activity that opened it
      * (state-seam P5 / ledger S5). Called from `LawnchairLauncher.onDestroy`. The identity guard
-     * mirrors `AresFolderExitHandoff.onLauncherDestroyed`: a fold that has already created the NEW
-     * Launcher and opened a fresh preview must NOT have it torn down by the OLD activity's onDestroy.
+     * matters because a fold that has already created the NEW Launcher and opened a fresh preview
+     * must NOT have it torn down by the OLD activity's onDestroy.
      */
     @JvmStatic
     fun onLauncherDestroyed(launcher: Launcher) {
