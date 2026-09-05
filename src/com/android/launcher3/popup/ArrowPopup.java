@@ -271,7 +271,19 @@ public abstract class ArrowPopup<T extends Context & ActivityContext>
                     //
                     // Ordering matters: setChildColor above has already read this view's background
                     // to seed the arrow colour, so clearing it here costs nothing.
-                    view.setBackground(null);
+                    //
+                    // ONLY where the rows will paint themselves. isShortcutContainer matches five
+                    // tagged layouts, and one of them -- system_shortcut_icons_container, the
+                    // collapsed icons-only row used once an item has more than
+                    // SHORTCUT_COLLAPSE_THRESHOLD shortcuts -- holds bare ImageViews that the
+                    // segment branch below never touches. Dropping ITS slab left the icons floating
+                    // on the wallpaper: the "bare text on the wallpaper" failure 29f3209b1b already
+                    // recorded, re-introduced on the path that commit's device check (five
+                    // uncollapsed rows) never reached. Adversarial review 2026-09-05, F1. The slab
+                    // keeps the colour setChildColor just gave it.
+                    if (hasShortcutRow((ViewGroup) view)) {
+                        view.setBackground(null);
+                    }
                     assignMarginsAndBackgrounds((ViewGroup) view, backgroundColor);
                     continue;
                 }
@@ -288,8 +300,6 @@ public abstract class ArrowPopup<T extends Context & ActivityContext>
                     // SingleItemPrimary is exactly the fully-rounded background stock already uses
                     // when there is only one item, so a segment is just "every row treated as if it
                     // were the only one" -- no new drawable, and it keeps following the theme.
-                    // mRoundedTop/mRoundedBottom/MiddleItemPrimary are consequently unused here now;
-                    // they remain for the widget/taskbar popups that still call the stock path.
                     // ONE LIST, SLICED -- not a stack of separate pills. Owner 2026-09-04, after
                     // seeing the first cut: "what you have now is like a list of individual pills
                     // but I do want it a single list just with the spacing between each item."
@@ -340,6 +350,20 @@ public abstract class ArrowPopup<T extends Context & ActivityContext>
      */
     protected boolean isShortcutOrWrapper(View view) {
         return view instanceof DeepShortcutView;
+    }
+
+    /**
+     * AresLauncher: true when {@code container} holds at least one row the segmented branch of
+     * {@link #assignMarginsAndBackgrounds} will paint itself. A container with none (the collapsed
+     * icons-only row) must keep its own slab, or it renders as nothing.
+     */
+    private boolean hasShortcutRow(ViewGroup container) {
+        for (int i = 0; i < container.getChildCount(); i++) {
+            if (isShortcutOrWrapper(container.getChildAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
