@@ -3000,6 +3000,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * no reachable origin and deleted, task #107). Its remaining caller is the §25 live-create seam,
      * which ends the in-grid drag with a synthetic UP before forming the folder.
      */
+    /**
+     * Lifts [holder] as an `ItemTouchHelper` drag. Used by [AresHomeDropPreview] to hand the §C4
+     * drop slot to the in-grid reorder pipeline (row 97); callers must have dispatched a synthetic
+     * DOWN first, because ItemTouchHelper measures every later MOVE against it.
+     */
+    internal fun startSlotDrag(holder: RecyclerView.ViewHolder) {
+        itemTouchHelper.startDrag(holder)
+    }
+
     internal fun dispatchSyntheticEvent(
         action: Int,
         downTime: Long,

@@ -1,5 +1,6 @@
 package app.lawnchair.areslauncher
 
+import android.graphics.Rect
 import android.util.Log
 import android.view.View
 import com.android.launcher3.DropTarget
@@ -138,7 +139,11 @@ object AresHomeDrop {
             // through Launcher.addPendingItem so binding and the configure activity happen -- the
             // item is not ready to persist yet. That is exactly what addToHomeList wraps.
             dragged is PendingAddItemInfo ->
-                AresWidgetAdd.addToHomeList(launcher, dragged, dropIndex(launcher, d))
+                AresWidgetAdd.addToHomeList(
+                    launcher,
+                    dragged,
+                    if (slotIndex >= 0) slotIndex else dropIndex(launcher, d),
+                )
             converted != null ->
                 addDraggedItem(launcher, converted, if (slotIndex >= 0) slotIndex else dropIndex(launcher, d))
             else -> false
@@ -150,6 +155,70 @@ object AresHomeDrop {
 
         finishDrop(launcher, d)
         return true
+    }
+
+    /**
+     * True when an external drag was RELEASED over the app-list pane sitting BESIDE the grid, so
+     * `Workspace.acceptDrop` should refuse it and the drag view flies back to where it came from
+     * (`ActivityAllAppsContainerView.onDropCompleted`).
+     *
+     * Measured on emulator-5554, 2026-09-04, unfolded: Gmail dragged out of the app list and
+     * released back over the list at (1450,1300) was ADDED to the home grid (31 → 32 rows, log
+     * *"drop at list (1429,1300) -> index 2"*). The Workspace is the drop target for every point
+     * the DragLayer does not claim otherwise, and the home list's own bounds run under the pane, so
+     * "over the pane" and "over the grid" are the same point to `dropIndexAt`. Owner: the icon
+     * should "either [go] to [a] spot on the home page or pull back to its location in the app list."
+     *
+     * Posture is decided by GEOMETRY, not by any `DisplayController` flag (CLAUDE.md: nothing there
+     * is posture-independent): folded, the drawer is a sheet OVER the grid and every release goes
+     * through it, so a pane that covers (nearly) all of the list is never "not the grid". Only a
+     * pane that overlaps less than 90% of the list's area can refuse a release. Logged on both
+     * branches so a guard that has quietly stopped engaging is visible in a log.
+     */
+    @JvmStatic
+    fun refusesExternalDrop(
+        launcher: Launcher,
+        isHotseatTarget: Boolean,
+        d: DropTarget.DragObject,
+    ): Boolean {
+        if (isHotseatTarget || !AresWidgetAdd.isAresHome(launcher)) return false
+        // The WORKSPACE-hosted pane, not launcher.appsView: that is the folded sheet, which is
+        // hidden unfolded and answered isShown=false on the first measurement of this guard.
+        val pane: View = launcher.workspace?.getAresAppListPaneOrNull() ?: run {
+            Log.i(TAG, "no app-list pane inflated; not refusing")
+            return false
+        }
+        if (!pane.isShown) {
+            Log.i(TAG, "app-list pane not shown (folded); not refusing")
+            return false
+        }
+        val list = launcher.workspace?.aresHomeList ?: return false
+        val dragLayer = launcher.dragLayer
+        val paneRect = Rect()
+        dragLayer.getDescendantRectRelativeToSelf(pane, paneRect)
+        val listRect = Rect()
+        dragLayer.getDescendantRectRelativeToSelf(list, listRect)
+        val overlap = Rect()
+        val listArea = listRect.width().toLong() * listRect.height()
+        val overlapArea = if (overlap.setIntersect(paneRect, listRect)) {
+            overlap.width().toLong() * overlap.height()
+        } else {
+            0L
+        }
+        if (listArea <= 0 || overlapArea * 10 >= listArea * 9) {
+            Log.i(TAG, "pane covers the list (pane=$paneRect list=$listRect); not refusing")
+            return false
+        }
+        // Fresh array every call: getDescendantCoordRelativeToSelf maps IN PLACE and never zeroes.
+        val p = floatArrayOf(d.x.toFloat(), d.y.toFloat())
+        dragLayer.getDescendantCoordRelativeToSelf(launcher.workspace, p)
+        val over = paneRect.contains(p[0].toInt(), p[1].toInt())
+        Log.i(
+            TAG,
+            "release at dragLayer (${p[0].toInt()},${p[1].toInt()}) pane=$paneRect -> " +
+                if (over) "over the app-list pane: REFUSED, drag view returns" else "on the grid",
+        )
+        return over
     }
 
     /**

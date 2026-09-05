@@ -1,13 +1,18 @@
 package app.lawnchair.areslauncher
 
+import android.os.SystemClock
+import android.util.Log
+import android.view.MotionEvent
 import com.android.launcher3.DropTarget
 import com.android.launcher3.Launcher
+import com.android.launcher3.LauncherSettings.Favorites
+import com.android.launcher3.Utilities
 import com.android.launcher3.dragndrop.DragController
 import com.android.launcher3.dragndrop.DragOptions
-import com.android.launcher3.model.data.ItemInfo
 
 /**
- * Makes the home grid open a space for an item that is still being held (§C4).
+ * Makes the home grid open a space for an item that is still being held (§C4), and moves that
+ * space around exactly the way an in-grid reorder moves a lifted tile.
  *
  * ## The gap this closes
  *
@@ -16,10 +21,10 @@ import com.android.launcher3.model.data.ItemInfo
  * tile visibly slides aside as the finger approaches it. That pipeline only exists for a drag that
  * *starts* on the grid.
  *
- * A drag out of an open folder is the other pipeline — a `DragController` drag, with the item in a
- * `DragView` and nothing in the adapter to move. Nobody was asking the grid to make room, so it did
- * not. Measured on emulator-5554 before this file existed, dragging an app out of a folder onto the
- * grid:
+ * A drag that arrives from outside — an app out of an open folder, an app from the app list, a
+ * widget from the picker — is a `DragController` drag, with the item in a `DragView` and nothing in
+ * the adapter to move. Nobody was asking the grid to make room, so it did not. Measured on
+ * emulator-5554 before this file existed, dragging an app out of a folder onto the grid:
  *
  * ```
  * edit  : FolderIcon@20,195 | DoubleShadowBubbleTextView@280,195 | DoubleShadowBubbleTextView@540,195
@@ -38,29 +43,73 @@ import com.android.launcher3.model.data.ItemInfo
  * second, parallel layout model that agrees with the packer only by luck, which is the failure mode
  * this project has hit repeatedly.
  *
- * So the space is a real adapter entry that renders nothing — [AresHomeAdapter.showDropSlot]. The
- * reflow that follows is then *literally* the in-grid one: same `notifyItemMoved`, same RecyclerView
- * animation, same packer. Nothing here re-implements it.
+ * So the space is a real adapter entry that renders nothing — [AresHomeAdapter.showDropSlot] —
+ * carrying the held item's footprint and container.
  *
- * ## Scope, stated rather than implied
+ * ## Why ItemTouchHelper drives it, not a hit-test (row 97, second report)
  *
- * Only drags carrying an item that **already has a database row** get a slot. That covers the case
- * §C4 is about — an app leaving an open folder — and deliberately excludes:
+ * The first version moved the slot itself: on every `onDragOver` it hit-tested the finger point
+ * ([AresHomeListView.dropIndexAt]) and slid the slot to that index. That is a second reorder
+ * rule, and it felt like one. Owner, 2026-09-04 on the Pixel, holding a widget from the picker:
+ * *"the preview for the widget placement isn't great … it should be just like moving an icon or
+ * widget around the home page."* The in-grid feel comes from things this file would have had to
+ * copy: a move threshold that scales with the lifted item, a coverage rule for widgets with travel
+ * hysteresis ([AresHomeReorder.Callback.chooseDropTarget]), the dwell freeze, and edge scrolling
+ * paced by the lifted item's own position. Copying them is exactly the parallel-model mistake the
+ * section above refuses for layout.
  *
- *  - the **widget picker**, which drags a `PendingAddItemInfo` with no row, no spans that survive
- *    the add, and a configure activity that may cancel the whole thing;
- *  - the **app list**, whose payload is an `AppInfo` with `id == NO_ID`. Two of those in flight
- *    would collide under the adapter's `setHasStableIds(true)`, and the conversion to a
- *    `WorkspaceItemInfo` does not happen until the drop.
+ * So instead the slot is *lifted*: once its holder is laid out, this dispatches a synthetic
+ * `ACTION_DOWN` inside it and calls `ItemTouchHelper.startDrag` on it, then relays every
+ * subsequent `onDragOver` position as a synthetic `ACTION_MOVE`. From there the in-grid callback
+ * owns the reflow with no knowledge that the finger is really on the `DragLayer` — the slot is a
+ * lifted tile that happens to draw nothing, and the tiles part around it the way they part around
+ * a real one. The drop ([take]) or the drag's end ([clear]) sends the matching `UP`/`CANCEL`, which
+ * is how the in-grid drag ends too. `AresHomeListView.dispatchSyntheticEvent` is the relay the
+ * §25 live-create seam already uses for the same purpose.
  *
- * Widening it is possible and is not free; it is not what was reported and is not attempted here.
+ * The callback treats the slot specially in four places, all keyed on
+ * [AresHomeAdapter.isDropSlot]: it never feeds the in-grid dwell (the EXTERNAL dwell,
+ * [AresFolderDrop.onExternalDragOver], is the one tracking this drag), it does not close open
+ * floating views when the slot is picked up, and on release it neither commits a folder drop nor
+ * persists — [AresHomeDrop] owns what happens to the real item. Everything else — threshold,
+ * coverage, hysteresis, freeze, edge scroll — is the in-grid code, untouched.
+ *
+ * ## Scope
+ *
+ * Every `DragController` drag over the grid. The first version took only items that already had a
+ * database row; its stated reasons did not survive reading (the slot has its own id, so an
+ * `AppInfo`'s `NO_ID` collides with nothing, and a `PendingAddWidgetInfo` carries exactly the spans
+ * the gap needs), and what the exclusion cost was measured on the owner's Pixel: a widget landed
+ * where it was released while nothing moved until release. A picker drag whose configure activity
+ * is later cancelled leaves no trace: the slot is taken at the drop before the add is requested.
  */
 object AresHomeDropPreview : DragController.DragListener {
+
+    private const val TAG = "AresHomeDropPreview"
+
+    /** How many animation frames to wait for the slot's holder before giving up on the lift. */
+    private const val START_ATTEMPTS = 6
 
     private var list: AresHomeListView? = null
 
     /** Held only to deregister in [onDragEnd]; never used to reach anything else. */
     private var host: Launcher? = null
+
+    /** True from the moment `ItemTouchHelper` took the slot until the matching UP/CANCEL. */
+    private var driving = false
+
+    private var downTime = 0L
+    private var lastX = 0f
+    private var lastY = 0f
+    private var startAttempts = 0
+
+    /**
+     * True while the slot is a lifted `ItemTouchHelper` item. [AresExternalDragScroll] stands down
+     * then: ItemTouchHelper's own edge scroll is running, paced by the slot's position, the same
+     * one an in-grid drag gets.
+     */
+    @JvmStatic
+    fun isDrivingItemTouchHelper(): Boolean = driving
 
     /**
      * Updates the gap for a `DragController` drag now over the grid.
@@ -71,54 +120,121 @@ object AresHomeDropPreview : DragController.DragListener {
     @JvmStatic
     fun onExternalDragOver(launcher: Launcher, d: DropTarget.DragObject) {
         val item = d.dragInfo ?: return
-        // See "Scope" above.
-        if (item.id == ItemInfo.NO_ID) return
         if (!AresWidgetAdd.isAresHome(launcher)) return
         val grid = launcher.workspace?.aresHomeList ?: return
 
-        // A dwell that is aiming at a tile freezes the reflow so the target can be held still
-        // (see AresFolderDrop.isFrozen). The gap is part of that reflow: sliding it about under a
-        // finger that is trying to hold steady over a folder is exactly what the freeze exists to
-        // stop. Deliberately leaves an already-open gap where it is rather than closing it -- the
-        // dwell may be abandoned, and a hole that blinks out and back is worse than one that waits.
-        if (AresFolderDrop.isFrozen()) return
+        // The pointer ItemTouchHelper sees is the DRAG VIEW's centre, not the finger. In an in-grid
+        // drag the lifted tile IS what the finger holds, so the two coincide; here the picture on
+        // the finger is a DragView with its own registration offset (an app-list icon measured
+        // ~375px right of the finger on emulator-5554 unfolded), and the hole has to follow the
+        // picture the user is looking at, not a point they cannot see. The DOWN lands at the slot's
+        // own centre (see startDrive), so the slot's visual centre tracks this point exactly.
+        val finger = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
+        val anchor = dragViewCentre(launcher, grid, d) ?: finger
+        lastX = anchor[0]
+        lastY = anchor[1]
 
-        val local = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
-
-        var index = grid.dropIndexAt(local[0], local[1])
-
-        // Never displace the tile the finger is INSIDE when a dwell over it could arm (row 32).
-        // dropIndexAt's case 1 takes the hovered tile's own index — right for a RELEASE, wrong for
-        // the live mover: opening the gap AT the aim shoves the aim target aside (measured: the
-        // icon slid 263px out from under a still finger), so the CREATE dwell structurally never
-        // completed — the freeze only engages once a dwell ARMS, and the dwell needs the icon to
-        // still be there. Parking the slot one index PAST the hovered tile keeps every tile before
-        // it — the aim included — exactly where it is, which is the external-pipeline mirror of
-        // the in-grid rule that displacement "must not fire at the point they are aiming for".
-        val aim = grid.dropCandidateUnder(local[0], local[1], item.id)
-        if (aim != null) {
-            val position = grid.getChildAdapterPosition(aim)
-            val info = if (position != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
-                grid.aresAdapter.itemAt(position)
-            } else {
-                null
+        if (list === grid) {
+            // Already open. Once lifted, every position is a synthetic MOVE and ItemTouchHelper
+            // decides what (if anything) to displace -- including declining while the dwell has
+            // the reflow frozen, which chooseDropTarget already does for an in-grid drag. Before
+            // the lift, the pending start reads lastX/lastY on its own.
+            if (driving) {
+                grid.dispatchSyntheticEvent(
+                    MotionEvent.ACTION_MOVE, downTime, SystemClock.uptimeMillis(), lastX, lastY,
+                )
             }
-            if (info != null && AresFolderDrop.couldAcceptDwell(info, item)) {
-                index = position + 1
-            }
-        }
-
-        if (list !== grid) {
-            clear()
-            list = grid
-            host = launcher
-            // Idempotent by contract: DragController holds an ArrayList and this is only reached
-            // when `list` was null or a different grid, both of which run through clear() first.
-            launcher.dragController.addDragListener(this)
-            grid.aresAdapter.showDropSlot(index)
             return
         }
-        grid.aresAdapter.moveDropSlot(index)
+
+        // Do not OPEN under a frozen reflow: a dwell aiming at a tile must not have the target
+        // shoved aside by a hole appearing beside it. Once the freeze lifts the next move opens it.
+        if (AresFolderDrop.isFrozen()) return
+
+        clear()
+        list = grid
+        host = launcher
+        // Idempotent by contract: DragController holds an ArrayList and this is only reached
+        // when `list` was null or a different grid, both of which run through clear() first.
+        launcher.dragController.addDragListener(this)
+        val index = grid.dropIndexAt(anchor[0], anchor[1])
+        val widget = item.itemType == Favorites.ITEM_TYPE_APPWIDGET ||
+            item.itemType == Favorites.ITEM_TYPE_CUSTOM_APPWIDGET
+        grid.aresAdapter.showDropSlot(
+            index,
+            item.spanX.coerceAtLeast(1),
+            item.spanY.coerceAtLeast(1),
+            widget,
+        )
+        startAttempts = 0
+        // The holder exists only after the next layout pass; lift it then.
+        grid.postOnAnimation(startDrive)
+    }
+
+    /**
+     * The drag view's visual centre in [grid]'s coordinates, or null when there is no drag view.
+     * `translationX/Y` is how `DragView.move` positions it (including its animated shift), and a
+     * scale about the centre leaves the centre where it is, so no scale term is needed.
+     */
+    private fun dragViewCentre(
+        launcher: Launcher,
+        grid: AresHomeListView,
+        d: DropTarget.DragObject,
+    ): FloatArray? {
+        val dv = d.dragView ?: return null
+        // Fresh array: mapCoordInSelfToDescendant maps IN PLACE and never zeroes.
+        val coord = floatArrayOf(
+            dv.left + dv.translationX + dv.width / 2f,
+            dv.top + dv.translationY + dv.height / 2f,
+        )
+        Utilities.mapCoordInSelfToDescendant(grid, launcher.dragLayer, coord)
+        return coord
+    }
+
+    /**
+     * Lifts the slot once its holder is laid out.
+     *
+     * The synthetic DOWN lands at the slot's own CENTRE, for two reasons: `ItemTouchHelper` keeps
+     * the lifted view at `start + (pointer - down)`, so with the pointer being the drag view's
+     * centre the slot's visual centre sits exactly under the picture from the first MOVE on; and
+     * [AresHomeListView.onInterceptTouchEvent] arms its empty-space long-press on a DOWN that hits
+     * no child, which a still finger would then fire as a popup mid-drag.
+     *
+     * Proof of path is `isReorderInProgress()`, which `onSelectedChanged` sets synchronously inside
+     * `startDrag`; a refused lift (no drag flag, holder not a child) is logged, and the gap then
+     * simply stays where it opened rather than failing silently.
+     */
+    private val startDrive = object : Runnable {
+        override fun run() {
+            val grid = list ?: return
+            val position = grid.aresAdapter.dropSlotIndex()
+            val holder = if (position >= 0) grid.findViewHolderForAdapterPosition(position) else null
+            val v = holder?.itemView
+            if (v == null || v.parent !== grid || v.width == 0 || v.height == 0) {
+                if (++startAttempts <= START_ATTEMPTS) {
+                    grid.postOnAnimation(this)
+                } else {
+                    Log.w(TAG, "slot holder not laid out after $START_ATTEMPTS frames; gap stays static")
+                }
+                return
+            }
+            val downX = (v.left + v.right) / 2f
+            val downY = (v.top + v.bottom) / 2f
+            downTime = SystemClock.uptimeMillis()
+            grid.dispatchSyntheticEvent(MotionEvent.ACTION_DOWN, downTime, downTime, downX, downY)
+            grid.startSlotDrag(holder)
+            driving = grid.isReorderInProgress()
+            Log.i(
+                TAG,
+                "ItemTouchHelper ${if (driving) "took" else "REFUSED"} the slot at index $position " +
+                    "(down=${downX.toInt()},${downY.toInt()} anchor=${lastX.toInt()},${lastY.toInt()})",
+            )
+            if (driving) {
+                grid.dispatchSyntheticEvent(
+                    MotionEvent.ACTION_MOVE, downTime, SystemClock.uptimeMillis(), lastX, lastY,
+                )
+            }
+        }
     }
 
     /**
@@ -127,19 +243,34 @@ object AresHomeDropPreview : DragController.DragListener {
      * Called first thing in [AresHomeDrop.handleExternalDrop] so the slot can never be present
      * while anything persists, and so the item lands **where the gap was** — which is what the user
      * has been watching for the whole drag, and is a stricter answer than re-deriving a drop index
-     * from the release point.
+     * from the release point. The lift ends with a synthetic UP first, the same event that ends an
+     * in-grid drag; the callback's clearView sees the slot and leaves persistence to the caller.
      */
     @JvmStatic
     fun take(): Int {
+        endDrive(MotionEvent.ACTION_UP)
         val at = list?.aresAdapter?.clearDropSlot() ?: -1
-        clear()
+        detach()
         return at
     }
 
     /** Closes the gap without reading it. Safe at any time, and idempotent. */
     @JvmStatic
     fun clear() {
+        endDrive(MotionEvent.ACTION_CANCEL)
         list?.aresAdapter?.clearDropSlot()
+        detach()
+    }
+
+    private fun endDrive(action: Int) {
+        val grid = list ?: return
+        grid.removeCallbacks(startDrive)
+        if (!driving) return
+        driving = false
+        grid.dispatchSyntheticEvent(action, downTime, SystemClock.uptimeMillis(), lastX, lastY)
+    }
+
+    private fun detach() {
         list = null
         host?.dragController?.removeDragListener(this)
         host = null
@@ -151,9 +282,10 @@ object AresHomeDropPreview : DragController.DragListener {
      * The backstop, and the reason this is a `DragListener` at all.
      *
      * A drop on the grid is handled by [AresHomeDrop], but most drags end some other way: cancelled
-     * by a call or the shade, released over the drop-target bar, dropped back into the folder it
-     * came from, or committed into a folder by a dwell. `DragController` calls this for every one
-     * of them, so there is no outcome that can leave a hole in the grid.
+     * by a call or the shade, released over the drop-target bar, refused over the app-list pane,
+     * dropped back into the folder it came from, or committed into a folder by a dwell.
+     * `DragController` calls this for every one of them, so there is no outcome that can leave a
+     * hole in the grid or a lifted slot in `ItemTouchHelper`.
      */
     override fun onDragEnd() = clear()
 }

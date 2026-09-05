@@ -353,6 +353,8 @@ object AresHomeReorder {
             // too; neither is the finger.
             if (actionState != ItemTouchHelper.ACTION_STATE_DRAG || !isCurrentlyActive) return
             val item = draggedInfo ?: return
+            // The drop slot's dwell is the external one; see chooseDropTarget.
+            if (list.aresAdapter.isDropSlot(item)) return
             val view = viewHolder.itemView
             AresFolderDrop.onDragPoint(
                 list,
@@ -425,7 +427,10 @@ object AresHomeReorder {
             // reaches onMove. The freeze lasts only while the drag is actually over an eligible
             // tile: move on without stopping and the reflow resumes and catches up in one step, so
             // nothing about ordinary reordering is given up.
-            draggedInfo?.let {
+            // Not for the §C4 drop slot (row 97): it is the placeholder of an EXTERNAL drag, whose
+            // dwell AresFolderDrop.onExternalDragOver is already tracking from the real finger.
+            // Feeding it here as well would arm a second dwell with the slot as its source.
+            draggedInfo?.takeUnless { list.aresAdapter.isDropSlot(it) }?.let {
                 AresFolderDrop.onDragPoint(list, it, centreX.toFloat(), centreY.toFloat())
             }
             if (AresFolderDrop.isFrozen()) return null
@@ -555,11 +560,28 @@ object AresHomeReorder {
             // 270-510 / 530-770 / 790-1030 against a widget centre of x=520, inside no tile at
             // all, so nothing was ever chosen and nothing reflowed. Separation now lives inside
             // the widget holders instead, leaving every tile the full cell it stands for.
+            val slotDrag = list.aresAdapter.isDropSlot(draggedInfo)
+            if (slotDrag) {
+                // Row 97 instrumentation: the lifted drop slot's targeting, readable from logcat.
+                Log.d(
+                    "AresHomeDropPreview",
+                    "slot choose: centre=($centreX,$centreY) layout=(${selected.itemView.left}," +
+                        "${selected.itemView.top}) targets=${dropTargets.size} " +
+                        "at=${selected.bindingAdapterPosition}",
+                )
+            }
             dropTargets.forEach { target ->
                 val v = target.itemView
                 if (centreX >= v.left && centreX < v.right &&
                     centreY >= v.top && centreY < v.bottom
                 ) {
+                    if (slotDrag) {
+                        Log.d(
+                            "AresHomeDropPreview",
+                            "slot over ${target.bindingAdapterPosition} " +
+                                "reached=${hasReached(selected, v, centreX, centreY)}",
+                        )
+                    }
                     // THE OTHER HALF OF THE DWELL, and it is here rather than in AresFolderDrop
                     // because it is a statement about reordering, not about folders.
                     //
@@ -741,8 +763,12 @@ object AresHomeReorder {
             viewHolder?.itemView?.let { list.setPickedUp(it) }
 
             // A popup may still be open from the long-press that entered edit mode. Once the finger
-            // moves and this becomes a reorder, it is stale.
-            AbstractFloatingView.closeAllOpenViews(launcher)
+            // moves and this becomes a reorder, it is stale. Not for the drop slot (row 97): its
+            // drag came from outside, and an open Folder it came out of must stay open until the
+            // DragController drag resolves.
+            if (!list.aresAdapter.isDropSlot(draggedInfo)) {
+                AbstractFloatingView.closeAllOpenViews(launcher)
+            }
         }
 
         override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
@@ -787,6 +813,11 @@ object AresHomeReorder {
             val item = draggedInfo
             draggedInfo = null
             val end = list.dragGestureEnd
+            // The §C4 drop slot (row 97): a lifted placeholder for a DragController drag. Its
+            // synthetic UP/CANCEL ends the lift and nothing else -- AresHomeDrop commits or refuses
+            // the real item and renumbers, and the external dwell resolves there. Persisting here
+            // would write the slot-free order a moment before that renumber rewrites it.
+            if (list.aresAdapter.isDropSlot(item)) return
             // WP folders reorder-inside (design/wp-phase2-spike.md): a child dragged among its
             // siblings must write FOLDER-LOCAL ranks, never the desktop persistOrder (which skips
             // non-DESKTOP rows and would silently drop the reorder -- the reviewers' Scenario C).

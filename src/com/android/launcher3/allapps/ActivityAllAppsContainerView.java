@@ -1721,7 +1721,21 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     @Override
-    public void onDropCompleted(View target, DragObject d, boolean success) {}
+    public void onDropCompleted(View target, DragObject d, boolean success) {
+        // AresLauncher: a drag out of the app list that lands nowhere -- released back over the
+        // pane (Workspace.acceptDrop refuses it), over bare DragLayer, or cancelled -- flies back
+        // to the row it came from instead of vanishing where the finger let go. The row itself was
+        // never hidden (ItemLongClickListener), so the copy lands on it and disappears. This is the
+        // pre-drag return path stock already has in DragController.endDrag, opened up to a real
+        // drag: the deferred-cleanup flag makes endDrag leave the view alone, and the animation's
+        // end runs DragLayer.clearAnimatedView -> DragController.onDeferredEndDrag, which removes
+        // it and fires onDragEnd. Ledger row 97.
+        if (!success && d.dragView != null && mActivityContext instanceof Launcher launcher
+                && app.lawnchair.areslauncher.AresWidgetAdd.isAresHome(launcher)) {
+            d.deferDragViewCleanupPostAnimation = true;
+            launcher.getDragController().animateDragViewToOriginalPosition(null, null, -1);
+        }
+    }
 
     /**
      * AresLauncher edge-to-edge (owner, 2026-08-22): the top system-bar inset to relocate from this

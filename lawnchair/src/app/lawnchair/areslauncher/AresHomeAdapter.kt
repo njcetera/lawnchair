@@ -1277,21 +1277,34 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * render a second copy of the icon already under the finger, and stable ids would then have two
      * holders claiming one id at the moment the real insert lands.
      */
-    fun showDropSlot(index: Int): ItemInfo {
+    fun showDropSlot(index: Int, spanX: Int = 1, spanY: Int = 1, widget: Boolean = false): ItemInfo {
         clearDropSlot()
         val slot = ItemInfo().apply {
             // Unique by construction: database ids are positive and NO_ID is -1, so nothing else
             // can collide with this under setHasStableIds(true).
             id = DROP_SLOT_ID
-            itemType = Favorites.ITEM_TYPE_APPLICATION
-            spanX = 1
-            spanY = 1
+            // The held item's KIND and footprint, because ItemTouchHelper lifts this slot and the
+            // reorder callback keys its rules on them: a widget slot gets the widget move threshold
+            // and the coverage rule, an icon slot gets stock's half-tile threshold -- the same
+            // treatment the real item gets once it is in the grid. (The widget view type binds an
+            // empty container for the slot; onBindViewHolder returns before any host inflation.)
+            itemType = if (widget) Favorites.ITEM_TYPE_APPWIDGET else Favorites.ITEM_TYPE_APPLICATION
+            // A desktop row, or getMovementFlags locks it and startDrag refuses the lift.
+            container = Favorites.CONTAINER_DESKTOP
+            this.spanX = spanX
+            this.spanY = spanY
         }
         dropSlot = slot
         val at = index.coerceIn(0, items.size)
         items.add(at, slot)
         notifyItemInserted(at)
         return slot
+    }
+
+    /** The gap's current adapter index, or -1 when there is none. */
+    fun dropSlotIndex(): Int {
+        val slot = dropSlot ?: return -1
+        return items.indexOfFirst { it === slot }
     }
 
     /** Slides the gap to [index]. The same `notifyItemMoved` an in-grid reorder uses. */
@@ -1348,6 +1361,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     fun spanOf(position: Int): AresPacker.Span {
         val info = items.getOrNull(position) ?: return AresPacker.Span(1, 1)
+        // The drop slot is typed as an icon (it renders nothing) but carries the footprint of the
+        // item being held; a 4x2 widget in hand must open a 4x2 hole. Measured 2026-09-04 without
+        // this branch: the Gmail Inbox widget's gap was one cell (254x232) and the widget landed
+        // one index off the gap because the finger kept re-hitting the tile beside it (row 97).
+        if (info === dropSlot) {
+            return AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
+        }
         return when (info.itemType) {
             Favorites.ITEM_TYPE_APPWIDGET, Favorites.ITEM_TYPE_CUSTOM_APPWIDGET ->
                 AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))

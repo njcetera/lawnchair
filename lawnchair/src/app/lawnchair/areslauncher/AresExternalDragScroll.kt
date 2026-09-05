@@ -99,6 +99,13 @@ object AresExternalDragScroll {
     @JvmStatic
     fun onDragOver(launcher: Launcher, d: DropTarget.DragObject) {
         if (!AresWidgetAdd.isAresHome(launcher)) return
+        // While the drop slot is a lifted ItemTouchHelper item (row 97), ITH's own edge scroll is
+        // running, paced by the slot's position exactly as for an in-grid drag. Two scrollers on
+        // one list would fight, so this one stands down.
+        if (AresHomeDropPreview.isDrivingItemTouchHelper()) {
+            stop()
+            return
+        }
         val grid = launcher.workspace?.aresHomeList ?: return
         val local = AresFolderDrop.toListSpace(launcher, grid, d.x.toFloat(), d.y.toFloat())
         val x = local[0]

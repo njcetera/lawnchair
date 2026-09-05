@@ -580,12 +580,34 @@ public class PopupContainerWithArrow<T extends Context & ActivityContext>
     }
 
     /**
+     * True when the popup's icon is an all-apps entry on an Ares home: the drag that follows is a
+     * COPY onto the grid, the source row stays where it is, and a failed drop flies the copy back
+     * onto it ({@code ActivityAllAppsContainerView.onDropCompleted}). Row 97.
+     */
+    private boolean aresSourceStaysVisible() {
+        if (!(mActivityContext instanceof com.android.launcher3.Launcher launcher)
+                || !app.lawnchair.areslauncher.AresWidgetAdd.isAresHome(launcher)) {
+            return false;
+        }
+        return mOriginalIcon != null && mOriginalIcon.getTag() instanceof ItemInfo info
+                && info.container == com.android.launcher3.LauncherSettings.Favorites
+                        .CONTAINER_ALL_APPS;
+    }
+
+    /**
      * Determines when the deferred drag should be started.
      *
      * Current behavior:
      * - Start the drag if the touch passes a certain distance from the original touch down.
      */
-    public DragOptions.PreDragCondition createPreDragCondition(boolean updateIconUi) {
+    public DragOptions.PreDragCondition createPreDragCondition(boolean requestedIconUi) {
+        // AresLauncher (ledger row 97): an app-list icon stays visible while its copy is dragged.
+        // Stock blanks the source here (onPreDragStart hides it, onPreDragEnd keeps it hidden once
+        // the drag starts) and relies on SPRING_LOADED closing the drawer so nobody sees the hole;
+        // on this launcher the app-list pane stays on screen for the whole drag. This is the SECOND
+        // hider -- ItemLongClickListener's drag listener was the first -- and the row measured
+        // blank on emulator-5554 with only the first one removed.
+        final boolean updateIconUi = requestedIconUi && !aresSourceStaysVisible();
         return new DragOptions.PreDragCondition() {
 
             @Override

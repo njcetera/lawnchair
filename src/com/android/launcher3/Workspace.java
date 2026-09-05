@@ -1625,6 +1625,17 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
+     * The unfolded app-list pane if it has been inflated, else null. A READ: never inflates.
+     * Distinct from {@link Launcher#getAppsView()}, which is the FOLDED sheet -- hidden while the
+     * pane is on screen -- so a "is the finger over the app list" question asked of getAppsView()
+     * answers no on exactly the posture it matters (row 97).
+     */
+    @Nullable
+    public AresPanelAllAppsContainerView getAresAppListPaneOrNull() {
+        return mAresAppList;
+    }
+
+    /**
      * Per-posture ownership of the floating search affordance.
      *
      * Both the folded container and the unfolded pane are full
@@ -2677,6 +2688,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (draggableView != null) {
             draggableView.getSourceVisualDragBounds(dragRect);
             dragLayerY += dragRect.top;
+            // AresLauncher (ledger row 98): stock centres the drag preview on the VIEW, which is
+            // right for a workspace cell whose icon is centred and wrong for the app-list pane's
+            // rows, where the icon sits at the left of a row ~1000px wide -- the picture rode
+            // ~375px to the right of the finger for the whole drag (owner, 2026-09-04: "when
+            // picking an app from the app list and dragging it, it don't stay right under my
+            // finger"; measured on emulator-5554 unfolded). Re-centre it on the icon's own bounds.
+            // Zero for any view whose icon is horizontally centred, so workspace cells are unmoved.
+            if (child instanceof BubbleTextView && !dragRect.isEmpty()) {
+                dragLayerX += Math.round(scale * (dragRect.exactCenterX() - child.getWidth() / 2f));
+            }
         }
 
 
@@ -2765,6 +2786,14 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (d.dragSource != this) {
             // Don't accept the drop if we're not over a valid drop target at time of drop
             if (dropTargetLayout == null) {
+                return false;
+            }
+            // AresLauncher: a release over the app-list pane BESIDE the grid is not a drop on the
+            // grid. Refused here so DragController reports it as not accepted and the source's
+            // onDropCompleted can fly the drag view back (ledger row 97). See the method's doc for
+            // why this is decided by geometry and why the folded sheet never triggers it.
+            if (AresHomeDrop.refusesExternalDrop(
+                    mLauncher, mLauncher.isHotseatLayout(dropTargetLayout), d)) {
                 return false;
             }
             // AresLauncher: a drag that started inside an open folder used to be REFUSED here

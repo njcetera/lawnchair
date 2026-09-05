@@ -179,18 +179,26 @@ public class ItemLongClickListener {
 
         // Start the drag
         final DragController dragController = launcher.getDragController();
-        dragController.addDragListener(new DragController.DragListener() {
-            @Override
-            public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
-                v.setVisibility(INVISIBLE);
-            }
+        // AresLauncher: the source row stays put. Stock blanks it because SPRING_LOADED closes the
+        // drawer anyway and the icon is off screen; here the app-list pane stays on screen for the
+        // whole drag (AresDragChrome), so the blanked row was a visible hole in the list under the
+        // copy on the finger. Measured on emulator-5554 2026-09-04: the Gmail row empty mid-drag.
+        // Owner: "the app should just kinda copy and follow the finger". A failed drop flies the
+        // copy back onto the row (ActivityAllAppsContainerView.onDropCompleted). Ledger row 97.
+        if (!app.lawnchair.areslauncher.AresWidgetAdd.isAresHome(launcher)) {
+            dragController.addDragListener(new DragController.DragListener() {
+                @Override
+                public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
+                    v.setVisibility(INVISIBLE);
+                }
 
-            @Override
-            public void onDragEnd() {
-                v.setVisibility(VISIBLE);
-                dragController.removeDragListener(this);
-            }
-        });
+                @Override
+                public void onDragEnd() {
+                    v.setVisibility(VISIBLE);
+                    dragController.removeDragListener(this);
+                }
+            });
+        }
 
         launcher.getWorkspace().beginDragShared(v, launcher.getAppsView(), new DragOptions());
         return false;
