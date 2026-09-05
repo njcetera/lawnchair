@@ -1625,17 +1625,6 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     /**
-     * The unfolded app-list pane if it has been inflated, else null. A READ: never inflates.
-     * Distinct from {@link Launcher#getAppsView()}, which is the FOLDED sheet -- hidden while the
-     * pane is on screen -- so a "is the finger over the app list" question asked of getAppsView()
-     * answers no on exactly the posture it matters (row 97).
-     */
-    @Nullable
-    public AresPanelAllAppsContainerView getAresAppListPaneOrNull() {
-        return mAresAppList;
-    }
-
-    /**
      * Per-posture ownership of the floating search affordance.
      *
      * Both the folded container and the unfolded pane are full

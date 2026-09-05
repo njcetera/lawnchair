@@ -184,8 +184,10 @@ object AresHomeDrop {
         if (isHotseatTarget || !AresWidgetAdd.isAresHome(launcher)) return false
         // The WORKSPACE-hosted pane, not launcher.appsView: that is the folded sheet, which is
         // hidden unfolded and answered isShown=false on the first measurement of this guard.
-        val pane: View = launcher.workspace?.getAresAppListPaneOrNull() ?: run {
-            Log.i(TAG, "no app-list pane inflated; not refusing")
+        // getAresAppListPane() answers null while the pane is detached (folded), which is the
+        // first half of the question; isShown below is the second.
+        val pane: View = launcher.workspace?.getAresAppListPane() ?: run {
+            Log.i(TAG, "no app-list pane attached (folded, or not inflated); not refusing")
             return false
         }
         if (!pane.isShown) {
