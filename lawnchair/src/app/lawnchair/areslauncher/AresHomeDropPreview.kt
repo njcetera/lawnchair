@@ -233,8 +233,27 @@ object AresHomeDropPreview : DragController.DragListener {
                 grid.dispatchSyntheticEvent(
                     MotionEvent.ACTION_MOVE, downTime, SystemClock.uptimeMillis(), lastX, lastY,
                 )
+            } else {
+                // A refused lift must not leave the DOWN half-open in the RecyclerView (velocity
+                // tracker, scroll pointer, gesture detector) until some later real DOWN resets it
+                // (nightly review 2026-09-05, F4). Same downTime, so it cancels THIS gesture.
+                grid.dispatchSyntheticEvent(
+                    MotionEvent.ACTION_CANCEL, downTime, SystemClock.uptimeMillis(), downX, downY,
+                )
             }
         }
+    }
+
+    /**
+     * State-seam P5 / ledger S5: a fold recreates the Launcher mid-drag, and if the drag's terminal
+     * callback never reaches this singleton it would keep the OLD activity's grid, a lifted slot
+     * and a listener on a dead controller until the next drag's `clear()` healed it against a
+     * detached RecyclerView (nightly review 2026-09-05, F6). Mirrors [AresFolderPreview]'s hook;
+     * a no-op when nothing is in flight or when the drag belongs to another activity.
+     */
+    @JvmStatic
+    fun onLauncherDestroyed(launcher: Launcher) {
+        if (host === launcher) clear()
     }
 
     /**

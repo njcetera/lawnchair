@@ -36,6 +36,7 @@ import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.areslauncher.AresBindGuard
 import app.lawnchair.areslauncher.AresDragWatch
 import app.lawnchair.areslauncher.AresFolderPreview
+import app.lawnchair.areslauncher.AresHomeDropPreview
 import app.lawnchair.areslauncher.AresIconTransition
 import app.lawnchair.areslauncher.AresThemeIconRefresh
 import app.lawnchair.compat.LawnchairQuickstepCompat
@@ -818,6 +819,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         // clears are safe to call when nothing is in flight (guarded / no-op).
         AresDragWatch.onLauncherDestroyed(this)
         AresFolderPreview.onLauncherDestroyed(this)
+        AresHomeDropPreview.onLauncherDestroyed(this)
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()
