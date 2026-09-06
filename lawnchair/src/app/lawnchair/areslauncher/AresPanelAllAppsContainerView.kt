@@ -53,9 +53,10 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     // is the home list's folder wash, which paints this pane too (AresHomeListView.paintFolderWash).
     // This is the INACTIVE half: while a folder is expanded every touch on the pane is intercepted
     // here, a stationary tap collapses the folder (and does nothing else -- the row under the finger
-    // does not launch), and a scroll is swallowed. Mirrors the grid's own rule, where a tap outside
-    // the open folder closes it and is consumed (AresHomeListView's UP handling), and where a
-    // scroll with a folder open is neither a close nor a launch.
+    // does not launch), and a scroll is swallowed. The TAP half mirrors the grid's own rule, where
+    // a tap outside the open folder closes it and is consumed (AresHomeListView's UP handling). The
+    // SCROLL half deliberately does not: the grid still scrolls with a folder open, the pane does
+    // not -- "inactive" was the owner's word for the pane, and a list that scrolls is not inactive.
 
     private var folderGateActive = false
     private var folderGateDownX = 0f
@@ -178,6 +179,9 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // Balance any registrations still live from the previous attach. Without this they
         // accumulate one per fold cycle (see [windowRegistered]).
         releaseWindowRegistrations()
+        // Row 100 / nightly review 2026-09-06 F1: take the folder wash's current state on arrival,
+        // whatever happened to it while this pane was detached across a fold.
+        mActivityContext.workspace?.aresHomeList?.syncFolderWashTo(this)
         // The base class adds mSearchContainer to the DragLayer when the search bar is floating,
         // and onDetachedFromWindow never removes it. This pane is detached and re-attached on every
         // fold cycle, so on the second attach that add would throw ("child already has a parent").

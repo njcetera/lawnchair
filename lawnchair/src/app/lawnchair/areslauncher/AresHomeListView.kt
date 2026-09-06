@@ -550,7 +550,19 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * list should be dim and inactive like the rest of the home screen"). The INACTIVE half lives
      * in [AresPanelAllAppsContainerView]'s touch gate. Null folded, where the pane is detached.
      */
-    private fun paneForWash(): View? = launcher.workspace?.aresAppListPane
+    private fun paneForWash(): View? = launcher.workspace?.aresAppListPaneForModelFeed
+
+    /**
+     * Pushes the CURRENT wash state onto [pane] once. Called from the pane's own attach (nightly
+     * review 2026-09-06, F1): the pane is one View re-attached on every fold cycle, a wash frame
+     * that ran while it was detached could not reach it through an attached-only accessor, and a
+     * layer paint left on a detached view rides back in with it. [paneForWash] now reads the
+     * detached-safe accessor as well, so this is the second half of the same guarantee: whatever
+     * the pane missed while away, it gets on arrival -- a full wash if a folder is open, none if not.
+     */
+    fun syncFolderWashTo(pane: View) {
+        applyTileWash(pane, washStrength)
+    }
 
     private fun clearAllTileWash() {
         washStrength = 0f
@@ -3027,9 +3039,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         y: Float,
     ) {
         val ev = MotionEvent.obtain(downTime, eventTime, action, x, y, 0)
-        dispatchTouchEvent(ev)
+        dispatchingSyntheticEvent = true
+        try {
+            dispatchTouchEvent(ev)
+        } finally {
+            dispatchingSyntheticEvent = false
+        }
         ev.recycle()
     }
+
+    /** True only while [dispatchSyntheticEvent] is inside `dispatchTouchEvent`; see the CANCEL gate there. */
+    private var dispatchingSyntheticEvent = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val end = when (ev.actionMasked) {
@@ -3051,7 +3071,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // never completes on the fold (owner report 2026-08-23; the N1 race in AresFolderDrop.clearTarget,
         // reliably triggered here). The synthetic UP has already latched dragGestureEnd=UP, so commitDrop
         // still runs on the real end; suppressing only this cancel() lets it see liveArming and create.
-        if (ev.actionMasked == MotionEvent.ACTION_CANCEL && !AresFolderDrop.isLiveArming()) {
+        // ...and not for a SYNTHETIC cancel either (nightly review 2026-09-06, F3): the drop slot's
+        // relay sends one to end a refused ItemTouchHelper lift (or from clear()), and the EXTERNAL
+        // dwell tracking that same DragController drag must not be reset by it -- the real finger
+        // is still down and still over whatever it was dwelling on.
+        if (ev.actionMasked == MotionEvent.ACTION_CANCEL && !AresFolderDrop.isLiveArming() &&
+            !dispatchingSyntheticEvent
+        ) {
             AresFolderDrop.cancel()
         }
         trackEmptySpaceLongPress(ev)
