@@ -455,6 +455,12 @@ object AresFolderDrop {
      *
      * ## Why only an IN-GRID drag opens the folder
      *
+     * (Historical note, 2026-09-06: the `SPRING_LOADED` mechanism below stopped applying when row 93
+     * removed that state for app-list and picker drags — but the exception itself still stands, on
+     * MJ-2 grounds: WP folders never raise the overlay for an external drag; see the `fromGrid`
+     * gates in [arm] and the live-create path. The measurement is kept as the record of why the
+     * exception was first made.)
+     *
      * §17's rule is that one interaction has one implementation, and this is a deliberate,
      * measured exception rather than drift. A `DragController` drag runs the launcher in
      * `SPRING_LOADED`; opening a folder on top of that and then **closing it again** — which

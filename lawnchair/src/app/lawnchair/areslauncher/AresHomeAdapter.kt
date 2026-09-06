@@ -1264,7 +1264,11 @@ class AresHomeAdapter(private val launcher: Launcher) :
     // packer lays out a gap the size of a cell and the tiles after it slide down, animated by
     // RecyclerView exactly as an in-grid reorder is. [AresHomeDropPreview] drives it.
 
-    /** The in-flight gap, or null. Identity, never id: it has no row and no meaningful id. */
+    /**
+     * The in-flight gap, or null. It has no database row; its id is the reserved [DROP_SLOT_ID],
+     * which [isDropSlot] matches alongside identity because ItemTouchHelper's deferred clearView
+     * can arrive after this field has been nulled.
+     */
     private var dropSlot: ItemInfo? = null
 
     /** True when [info] is the gap rather than a real item. */
