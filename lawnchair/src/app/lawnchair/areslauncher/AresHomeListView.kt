@@ -3020,12 +3020,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         android.util.Log.i("AresAttach", "DETACHED kids=$childCount w=$width")
         cancelEmptySpaceLongPress()
         emptySpacePopupTook = false
+        viewTreeObserver.removeOnGlobalLayoutListener(hostDriftWatcher)
         super.onDetachedFromWindow()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         android.util.Log.i("AresAttach", "ATTACHED kids=$childCount w=$width")
+        viewTreeObserver.addOnGlobalLayoutListener(hostDriftWatcher)
     }
 
     /**
@@ -3253,6 +3255,71 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private val tmpLoc = IntArray(2)
 
     /**
+     * Re-derives the overscan when the HOST moves under a list that is not itself re-laid out.
+     *
+     * Ledger row 144. A fold lays the window out twice: a stale frame with the OLD window height
+     * (2152 on the AVD) in which the host sits at window y=0 and this list takes its final size,
+     * then the real pass in which the host moves to y=178 -- and moves alone. Nothing about this
+     * list changes in that second pass (same size, same frame inside the host), so neither
+     * [onMeasure] nor [onLayout] runs, the convergence check in [onLayout] never gets a turn, and
+     * the overscan stays at the stale frame's 0. Home still LOOKS right (a list at 0 inside a host at
+     * 178 with padding 261 puts row 0 at 439, exactly where 0 + 439 would) -- which is how it shipped.
+     * The folded app-list sheet mirrored the padding, and 261 put its first row 178px above home's.
+     * Measured 3/3 on emulator-5554, 2026-09-07 11:38 (`homeTop=178 homePad=261` against
+     * `paneTop=0 rvPad=261`; the last `overscan measure` line of each fold read `windowHeight=2152`).
+     *
+     * A global-layout listener runs after EVERY layout pass in the window, including one that moved
+     * only the host, so it is the cheap place to notice the drift: one `getLocationInWindow` per
+     * pass, a `requestLayout` only when the host's window top differs from the one the last measure
+     * used. Converges in one extra pass, like the first-settle case in [onLayout]: that measure runs
+     * after the pass that moved the host, so it reads the settled position. Registered on attach and
+     * removed on detach; a rebind's TEMPORARY detach dispatches neither callback, so the listener
+     * rides through it on the same ViewTreeObserver.
+     */
+    private val hostDriftWatcher = ViewTreeObserver.OnGlobalLayoutListener {
+        reconcileHostWindowTop()
+    }
+
+    private fun reconcileHostWindowTop() {
+        if (measuredHostWindowTop < 0 || isLayoutRequested) return
+        val host = parent as? View ?: return
+        host.getLocationInWindow(tmpLoc)
+        val hostTop = tmpLoc[1]
+        if (hostTop >= 0 && hostTop != measuredHostWindowTop) {
+            Log.i(
+                "AresPaneAlign",
+                "host moved $measuredHostWindowTop -> $hostTop without a list layout: re-measuring overscan",
+            )
+            requestLayout()
+        }
+    }
+
+    /**
+     * Window Y of this list's resting first row: the top of row 0 with the list scrolled to the top.
+     *
+     * The FOLDED app-list sheet pads itself to this so that it starts where home starts (row 86,
+     * owner 2026-09-04). It is the layout position plus [getPaddingTop], not the padding alone: the
+     * padding carries the edge-to-edge overscan, and how much of the overscan has been applied is a
+     * matter of timing (row 144) -- `0 + 439` once a fold has settled and `178 + 261` in the window
+     * before [hostDriftWatcher] has caught up are the same row on screen, and only the sum says so.
+     *
+     * Frames, not [getLocationInWindow]: that folds in every ancestor's animation matrix, and the
+     * Workspace scales and translates during a state transition. The number the sheet has to match
+     * is where the row RESTS.
+     */
+    fun firstRowWindowTop(): Int {
+        var y = paddingTop
+        var v: View? = this
+        while (v != null) {
+            y += v.top
+            val p = v.parent as? View
+            if (p != null) y -= p.scrollY
+            v = p
+        }
+        return y
+    }
+
+    /**
      * Whether this device is a foldable, cached for the process.
      *
      * Read in [onMeasure], so it must not be a per-pass lookup. The value cannot change: it is
@@ -3434,6 +3501,13 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val ovTop = if (headerTop > 0) 0 else hostWindowTop
         val ovBottom = (windowHeight - (hostWindowTop + hostHeight)).coerceAtLeast(0)
         if (ovTop != overscanTop || ovBottom != overscanBottom) {
+            // Rare by construction (first settle, a fold, a host that moved -- see hostDriftWatcher),
+            // and the one place the folded sheet's starting row is decided, so it is worth a line.
+            Log.i(
+                "AresPaneAlign",
+                "overscan $overscanTop/$overscanBottom -> $ovTop/$ovBottom (hostWindowTop=$hostWindowTop " +
+                    "headerTop=$headerTop hostHeight=$hostHeight windowHeight=$windowHeight)",
+            )
             overscanTop = ovTop
             overscanBottom = ovBottom
             // Through super: our setPadding() is a deliberate no-op (see below). Runs only when the

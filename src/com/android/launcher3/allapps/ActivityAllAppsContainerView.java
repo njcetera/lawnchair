@@ -917,7 +917,16 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
             app.lawnchair.areslauncher.AresHomeListView homeList =
                     workspace == null ? null : workspace.getAresHomeList();
             if (homeList != null && homeList.getPaddingTop() > 0) {
-                return homeList.getPaddingTop();
+                // The row's WINDOW position, not the padding: the padding carries home's edge-to-edge
+                // overscan, and after a fold the overscan can lag the host's move by a layout pass or
+                // stick at 0 outright (ledger row 144: `homeTop=178 homePad=261` mirrored as 261, the
+                // sheet's first row 178px above home's). `0 + 439` and `178 + 261` are the same row
+                // on screen; this recycler starts at the window top (its inset is relocated into this
+                // padding), so that sum IS its padding.
+                int firstRow = homeList.firstRowWindowTop();
+                if (firstRow > 0) {
+                    return firstRow;
+                }
             }
         }
         // AresLauncher §11c: the stock value is room reserved under a search bar we do not draw,
