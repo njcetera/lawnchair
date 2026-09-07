@@ -159,12 +159,29 @@ object AresIconTransition {
      * Start the per-tile sparkles for a live icon change. [target] is the home list (the tiles to
      * sparkle); the app-list pane, if attached, is covered as a second layer. They play until
      * [playFrozen] / [playFrozenPane] (bind-complete) resolve them, or a safety timeout does.
-     * No-op if sparkles are already up, so clicking through packs/shapes keeps the one field.
+     * If sparkles are already up, the existing overlay is RE-ARMED for the new change: every layer
+     * goes back to fully covering, the clock restarts and the new change's own bind-complete resolves
+     * it. It used to be a no-op, which was fine while the overlay lived ~2 s; once the pane layer
+     * waited for the (slow, on the Pixel) all-apps bind, a second change inside that window got no
+     * fresh cover and its icons swapped bare (owner 2026-09-07: "subsequent changes aren't
+     * consistently triggering the animation", ledger row 141).
      */
     fun freeze(launcher: Launcher, target: View) {
-        if (active != null) return
         val list = target as? ViewGroup ?: return
+        active?.let { o ->
+            Log.i(TAG, "re-armed the existing overlay for a new change, ${SystemClock.uptimeMillis() - o.shownAt}ms after its show")
+            o.rearm()
+            armSafeties(o, target)
+            return
+        }
         val o = show(launcher, list) ?: return
+        armSafeties(o, target)
+    }
+
+    /** The home safety (FREEZE_TIMEOUT_MS from now) and, with a pane layer, the pane safety (PANE_SAFETY_MS). */
+    private fun armSafeties(o: TileSparkleOverlay, target: View) {
+        clearHoldTimeout()
+        clearPaneTimeout()
         holdTarget = target
         holdTimeout = Runnable { beginFadeOut() }.also { target.postDelayed(it, FREEZE_TIMEOUT_MS) }
         if (o.pane.list != null) {
@@ -462,6 +479,25 @@ object AresIconTransition {
                 onAllResolved = null
                 cb?.invoke(this)
             }
+        }
+
+        /**
+         * Row 141: a new change landed while this overlay is up. Put every populated layer back to a
+         * full cover (a fade in flight is cancelled WITHOUT its end listener, which would otherwise
+         * mark the layer done and tear the overlay down) and restart the clock.
+         */
+        fun rearm() {
+            for (l in layers) {
+                if (l.list == null) continue
+                l.fade?.let { it.removeAllListeners(); it.removeAllUpdateListeners(); it.cancel() }
+                l.fade = null
+                l.fading = false
+                l.done = false
+                l.layerAlpha = 1f
+            }
+            shownAt = SystemClock.uptimeMillis()
+            alpha = 1f
+            invalidate()
         }
 
         /** Drop every list reference and stop the fades; called from teardown. */
