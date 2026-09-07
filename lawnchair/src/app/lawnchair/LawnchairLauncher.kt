@@ -833,8 +833,8 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onDestroy() {
         // state-seam P5 / ledger S5: drop any drag / preview state pinned to THIS activity before
-        // it goes. These are process-global singletons; a fold recreates the Launcher and, mid-
-        // gesture, their per-drag terminal callbacks (onDragEnd / preview close) may never fire —
+        // it goes. These are process-global singletons; a theme or wallpaper-colour change recreates the
+        // Launcher (a fold does not: configChanges) and, mid-gesture, their per-drag terminal callbacks (onDragEnd / preview close) may never fire —
         // leaving a dead Launcher registered, or a ghost icon that outlives the activity. Both
         // clears are safe to call when nothing is in flight (guarded / no-op).
         AresDragWatch.onLauncherDestroyed(this)

@@ -309,7 +309,7 @@ object AresEditCarousel {
     }
 
     /**
-     * The activity is going away (theme switch / fold recreate). If the carousel on screen belongs
+     * The activity is going away (a theme or wallpaper-colour change recreates the Launcher; a fold does not -- configChanges). If the carousel on screen belongs
      * to it, drop it synchronously: `view` is a process-global reference to a DragLayer child of the
      * dying activity and only detach() or the next attach() would otherwise release it.
      */
@@ -317,6 +317,10 @@ object AresEditCarousel {
         val v = view ?: return
         if (Launcher.getLauncher(v.context) === launcher) {
             android.util.Log.i("AresEditCarousel", "released with its activity (onDestroy)")
+            // Commit, do not drop, a pack/shape pick still inside its debounce: before this hook
+            // the posted runnable outlived the view and committed anyway (panel review 2026-09-07, F2).
+            flushPendingIconPack()
+            flushPendingShape()
             clearStale()
         }
     }

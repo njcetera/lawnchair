@@ -27,10 +27,9 @@ import androidx.recyclerview.widget.RecyclerView
  * normal contract. Verified on device: 40 items laid out to 8800px inside a 1773px viewport with
  * scroll offset/range/extent all correct, and 9 views attached for 40 items.
  *
- * On scroll this detaches and re-fills rather than incrementally adding and removing at the edges.
- * That is a deliberate simplification: a home screen holds tens of items, not thousands, so the
- * cost is trivial, and it removes a whole class of edge-case bugs in edge bookkeeping. Views still
- * recycle -- scrapped views are handed straight back by the recycler.
+ * On scroll, fill() offsets the attached children and lays out only what entered the overscan band
+ * (row 47 / e6bea34a17 replaced the original detach-and-refill); with the full-grid overscan
+ * (row 51) every child stays attached, so a scroll frame allocates nothing.
  */
 class AresMasonryLayoutManager(
     private val spanProvider: SpanProvider,

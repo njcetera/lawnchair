@@ -429,7 +429,7 @@ object AresFolderDrop {
     fun cancel() = clear()
 
     /**
-     * The activity is going away (theme switch / fold recreate) with a dwell possibly in flight:
+     * The activity is going away (a theme or wallpaper-colour change recreates the Launcher; a fold does not -- configChanges) with a dwell possibly in flight:
      * `grid` / `dragged` / `candidate` are process-global and only clear() releases them.
      */
     fun onLauncherDestroyed(launcher: Launcher) {

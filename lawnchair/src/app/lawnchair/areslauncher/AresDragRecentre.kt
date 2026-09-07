@@ -28,6 +28,10 @@ import com.android.launcher3.views.ActivityContext
  * decision itself lives in [com.android.launcher3.dragndrop.DragView.aresRecentreUnderFinger]: a
  * finger already ON the picture keeps stock's exact-press-point registration.
  *
+ * Scope note: `AresWidgetAdd.isAresHome` is always true on this fork (Workspace.hasAresHomeList()
+ * returns true unconditionally), so the effective gate is "a BubbleTextView dragged from an all-apps
+ * container" -- the unfolded pane AND the folded sheet. Measured on the pane only (panel 2026-09-07).
+ *
  * `setprop debug.ares.drag_recentre 0` keeps the stock registration, so control and fix come from
  * identical bytes; both branches log so an arm proves which path it took.
  */

@@ -70,8 +70,12 @@ object AresIconTransition {
     private const val FADE_OUT_MS = 460L        // the unified resolve
     private const val POST_BIND_HOLD_MS = 350L  // let widgets repaint before resolving
     private const val FREEZE_TIMEOUT_MS = 6000L // safety: resolve even if bind-complete never fires
-    // Safety for the pane layer: if all-apps never binds after the home resolved, resolve it anyway.
-    private const val PANE_AFTER_HOME_TIMEOUT_MS = 4000L
+    // Safety for the PANE layer, from show: all apps bind after the workspace and, on a device with
+    // hundreds of apps, seconds after it (ledger row 77: loadAllApps ~46x slower on the Pixel), so
+    // the pane must not fall to the 6 s global safety -- that would lift its covers before its icons
+    // change, the exact defect row 104 fixed (panel review 2026-09-07). Generous on purpose: a pane
+    // cover that stays a few seconds too long is a beat; one that lifts too early is a bare swap.
+    private const val PANE_SAFETY_MS = 20000L
     private const val TWINKLE_MS = 1600f
 
     // Each tile is covered by an opaque flowing M3 gradient (so the icon/widget swap is hidden), with
@@ -160,9 +164,15 @@ object AresIconTransition {
     fun freeze(launcher: Launcher, target: View) {
         if (active != null) return
         val list = target as? ViewGroup ?: return
-        show(launcher, list) ?: return
+        val o = show(launcher, list) ?: return
         holdTarget = target
         holdTimeout = Runnable { beginFadeOut() }.also { target.postDelayed(it, FREEZE_TIMEOUT_MS) }
+        if (o.pane.list != null) {
+            paneTimeout = Runnable {
+                Log.w(TAG, "pane safety fired ${PANE_SAFETY_MS}ms after show: all apps never bound")
+                o.resolve(o.pane)
+            }.also { o.postDelayed(it, PANE_SAFETY_MS) }
+        }
     }
 
     /**
@@ -177,10 +187,6 @@ object AresIconTransition {
         val t = target ?: o
         holdTarget = t
         holdTimeout = Runnable { o.resolve(o.home) }.also { t.postDelayed(it, wait) }
-        if (o.pane.list != null && paneTimeout == null) {
-            paneTimeout = Runnable { o.resolve(o.pane) }
-                .also { o.postDelayed(it, wait + PANE_AFTER_HOME_TIMEOUT_MS) }
-        }
     }
 
     /**
@@ -191,6 +197,7 @@ object AresIconTransition {
     fun playFrozenPane(launcher: Launcher) {
         val o = active ?: return
         if (o.pane.list == null) return
+        Log.i(TAG, "pane bind-complete ${SystemClock.uptimeMillis() - o.shownAt}ms after show (all apps bound)")
         clearPaneTimeout()
         paneTimeout = Runnable { o.resolve(o.pane) }.also { o.postDelayed(it, resolveDelay(o)) }
     }
@@ -256,12 +263,14 @@ object AresIconTransition {
         null
     }
 
-    /** Safety resolve: fade every layer out together, then tear down. Idempotent while resolving. */
+    /**
+     * Global safety: bind-complete never came for the HOME layer -- resolve it. The pane keeps its
+     * own, longer safety (PANE_SAFETY_MS), because all apps legitimately bind well after this point.
+     */
     private fun beginFadeOut() {
         val o = active ?: return
-        clearPaneTimeout()
+        Log.w(TAG, "home safety fired ${FREEZE_TIMEOUT_MS}ms after show: bind-complete never came")
         o.resolve(o.home)
-        o.resolve(o.pane)
     }
 
     private fun teardown(o: TileSparkleOverlay) {
@@ -618,6 +627,18 @@ object AresIconTransition {
             for (layer in layers) {
                 val list = layer.list ?: continue
                 if (layer.done || layer.layerAlpha <= 0.002f) continue
+                // A fold lifts the pane out of the window without a detach callback (temp detach),
+                // so its RecyclerView still answers isAttachedToWindow while its drag-layer origin
+                // no longer resolves -- covers would be drawn at a broken origin on the folded
+                // display (panel review 2026-09-07, F1). The attached-only accessor is null exactly
+                // then: drop the pane layer rather than draw it.
+                if (layer.isPane && (context as? Launcher)?.workspace?.aresAppListPane == null) {
+                    Log.i(TAG, "pane left the window mid-sparkle; pane layer dropped")
+                    layer.list = null
+                    layer.done = true
+                    checkAllResolved()
+                    continue
+                }
                 drawLayer(canvas, layer, list)
             }
         }
