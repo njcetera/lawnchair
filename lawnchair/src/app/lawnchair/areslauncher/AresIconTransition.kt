@@ -75,6 +75,10 @@ object AresIconTransition {
     private const val FADE_IN_MS = 220L
     private const val FADE_OUT_MS = 420L        // the unified resolve
     private const val POST_BIND_HOLD_MS = 250L  // let widgets repaint before resolving
+    // Row 141: a bind whose loader started this much before the latest re-arm belongs to the
+    // PREVIOUS change. The new change's own loader starts within a few ms of the re-arm (either
+    // side of it), a previous change's at least a whole user gesture earlier.
+    private const val STALE_BIND_MARGIN_MS = 250L
     private const val FREEZE_TIMEOUT_MS = 6000L // safety: resolve even if bind-complete never fires
     // Safety for the PANE layer, from show: all apps bind after the workspace and, on a device with
     // hundreds of apps, seconds after it (ledger row 77: loadAllApps ~46x slower on the Pixel), so
@@ -230,6 +234,7 @@ object AresIconTransition {
      */
     fun playFrozen(launcher: Launcher, target: View?) {
         val o = active ?: return
+        if (bindIsStale(o, "home")) return
         clearHoldTimeout()
         val wait = resolveDelay(o)
         val t = target ?: o
@@ -245,9 +250,44 @@ object AresIconTransition {
     fun playFrozenPane(launcher: Launcher) {
         val o = active ?: return
         if (o.pane.list == null) return
+        if (bindIsStale(o, "pane")) return
         Log.i(TAG, "pane bind-complete ${SystemClock.uptimeMillis() - o.shownAt}ms after show (all apps bound)")
         clearPaneTimeout()
         paneTimeout = Runnable { o.resolve(o.pane) }.also { o.postDelayed(it, resolveDelay(o)) }
+    }
+
+    /**
+     * Start time of the LoaderTask whose bind is being dispatched right now, or 0 when the current
+     * call did not come through a loader's callback dispatch. Set and cleared around every dispatch
+     * by `BaseLauncherBinder.executeCallbacksTask`; main thread only.
+     */
+    private var bindingLoaderStartedAt = 0L
+
+    @JvmStatic
+    fun noteBindingLoader(startedAt: Long) {
+        bindingLoaderStartedAt = startedAt
+    }
+
+    /**
+     * Row 141, the §27 verifier's FAIL at a 0.9 s gap: a second change re-armed the covers, then the
+     * FIRST change's all-apps bind landed (its loader had already passed its last cancel point) and
+     * resolved the pane onto change 1's icons, 1.4 s before change 2's loader had even started;
+     * change 2's own bind then found the layer done and the pane swapped icons bare. A bind-complete
+     * only counts if the loader that produced it started no earlier than [STALE_BIND_MARGIN_MS]
+     * before the latest re-arm; a stale one is ignored and the layer waits for the bind the re-arm
+     * was for (the safeties still bound a bind that never comes). Unknown provenance (0) is fresh:
+     * a plain rebind must keep resolving as it always has.
+     */
+    private fun bindIsStale(o: TileSparkleOverlay, which: String): Boolean {
+        if (o.rearmedAt == 0L || bindingLoaderStartedAt == 0L) return false
+        val lead = o.rearmedAt - bindingLoaderStartedAt
+        if (lead <= STALE_BIND_MARGIN_MS) return false
+        Log.i(
+            TAG,
+            "ignoring stale $which bind: its loader started ${lead}ms before the re-arm (row 141); " +
+                "the $which covers wait for the new change's own bind",
+        )
+        return true
     }
 
     private fun resolveDelay(o: TileSparkleOverlay): Long {
@@ -450,6 +490,8 @@ object AresIconTransition {
         private val layers = arrayOf(home, pane)
 
         var shownAt = 0L
+        /** Uptime of the latest [rearm], 0 when this overlay has never been re-armed (row 141). */
+        var rearmedAt = 0L
         var filters: Array<PorterDuffColorFilter> = emptyArray()
         var veilColors = IntArray(0)
         var cornerPx = 0f
@@ -555,6 +597,7 @@ object AresIconTransition {
                 l.resolveDefers = 0
             }
             shownAt = SystemClock.uptimeMillis()
+            rearmedAt = shownAt
             alpha = 1f
             invalidate()
         }

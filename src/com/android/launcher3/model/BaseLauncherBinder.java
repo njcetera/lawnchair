@@ -68,6 +68,20 @@ public class BaseLauncherBinder {
 
     private int mMyBindingId;
 
+    /**
+     * AresLauncher (ledger row 141): uptime at which the LoaderTask that owns this binder started,
+     * 0 for a binder that never ran one (a plain rebind). Every callback this binder dispatches is
+     * announced with it, so the theming transition can tell a bind that belongs to a PREVIOUS change
+     * from the one it is waiting for -- a first change's all-apps bind landing after a second change
+     * re-armed the covers used to resolve the pane onto the wrong icons.
+     */
+    private long mAresLoaderStartedAt;
+
+    /** Called by the owning LoaderTask at the top of its run. */
+    public void aresMarkLoaderStarted() {
+        mAresLoaderStartedAt = android.os.SystemClock.uptimeMillis();
+    }
+
     @AssistedInject
     public BaseLauncherBinder(
             @ApplicationContext Context context,
@@ -161,8 +175,15 @@ public class BaseLauncherBinder {
                 Log.d(TAG, "Too many consecutive reloads, skipping obsolete data-bind");
                 return;
             }
-            for (Callbacks cb : mCallbacksList) {
-                task.execute(cb);
+            // AresLauncher row 141: stamp the dispatch with its loader's start, and clear it after,
+            // so a bind arriving by any other route reads 0 and is treated as fresh.
+            app.lawnchair.areslauncher.AresIconTransition.noteBindingLoader(mAresLoaderStartedAt);
+            try {
+                for (Callbacks cb : mCallbacksList) {
+                    task.execute(cb);
+                }
+            } finally {
+                app.lawnchair.areslauncher.AresIconTransition.noteBindingLoader(0L);
             }
         });
     }

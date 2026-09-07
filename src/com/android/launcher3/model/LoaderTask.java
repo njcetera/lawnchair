@@ -395,6 +395,9 @@ public class LoaderTask implements Runnable {
             }
         }
 
+        // AresLauncher row 141: every bind this run dispatches carries this start time.
+        mLauncherBinder.aresMarkLoaderStarted();
+
         TraceHelper.INSTANCE.beginSection(TAG);
         MODEL_EXECUTOR.elevatePriority(CALLER_LOADER_TASK);
         LoaderMemoryLogger memoryLogger = new LoaderMemoryLogger();
