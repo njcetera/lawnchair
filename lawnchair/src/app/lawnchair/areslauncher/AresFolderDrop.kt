@@ -432,6 +432,18 @@ object AresFolderDrop {
     @JvmStatic
     fun cancel() = clear()
 
+    /**
+     * The activity is going away (theme switch / fold recreate) with a dwell possibly in flight:
+     * `grid` / `dragged` / `candidate` are process-global and only clear() releases them.
+     */
+    fun onLauncherDestroyed(launcher: Launcher) {
+        val g = grid ?: return
+        if (Launcher.getLauncher(g.context) === launcher) {
+            Log.i(TAG, "released with its activity (onDestroy)")
+            clear()
+        }
+    }
+
     private fun restart(list: AresHomeListView, x: Float, y: Float) {
         anchorX = x
         anchorY = y

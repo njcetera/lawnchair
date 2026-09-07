@@ -134,6 +134,14 @@ object AresIconTransition {
         return "showing=true|home=${o.home.snapCount}|pane=${o.pane.snapCount}|paneAttached=${o.pane.list != null}"
     }
 
+    /** The overlay is a DragLayer child of the activity it was built for; drop it when that activity dies. */
+    fun onLauncherDestroyed(launcher: Launcher) {
+        if (active?.context === launcher) {
+            Log.i(TAG, "released with its activity (onDestroy)")
+            cancel()
+        }
+    }
+
     /** Cancel any in-flight sparkle overlay (activity destroy / edit-mode exit). Safe when idle. */
     fun cancel() {
         clearHoldTimeout()

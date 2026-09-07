@@ -137,6 +137,16 @@ object AresExternalDragScroll {
         }
     }
 
+    /** A recreate mid-drag skips onDragEnd; release the dying activity's list. */
+    @JvmStatic
+    fun onLauncherDestroyed(launcher: com.android.launcher3.Launcher) {
+        val l = list ?: return
+        if (com.android.launcher3.Launcher.getLauncher(l.context) === launcher) {
+            Log.i(TAG, "released with its activity (onDestroy)")
+            stop()
+        }
+    }
+
     /** Ends any scroll in flight. Safe to call at any time; call from onDragExit and onDragEnd. */
     @JvmStatic
     fun stop() {

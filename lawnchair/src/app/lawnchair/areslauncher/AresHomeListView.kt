@@ -1631,7 +1631,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         masonry.restScale = scale
         for (i in 0 until childCount) {
             val child = getChildAt(i)
-            child.animate().scaleX(tileScale(child)).scaleY(tileScale(child))
+            val target = tileScale(child)
+            child.animate().scaleX(target).scaleY(target)
                 .setDuration(EDIT_SCALE_MS).start()
             setItemClickable(child, !editMode)
             syncEditVisuals(child)

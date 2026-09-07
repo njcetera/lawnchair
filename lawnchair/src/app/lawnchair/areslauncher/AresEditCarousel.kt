@@ -308,6 +308,19 @@ object AresEditCarousel {
         pills = emptyList()
     }
 
+    /**
+     * The activity is going away (theme switch / fold recreate). If the carousel on screen belongs
+     * to it, drop it synchronously: `view` is a process-global reference to a DragLayer child of the
+     * dying activity and only detach() or the next attach() would otherwise release it.
+     */
+    fun onLauncherDestroyed(launcher: Launcher) {
+        val v = view ?: return
+        if (Launcher.getLauncher(v.context) === launcher) {
+            android.util.Log.i("AresEditCarousel", "released with its activity (onDestroy)")
+            clearStale()
+        }
+    }
+
     fun detach() {
         // Commit a debounced icon-pack pick before tearing down, so leaving edit mode right after a
         // tap still applies it (this runs the plain pref write, no freeze -- there is no grid to

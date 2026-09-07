@@ -100,6 +100,10 @@ class AresMasonryLayoutManager(
     // Scratch for fill()'s kept-widget position check; reused to avoid per-child allocation.
     private val decorBounds = android.graphics.Rect()
 
+    // Scratch for fill()'s attached-by-position index; reused so a scroll frame allocates nothing
+    // and boxes no Integer keys.
+    private val attachedScratch = android.util.SparseArray<View>()
+
     /** Read-only view of [scrollOffset], for the test channel. The §4 grid-jump defect (ledger
      * row 27) is an absolute jump of this value mid-drag, which layout bounds cannot show. */
     internal fun currentScrollOffset(): Int = scrollOffset
@@ -587,7 +591,7 @@ class AresMasonryLayoutManager(
      * only OFFSETS these already-measured children (see [fill]'s `moved`/`needsLayout` gate), so no
      * tile renders in mid-scroll.
      */
-    private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int): Boolean {
+    private fun isVisible(l: AresPacker.Layout, position: Int, ch: Int, over: Int): Boolean {
         if (position !in l.cells.indices) return false
         val pad = expandedPad(position)
         val top = l.cells[position].y * ch + pad
@@ -598,8 +602,7 @@ class AresMasonryLayoutManager(
         // Recycling at the content edge is what made tiles "de-render" scrolling into a large top/
         // bottom padding (owner) -- they should render across the whole page. A cell is drawn at screen
         // y = paddingTop + cellTop - scrollOffset, so it is laid out when that range overlaps
-        // [-overscan, height + overscan].
-        val over = overscanPx(l)
+        // [-overscan, height + overscan]. `over` is overscanPx(l), computed once per fill.
         return paddingTop + bottom - scrollOffset > -over &&
             paddingTop + top - scrollOffset < height + over
     }
@@ -638,28 +641,30 @@ class AresMasonryLayoutManager(
         // Recycle anything that has left the viewport or whose position no longer exists, and index
         // what is left by position so it is reused rather than duplicated. Backwards, because
         // removeAndRecycleView shifts every later index down.
-        val attached = HashMap<Int, View>()
+        val attached = attachedScratch
+        attached.clear()
+        val over = overscanPx(l)
         for (i in childCount - 1 downTo 0) {
             val child = getChildAt(i) ?: continue
             val position = getPosition(child)
             val keep = position in l.cells.indices &&
-                (isVisible(l, position, ch) || !mayRecycle(child)) &&
+                (isVisible(l, position, ch, over) || !mayRecycle(child)) &&
                 // Two children claiming one position is the corrupt state this whole function
                 // exists to prevent. If it is ever reached anyway, keep one and drop the rest --
                 // repairing on the next pass beats rendering both on top of each other.
-                !attached.containsKey(position)
-            if (keep) attached[position] = child else removeAndRecycleView(child, recycler)
+                attached.indexOfKey(position) < 0
+            if (keep) attached.put(position, child) else removeAndRecycleView(child, recycler)
         }
 
         for (position in l.cells.indices) {
-            if (!isVisible(l, position, ch) && !attached.containsKey(position)) continue
+            if (!isVisible(l, position, ch, over) && attached.indexOfKey(position) < 0) continue
             val cell = l.cells[position]
             val span = spanProvider.getSpan(position)
             val pad = expandedPad(position)
             val top = cell.y * ch + pad
             val bottom = top + span.h.coerceAtLeast(1) * ch
 
-            val existing = attached[position]
+            val existing = attached.get(position)
             val view = existing
                 ?: recycler.getViewForPosition(position).also { addView(it) }
 

@@ -510,12 +510,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
     fun indexOf(info: ItemInfo): Int = items.indexOfFirst { it.id == info.id }
 
     /**
-     * Width of the list we are attached to, for reporting real row size to widget providers.
-     * Zero until attached; [reportRowSizeToProvider] falls back to the device profile then.
-     */
-    private var recyclerViewWidth: Int = 0
-
-    /**
      * The list we are attached to, held only so [releaseForRemoval] can reach a holder by position.
      * Null between detach and the next attach.
      */
@@ -524,11 +518,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
         host = recyclerView
-        recyclerViewWidth = recyclerView.width
-        // The list is typically unmeasured at attach time, so pick the width up on first layout.
-        recyclerView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-            recyclerViewWidth = v.width
-        }
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
@@ -1369,7 +1358,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * the proportions its provider was designed against.
      */
     fun spanOf(position: Int): AresPacker.Span {
-        val info = items.getOrNull(position) ?: return AresPacker.Span(1, 1)
+        val info = items.getOrNull(position) ?: return SPAN_1X1
         // The drop slot renders nothing but carries the footprint of the item being held (and its
         // kind: a widget slot is typed APPWIDGET); a 4x2 widget in hand must open a 4x2 hole. Measured 2026-09-04 without
         // this branch: the Gmail Inbox widget's gap was one cell (254x232) and the widget landed
@@ -1380,7 +1369,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         return when (info.itemType) {
             Favorites.ITEM_TYPE_APPWIDGET, Favorites.ITEM_TYPE_CUSTOM_APPWIDGET ->
                 AresPacker.Span(info.spanX.coerceAtLeast(1), info.spanY.coerceAtLeast(1))
-            else -> AresPacker.Span(1, 1)
+            else -> SPAN_1X1
         }
     }
 
@@ -1715,6 +1704,13 @@ class AresHomeAdapter(private val launcher: Launcher) :
     }
 
     override fun onViewRecycled(holder: ViewHolder) {
+        // A host recycled here is being destroyed (hardClear inflates a fresh one on rebind), so
+        // drop its size-report bookkeeping or every hard rebind retains the old AppWidgetHostViews
+        // -- RemoteViews tree, context and all -- for the adapter's life.
+        (holder.container.getChildAt(0) as? AppWidgetHostView)?.let {
+            pendingWidgetSizeReports.remove(it)
+            lastReportedWidgetDp.remove(it)
+        }
         holder.container.removeAllViews()
         // Drop any focus-wash hardware layer/freeze bookkeeping this tile carried, so a tile
         // recycled while a folder is open does not reattach dimmed. (Adversarial review 2026-08-25,
@@ -1736,6 +1732,9 @@ class AresHomeAdapter(private val launcher: Launcher) :
     class ViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
 
     private companion object {
+        /** Shared 1x1 footprint: spanOf runs ~3x per position per scroll frame, and Span is a data class. */
+        private val SPAN_1X1 = AresPacker.Span(1, 1)
+
         /** Safety flush if a soft rebind is opened by clear() and bind-complete never arrives. */
         private const val SOFT_REBIND_FLUSH_MS = 5000L
         const val TYPE_ICON = 0

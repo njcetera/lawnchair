@@ -37,6 +37,9 @@ import app.lawnchair.areslauncher.AresBindGuard
 import app.lawnchair.areslauncher.AresDragWatch
 import app.lawnchair.areslauncher.AresFolderPreview
 import app.lawnchair.areslauncher.AresHomeDropPreview
+import app.lawnchair.areslauncher.AresEditCarousel
+import app.lawnchair.areslauncher.AresFolderDrop
+import app.lawnchair.areslauncher.AresExternalDragScroll
 import app.lawnchair.areslauncher.AresIconTransition
 import app.lawnchair.areslauncher.AresThemeIconRefresh
 import app.lawnchair.compat.LawnchairQuickstepCompat
@@ -837,6 +840,13 @@ class LawnchairLauncher : QuickstepLauncher() {
         AresDragWatch.onLauncherDestroyed(this)
         AresFolderPreview.onLauncherDestroyed(this)
         AresHomeDropPreview.onLauncherDestroyed(this)
+        // Same class of leak (performance review 2026-09-07, M6): the carousel view, the sparkle
+        // overlay, the folder-dwell state and the edge auto-scroll are also process-global and only
+        // their own terminal paths release them; a recreate in edit mode or mid-drag skips those.
+        AresEditCarousel.onLauncherDestroyed(this)
+        AresIconTransition.onLauncherDestroyed(this)
+        AresFolderDrop.onLauncherDestroyed(this)
+        AresExternalDragScroll.onLauncherDestroyed(this)
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()
