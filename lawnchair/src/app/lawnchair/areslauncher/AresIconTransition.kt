@@ -18,6 +18,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
 import android.util.Log
+import com.android.launcher3.Utilities
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
@@ -64,11 +65,13 @@ object AresIconTransition {
 
     private const val TAG = "AresIconTransition"
 
-    // Feel knobs.
-    private const val MIN_HOLD_MS = 700L        // min sparkle beat even for an instant change
+    // Feel knobs. Trimmed 2026-09-07 for ledger row 139 (owner: "these should both update really
+    // fast so the animation isn't so long"): 700/460/350 -> 400/320/150. Measured on the Pixel the
+    // floor was ~0.35 s of the home's 1.7 s; the pane's time is the all-apps reload, not this.
+    private const val MIN_HOLD_MS = 400L        // min sparkle beat even for an instant change
     private const val FADE_IN_MS = 220L
-    private const val FADE_OUT_MS = 460L        // the unified resolve
-    private const val POST_BIND_HOLD_MS = 350L  // let widgets repaint before resolving
+    private const val FADE_OUT_MS = 320L        // the unified resolve
+    private const val POST_BIND_HOLD_MS = 150L  // let widgets repaint before resolving
     private const val FREEZE_TIMEOUT_MS = 6000L // safety: resolve even if bind-complete never fires
     // Safety for the PANE layer, from show: all apps bind after the workspace and, on a device with
     // hundreds of apps, seconds after it (ledger row 77: loadAllApps ~46x slower on the Pixel), so
@@ -116,6 +119,8 @@ object AresIconTransition {
     // Fine fuzzy dust speckles that sit among the stars.
     private val softDot: Bitmap by lazy { buildSoftDot() }
 
+    // Volatile: written on the main thread, read by the loader thread in [loaderMaySkipIdleWait].
+    @Volatile
     private var active: TileSparkleOverlay? = null
     private var holdTimeout: Runnable? = null
     private var holdTarget: View? = null
@@ -128,6 +133,29 @@ object AresIconTransition {
      * a color-resolve throw) — the "the animation isn't happening" class.
      */
     val isShowing: Boolean get() = active != null
+
+    /**
+     * Row 139: whether `LoaderTask.waitForIdle` may return at once. Stock will not start
+     * `loadAllApps` until the main looper goes idle ("let the workspace settle"); after a home rebind
+     * on the Pixel that wait was 0.80–0.92 s in every measured run, and while a transition is showing
+     * the sparkle already covers both surfaces — the owner is waiting on the all-apps bind, not on a
+     * settled home. `setprop debug.ares.loader_break 1` restores the wait (the control arm of the
+     * A/B). Called on the LOADER thread, hence `active` is volatile. Both branches log.
+     */
+    @JvmStatic
+    fun loaderMaySkipIdleWait(): Boolean {
+        if (keepLoaderBreak) {
+            Log.i(TAG, "loader idle wait kept: debug.ares.loader_break=1")
+            return false
+        }
+        val showing = active != null
+        Log.i(TAG, if (showing) "loader idle wait skipped: transition showing" else "loader idle wait kept: no transition")
+        return showing
+    }
+
+    private val keepLoaderBreak: Boolean by lazy {
+        Utilities.getSystemProperty("debug.ares.loader_break", "") == "1"
+    }
 
     /**
      * One line for the test channel: whether an overlay is up and how many covers each layer drew on

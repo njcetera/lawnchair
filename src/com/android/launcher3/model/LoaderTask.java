@@ -212,6 +212,12 @@ public class LoaderTask implements Runnable {
     }
 
     protected synchronized void waitForIdle() {
+        // Ares (ledger row 139): while an icon transition is showing, the sparkle already covers
+        // both surfaces and the user is waiting on the all-apps bind, so do not hold loadAllApps
+        // for a settled home. Measured 0.80-0.92 s per reload on the Pixel.
+        if (app.lawnchair.areslauncher.AresIconTransition.loaderMaySkipIdleWait()) {
+            return;
+        }
         // Wait until the either we're stopped or the other threads are done.
         // This way we don't start loading all apps until the workspace has settled
         // down.
