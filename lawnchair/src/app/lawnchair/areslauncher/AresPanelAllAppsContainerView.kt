@@ -190,6 +190,9 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // The base class adds mSearchContainer to the DragLayer when the search bar is floating,
         // and onDetachedFromWindow never removes it. This pane is detached and re-attached on every
         // fold cycle, so on the second attach that add would throw ("child already has a parent").
+        // A release posted by a real detach moments ago must not run after this re-attach (see
+        // releaseSearchPill).
+        cancelPendingPillRelease()
         // Drop it first and let the base class re-add it.
         (searchView?.parent as? ViewGroup)?.removeView(searchView)
         super.onAttachedToWindow()
@@ -283,9 +286,30 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // DragLayer is still attached in the case this method actually exists for (a fold, where the
         // pill must not be left stranded). If the whole window is going away the runnable simply
         // never runs -- correct, because the DragLayer is being destroyed with it.
-        host.post {
+        cancelPendingPillRelease()
+        val release = Runnable {
+            pendingPillRelease = null
+            // A REAL detach followed by a re-attach before this ran: onAttachedToWindow has just
+            // re-added the pill, so removing it now leaves the pane on screen WITHOUT its fob. Seen
+            // on the owner's Pixel at boot 2026-09-07 ("fob showed for a moment but is gone now";
+            // the pane was attached and visible with no search container in the DragLayer). The
+            // fold case this method exists for keeps the pane parentless, so the removal still runs.
+            if (parent != null) {
+                android.util.Log.i("AresAttach", "pill release skipped: pane re-attached before it ran")
+                return@Runnable
+            }
             if (pill.parent === host) host.removeView(pill)
         }
+        pendingPillRelease = host to release
+        host.post(release)
+    }
+
+    /** The posted [releaseSearchPill] runnable and the host it was posted on, until it runs. */
+    private var pendingPillRelease: Pair<ViewGroup, Runnable>? = null
+
+    private fun cancelPendingPillRelease() {
+        pendingPillRelease?.let { (h, r) -> h.removeCallbacks(r) }
+        pendingPillRelease = null
     }
 
     /**
