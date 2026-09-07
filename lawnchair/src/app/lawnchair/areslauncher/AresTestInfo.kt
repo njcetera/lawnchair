@@ -126,6 +126,14 @@ object AresTestInfo {
     const val REQUEST_TILE_METRICS = "ares-tile-metrics"
 
     /**
+     * One entry per hosted widget on the home list:
+     * `id=<appWidgetId>|provider=<class>|host=<w>x<h>dp|opt=<minW>x<minH>-<maxW>x<maxH>|sizes=[<w>x<h>,...]|memo=<w>x<h>|none`.
+     * `opt`/`sizes` are the SYSTEM's stored size options; `host` is the view's real box. They
+     * agree when the list's report is what the provider last rendered for (ledger row 142).
+     */
+    const val REQUEST_WIDGET_OPTIONS = "ares-widget-options"
+
+    /**
      * The W1 metric: `viewGroup|layoutManager|adapter` child counts for the home grid.
      *
      * The three disagree in exactly one interesting way. `RecyclerView.getChildCount()` is plain
@@ -580,6 +588,10 @@ object AresTestInfo {
         REQUEST_TILE_METRICS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
             { launcher -> tileMetrics(launcher) },
+        )
+        REQUEST_WIDGET_OPTIONS -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putStringArray(key, value) },
+            { launcher -> widgetOptions(launcher) },
         )
         REQUEST_CHILD_CENSUS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
@@ -1326,6 +1338,32 @@ object AresTestInfo {
             .filter { it.container == fid }
             .map { it.id }
         return "order=$order"
+    }
+
+    private fun widgetOptions(launcher: Launcher): Array<String> {
+        val list = launcher.workspace?.aresHomeList ?: return emptyArray()
+        val manager = android.appwidget.AppWidgetManager.getInstance(launcher)
+        val density = launcher.resources.displayMetrics.density
+        val out = ArrayList<String>()
+        for (i in 0 until list.childCount) {
+            val container = list.getChildAt(i) as? ViewGroup ?: continue
+            val host = container.getChildAt(0) as? android.appwidget.AppWidgetHostView ?: continue
+            val id = host.appWidgetId
+            val opt = manager.getAppWidgetOptions(id)
+            val sizes = opt.getParcelableArrayList<android.util.SizeF>(
+                android.appwidget.AppWidgetManager.OPTION_APPWIDGET_SIZES,
+            )?.joinToString(",") { "${it.width.toInt()}x${it.height.toInt()}" } ?: ""
+            out.add(
+                "id=$id|provider=${host.appWidgetInfo?.provider?.shortClassName ?: "?"}" +
+                    "|host=${(host.width / density).toInt()}x${(host.height / density).toInt()}dp" +
+                    "|opt=${opt.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)}x" +
+                    "${opt.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)}-" +
+                    "${opt.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)}x" +
+                    "${opt.getInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)}" +
+                    "|sizes=[$sizes]|memo=${list.aresAdapter.lastReportedBox(host) ?: "none"}",
+            )
+        }
+        return out.toTypedArray()
     }
 
     private fun tileMetrics(launcher: Launcher): Array<String> {

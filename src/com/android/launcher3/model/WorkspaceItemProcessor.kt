@@ -656,13 +656,25 @@ class WorkspaceItemProcessor(
                 iconCache.getTitleAndIconForApp(appWidgetInfo.pendingItemInfo, iconLookupFlag)
             }
             WidgetInflater.TYPE_REAL ->
-                WidgetSizes.updateWidgetSizeRangesAsync(
-                    appWidgetInfo.appWidgetId,
-                    lapi,
-                    context,
-                    appWidgetInfo.spanX,
-                    appWidgetInfo.spanY,
-                )
+                // Ares (ledger row 142): the home list owns every desktop widget's box and reports
+                // it itself. Stock's span x profile-cell rewrite here ran on EVERY load and won
+                // over the list's real-box report on any reload after a cold start, leaving the
+                // provider rendering for a box it was not in. See AresWidgetSizeOwner.
+                if (
+                    app.lawnchair.areslauncher.AresWidgetSizeOwner.loaderMayWriteSizes(
+                        appWidgetInfo.appWidgetId,
+                        appWidgetInfo.spanX,
+                        appWidgetInfo.spanY,
+                    )
+                ) {
+                    WidgetSizes.updateWidgetSizeRangesAsync(
+                        appWidgetInfo.appWidgetId,
+                        lapi,
+                        context,
+                        appWidgetInfo.spanX,
+                        appWidgetInfo.spanY,
+                    )
+                }
         }
 
         if (shouldUpdate) {

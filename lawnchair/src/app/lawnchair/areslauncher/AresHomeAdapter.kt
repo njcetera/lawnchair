@@ -770,6 +770,14 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val pending = softRebuild ?: return
         softRebuild = null
         if (sameRows(items, pending)) return
+        // A model reload is the one moment another writer can have touched a widget's size options
+        // behind the memo's back (ledger row 142: stock's loader did, on every load). Forget what
+        // was reported so each reused host re-reports ONCE after the rebuild. Bounded -- one report
+        // per widget per model bind, never per layout pass -- and the framework drops a report that
+        // matches the stored options without waking the provider, so this cannot re-open the
+        // 2026-08-31 flicker loop. Gated with the loader rewrite so the control arm of row 142's
+        // A/B is the whole old behaviour, not half of it.
+        if (AresWidgetSizeOwner.listIsSoleWriter()) lastReportedWidgetDp.clear()
         hardRebuild(pending)
     }
 
@@ -1662,12 +1670,27 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (lastReportedWidgetDp[hostView] == key) return
         lastReportedWidgetDp[hostView] = key
 
+        // The FIRE branch logs (the decline above runs per layout pass and would be noise): this
+        // line is the proof, in an A/B, that the list's report ran for this host at all --
+        // ledger row 142 was invisible for as long as nothing here said anything.
+        android.util.Log.i(
+            "AresHomeAdapter",
+            "reported box ${widthDp}x${heightDp}dp for widget ${hostView.appWidgetId}",
+        )
+
         // A fresh Bundle, never Bundle.EMPTY: updateAppWidgetSize writes the computed size keys
         // into the bundle it is handed, and Bundle.EMPTY is immutable -- passing it throws
         // UnsupportedOperationException("ArrayMap is immutable") from inside the framework.
         // Exact box: the row does not resize with content, so min and max are the same.
+        // The framework compares against the SYSTEM's stored options and writes nothing when they
+        // already match, so a re-report after [finishSoftRebind] cleared the memo is a binder read,
+        // not a provider wake-up.
         hostView.updateAppWidgetSize(Bundle(), widthDp, heightDp, widthDp, heightDp)
     }
+
+    /** Test-channel read of the memo: the last box reported for [hostView], or null. */
+    internal fun lastReportedBox(hostView: AppWidgetHostView): String? =
+        lastReportedWidgetDp[hostView]?.let { "${it shr 32}x${it and 0xffffffffL}" }
 
     /**
      * Home-grid icon styling: **stock arrangement, label under the icon**.
