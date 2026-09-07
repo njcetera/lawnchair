@@ -561,6 +561,44 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private fun pillForWash(): View? =
         (paneForWash() as? com.android.launcher3.allapps.ActivityAllAppsContainerView<*>)?.searchUiManager as? View
 
+    // Decision §28 (ledger row 138; owner 2026-09-07: "touching the homepage should not do anything
+    // except close the search"). While the pane's search pill is expanded, a touch that lands on
+    // this list closes the search and does NOTHING else -- no launch, no folder, no edit mode, no
+    // scroll. The gate sits at the very top of dispatchTouchEvent so the RecyclerView, the reorder
+    // helper, the empty-space long-press and the folder-drop tracking never see the gesture; it is
+    // consumed for its whole life so no child gets a pressed state or a late UP. Search closes on
+    // the DOWN rather than a tap-on-UP because the owner's words cover any touch, not just a tap,
+    // and closing at once gives the finger immediate feedback. Drags never reach this gate: a
+    // pane-to-home drag travels through the DragLayer's DragController, not through this view's
+    // touch stream, so dragging a search result onto the home (row 102) is untouched.
+    private var searchGateActive = false
+
+    private fun expandedSearchPill(): AresSearchContainerView? =
+        (pillForWash() as? AresSearchContainerView)?.takeIf { it.isSearchExpanded }
+
+    /** True when [ev] belongs to a gesture this gate owns; the caller must then consume it. */
+    private fun gateTouchWhileSearchExpanded(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val pill = expandedSearchPill()
+                searchGateActive = pill != null
+                if (pill != null) {
+                    android.util.Log.i(
+                        "AresSearchHomeGate",
+                        "touch on the home with search expanded: collapsing search, gesture swallowed (§28)",
+                    )
+                    pill.collapseSearch()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val wasActive = searchGateActive
+                searchGateActive = false
+                return wasActive
+            }
+        }
+        return searchGateActive
+    }
+
     /**
      * Pushes the CURRENT wash state onto [pane] once. Called from the pane's own attach (nightly
      * review 2026-09-06, F1): the pane is one View re-attached on every fold cycle, a wash frame
@@ -611,7 +649,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         frozenTiles.remove(view)
     }
 
-    /** Fades the focus wash in (folder opened) or out (closed). */
+    /**
+     * §28 (ledger row 138; owner 2026-09-07: "when unfolded and searching, the homepage should go
+     * dim and unclickable ... similar to what happens when we expand a folder"). Dims the WHOLE home
+     * grid while the pane's search is expanded, reusing the folder focus wash. §28 guarantees a
+     * folder is never expanded at the same time as search (there is no run to exclude, so every tile
+     * washes), but the collapse path is guarded so a stray call can never strip a real folder's wash.
+     * The home is also made non-interactive by the touch gate in [dispatchTouchEvent]; this is only
+     * the visual half.
+     */
+    fun setSearchDim(on: Boolean) {
+        if (!on && aresAdapter.expandedWpFolder() != -1) return
+        updateFolderWash(on)
+    }
+
+    /** Fades the focus wash in (folder opened / search expanded) or out (closed). */
     private fun updateFolderWash(expanded: Boolean) {
         val target = if (expanded) WASH_MAX else 0f
         washAnimator?.cancel()
@@ -3063,6 +3115,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private var dispatchingSyntheticEvent = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // §28: a touch while search is expanded only closes the search (see gateTouchWhileSearchExpanded).
+        if (gateTouchWhileSearchExpanded(ev)) return true
         val end = when (ev.actionMasked) {
             MotionEvent.ACTION_UP -> GESTURE_END_UP
             MotionEvent.ACTION_CANCEL -> GESTURE_END_CANCEL

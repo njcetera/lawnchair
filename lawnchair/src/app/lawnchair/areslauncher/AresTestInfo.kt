@@ -134,6 +134,13 @@ object AresTestInfo {
     const val REQUEST_WIDGET_OPTIONS = "ares-widget-options"
 
     /**
+     * `expanded=<bool>|folderOpen=<id|-1>|pane=<bool>` — whether the pane's search pill is expanded,
+     * which home WP folder is expanded, and whether the pane exists at all (folded: no pane, no
+     * pill). Decision §28 / ledger row 138: the first two must never both be "on".
+     */
+    const val REQUEST_SEARCH_STATE = "ares-search-state"
+
+    /**
      * The W1 metric: `viewGroup|layoutManager|adapter` child counts for the home grid.
      *
      * The three disagree in exactly one interesting way. `RecyclerView.getChildCount()` is plain
@@ -592,6 +599,10 @@ object AresTestInfo {
         REQUEST_WIDGET_OPTIONS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putStringArray(key, value) },
             { launcher -> widgetOptions(launcher) },
+        )
+        REQUEST_SEARCH_STATE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> searchState(launcher) },
         )
         REQUEST_CHILD_CENSUS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
@@ -1338,6 +1349,16 @@ object AresTestInfo {
             .filter { it.container == fid }
             .map { it.id }
         return "order=$order"
+    }
+
+    private fun searchState(launcher: Launcher): String {
+        val list = launcher.workspace?.aresHomeList
+        val pane = launcher.workspace?.aresAppListPane
+            as? com.android.launcher3.allapps.ActivityAllAppsContainerView<*>
+        val pill = pane?.searchUiManager as? AresSearchContainerView
+        return "expanded=${pill?.isSearchExpanded ?: false}" +
+            "|folderOpen=${list?.aresAdapter?.expandedWpFolder() ?: -1}" +
+            "|pane=${pane != null}"
     }
 
     private fun widgetOptions(launcher: Launcher): Array<String> {

@@ -102,6 +102,12 @@ class AresSearchContainerView @JvmOverloads constructor(
         get() = input.isVisible
     private var widthAnimator: ValueAnimator? = null
 
+    /** Decision §28 (ledger row 138): read by the home list's touch gate and the `ares-search-state` channel. */
+    internal val isSearchExpanded: Boolean get() = expanded
+
+    /** Decision §28: the home list collapses search when it is touched while search is expanded. */
+    internal fun collapseSearch() = collapse()
+
     /** The collapsed search glyph's XML tint, restored on collapse; see [onFinishInflate]. */
     private var defaultIconTint: android.content.res.ColorStateList? = null
 
@@ -756,6 +762,21 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     private fun expand() {
         if (expanded) return
+        // Decision §28 (ledger row 138): search and an expanded folder never coexist. The pill's
+        // touch gate above already turns a fob TAP with a folder open into a folder collapse, so
+        // this is the belt for every other way in -- an accessibility click action, a keyboard
+        // shortcut, a state callback -- none of which pass through dispatchTouchEvent.
+        (appsView as? AresPanelAllAppsContainerView)?.takeIf { it.expandedWpFolderOpen() }?.let {
+            android.util.Log.i("AresSearchFolderGate", "expanding search with a folder open: collapsing the folder first (§28)")
+            it.collapseExpandedWpFolder()
+        }
+        // §28 (ledger row 138): dim the home grid behind the pane while search is open, the same
+        // focus wash a folder raises (owner 2026-09-07: "the homepage should go dim ... similar to
+        // what happens when we expand a folder"). Only the unfolded pane pill has a home grid beside
+        // it; the folded bottom-sheet search has none.
+        if (appsView is AresPanelAllAppsContainerView) {
+            Launcher.getLauncher(context).workspace?.aresHomeList?.setSearchDim(true)
+        }
         // First time search is opened, ask for the contacts/media permissions the enabled providers
         // need; they stay empty until granted.
         maybeRequestSearchPermissions()
@@ -918,6 +939,10 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     private fun collapse() {
         if (!expanded) return
+        // §28: lift the home-grid dim as search closes (paired with expand()).
+        if (appsView is AresPanelAllAppsContainerView) {
+            Launcher.getLauncher(context).workspace?.aresHomeList?.setSearchDim(false)
+        }
         collapsing = true
         // Keyboard drops first; the insets follower rides the bar down with it (applyImeTranslation).
         input.hideKeyboard()
