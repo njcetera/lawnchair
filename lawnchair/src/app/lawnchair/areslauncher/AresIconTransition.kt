@@ -65,13 +65,16 @@ object AresIconTransition {
 
     private const val TAG = "AresIconTransition"
 
-    // Feel knobs. Trimmed 2026-09-07 for ledger row 139 (owner: "these should both update really
-    // fast so the animation isn't so long"): 700/460/350 -> 400/320/150. Measured on the Pixel the
-    // floor was ~0.35 s of the home's 1.7 s; the pane's time is the all-apps reload, not this.
-    private const val MIN_HOLD_MS = 400L        // min sparkle beat even for an instant change
+    // Feel knobs. Row 139 (owner: "these should both update really fast so the animation isn't so
+    // long") cut these 700/460/350 -> 400/320/150, but the owner then found the sparkle "totally
+    // missing" and flickery: the real speed win is the loader idle-skip (0.9 s off the pane), not
+    // this floor, and cutting the floor this hard on top of the drained-grid gap (fixed below) made
+    // the home beat a barely-visible flash. Restored most of the way for a clearly visible, smooth
+    // sparkle while keeping the idle-skip win: 600/420/250.
+    private const val MIN_HOLD_MS = 600L        // min sparkle beat even for an instant change
     private const val FADE_IN_MS = 220L
-    private const val FADE_OUT_MS = 320L        // the unified resolve
-    private const val POST_BIND_HOLD_MS = 150L  // let widgets repaint before resolving
+    private const val FADE_OUT_MS = 420L        // the unified resolve
+    private const val POST_BIND_HOLD_MS = 250L  // let widgets repaint before resolving
     private const val FREEZE_TIMEOUT_MS = 6000L // safety: resolve even if bind-complete never fires
     // Safety for the PANE layer, from show: all apps bind after the workspace and, on a device with
     // hundreds of apps, seconds after it (ledger row 77: loadAllApps ~46x slower on the Pixel), so
@@ -163,7 +166,7 @@ object AresIconTransition {
      */
     fun summary(): String {
         val o = active ?: return "showing=false"
-        return "showing=true|home=${o.home.snapCount}|pane=${o.pane.snapCount}|paneAttached=${o.pane.list != null}"
+        return "showing=true|home=${o.home.snapCount}|pane=${o.pane.snapCount}|paneAttached=${o.pane.list != null}|frames=${o.framesDrawn}"
     }
 
     /** The overlay is a DragLayer child of the activity it was built for; drop it when that activity dies. */
@@ -292,6 +295,18 @@ object AresIconTransition {
             }
             dragLayer.addView(overlay, lp)
             active = overlay
+            // Diagnostic for the fold-cycle "0 covers" case (2026-09-07): what the overlay was
+            // handed at show time. Read against the first-frame line from onDraw.
+            var hops = 0
+            var p: android.view.ViewParent? = list.parent
+            while (p != null && p !== dragLayer && hops < 64) { p = p.parent; hops++ }
+            Log.i(
+                TAG,
+                "show: dragLayer ${w}x${h} attached=${dragLayer.isAttachedToWindow} " +
+                    "list attached=${list.isAttachedToWindow} children=${list.childCount} " +
+                    "size=${list.width}x${list.height} underDragLayer=${p === dragLayer} hops=$hops " +
+                    "pane=${overlay.pane.list != null}",
+            )
             overlay.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             overlay.startTwinkle()
             overlay
@@ -425,6 +440,9 @@ object AresIconTransition {
             var holdStartMs = 0L
             var originX = 0f
             var originY = 0f
+
+            /** How many times [resolve] has been deferred because the grid had no covers yet. */
+            var resolveDefers = 0
         }
 
         val home = Layer(isPane = false)
@@ -479,11 +497,22 @@ object AresIconTransition {
                 return
             }
             if (layer.fading) return
+            // Never fade out an EMPTY overlay. If bind-complete fires while the grid is still
+            // draining (snapCount 0 because every recent frame saw childCount 0), a fade now dissolves
+            // covers that were never drawn -- the "animation totally missing" (owner 2026-09-07,
+            // measured: a real Pixel toggle resolved "0 covers"). Defer briefly so the covers appear
+            // when the grid refills; bounded so a genuinely empty grid still resolves.
+            if (layer.snapCount == 0 && layer.resolveDefers < MAX_RESOLVE_DEFERS) {
+                layer.resolveDefers++
+                Log.i(TAG, "deferring ${if (layer.isPane) "pane" else "home"} resolve: no covers yet (grid draining), attempt ${layer.resolveDefers}")
+                postDelayed({ resolve(layer) }, RESOLVE_DEFER_MS)
+                return
+            }
             layer.fading = true
             Log.i(
                 TAG,
                 "resolving ${if (layer.isPane) "pane" else "home"} layer: ${layer.snapCount} covers, " +
-                    "${SystemClock.uptimeMillis() - shownAt}ms after show",
+                    "${SystemClock.uptimeMillis() - shownAt}ms after show, $framesDrawn frames drawn",
             )
             layer.fade = ValueAnimator.ofFloat(layer.layerAlpha, 0f).apply {
                 duration = FADE_OUT_MS
@@ -522,6 +551,8 @@ object AresIconTransition {
                 l.fading = false
                 l.done = false
                 l.layerAlpha = 1f
+                // Fresh deferral budget for the new change's own bind-complete.
+                l.resolveDefers = 0
             }
             shownAt = SystemClock.uptimeMillis()
             alpha = 1f
@@ -667,8 +698,23 @@ object AresIconTransition {
             layer.snapCount = idx
         }
 
+        /** Frames this overlay has drawn. Zero at resolve time is the "invisible sparkle" signature. */
+        var framesDrawn = 0
+
         override fun onDraw(canvas: Canvas) {
             if (filters.isEmpty()) return
+            framesDrawn++
+            if (framesDrawn == 1) {
+                Log.i(
+                    TAG,
+                    "first frame: overlay ${width}x${height} attached=$isAttachedToWindow " +
+                        layers.joinToString(" ") { l ->
+                            val ll = l.list
+                            "${if (l.isPane) "pane" else "home"}[list=${ll != null} attached=${ll?.isAttachedToWindow} " +
+                                "children=${ll?.childCount} size=${ll?.width}x${ll?.height}]"
+                        },
+                )
+            }
             val w = width.toFloat()
             val h = height.toFloat()
 
@@ -713,23 +759,34 @@ object AresIconTransition {
             val rv = list as? RecyclerView
 
             // Capture the tile layout from the LIVE list while it is populated; otherwise HOLD the last
-            // snapshot. The 2nd+ theme/pack reload rebinds the RecyclerView by clearing and repopulating
-            // it, so for a frame or two mid-animation childCount drops (measured: 15->11, 11->7) -- and
-            // without this bridge the opaque covers vanish for that frame and the icon swap flashes
-            // through (owner: "second change flickers once midway"). Re-snapshot every fully-populated
-            // frame so the covers keep tracking the edit-mode wiggle.
+            // snapshot. A theme/pack reload rebinds the RecyclerView by clearing and repopulating it,
+            // so mid-animation childCount drops -- all the way to 0 on a full model reload (the home
+            // grid drains and refills in chunks, project_fold_rebind_churn). Without this bridge the
+            // opaque covers vanish for those frames and the icon swap flashes through: that gap is
+            // BOTH the mid-animation flicker AND, when it lines up with the resolve, the whole
+            // "animation totally missing" (owner 2026-09-07; measured on the Pixel, a real toggle
+            // resolved "0 covers" because the grid was empty at resolve time). Re-snapshot every
+            // fully-populated frame so the covers keep tracking the edit-mode wiggle.
             //
-            // The hold is TIME-BOUNDED: a rebind can briefly attach MORE children than steady state
-            // (disappearing + incoming tiles overlap), which would latch snapCount too high and hold
-            // forever. So if the drop persists past HOLD_BRIDGE_MAX_MS it is the real new count, not a
-            // rebind gap -- adopt it by re-snapshotting from the live list.
+            // The hold is TIME-BOUNDED so a grid that genuinely SHRANK (an app uninstalled mid-drag)
+            // does not hold a stale cover forever. The bound must outlast a full reload's drain
+            // window -- 300 ms was fine when the covers lived ~2 s but is far too short for the
+            // Pixel's model reload, so a mid-reload drain past 300 ms dropped the covers and read as
+            // the flicker. Sized to the reload, not to a frame.
             val live = list.childCount
             val now = SystemClock.uptimeMillis()
             val wantHold = layer.snapCount > 0 && live < layer.snapCount
             if (wantHold && !layer.wasHolding) layer.holdStartMs = now
             layer.wasHolding = wantHold
-            val holding = wantHold && (now - layer.holdStartMs) < HOLD_BRIDGE_MAX_MS
+            // A drain to ZERO during a reload is always transient -- the grid refills every time --
+            // so hold the last snapshot indefinitely (until resolve or the safety). A drain to a
+            // SMALLER non-zero count could be a genuine shrink (an app uninstalled), so bound that
+            // one by time and then adopt it.
+            val holding = wantHold && (live == 0 || (now - layer.holdStartMs) < HOLD_BRIDGE_MAX_MS)
             if (!holding) rebuildSnapshot(layer, list, rv)
+            // Never DRAW zero covers once we have ever had them: an empty rebuild during a drain past
+            // the bound would otherwise blank the layer for a frame. Keep the last snapshot painted
+            // and wait for the refill.
             if (layer.snapCount == 0) return
 
             val la = layer.layerAlpha
@@ -804,9 +861,16 @@ object AresIconTransition {
             /** Floats per tile in the layout snapshot: cx, cy, halfX, halfY, sx, sy, rot, count, idBase, corner. */
             const val SNAP_STRIDE = 10
 
-            /** Max time to hold a stale snapshot across a reload's rebind gap before adopting the live
-             *  (smaller) list -- bounds the hold so a transient child overshoot can't latch it forever. */
-            const val HOLD_BRIDGE_MAX_MS = 300L
+            /** Max time to hold a stale snapshot across a reload's rebind gap before adopting a live
+             *  SMALLER-but-nonzero count as a real shrink. A drain to zero is held indefinitely (see
+             *  drawLayer); this bound applies only to the ambiguous shrink case, and must outlast a
+             *  full model reload on the Pixel (pane bind ~3.3 s) so a mid-reload dip never blanks. */
+            const val HOLD_BRIDGE_MAX_MS = 4000L
+
+            /** [resolve] re-posts this many times while the grid has no covers yet (draining), so a
+             *  bind-complete that beats the refill does not fade an empty overlay (missing animation). */
+            const val MAX_RESOLVE_DEFERS = 20
+            const val RESOLVE_DEFER_MS = 60L
 
             /** Cheap deterministic hash -> [0,1), for scattering particles per tile without arrays. */
             fun hash(x: Float): Float {
