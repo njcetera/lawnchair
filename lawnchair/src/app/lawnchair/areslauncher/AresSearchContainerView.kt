@@ -394,9 +394,73 @@ class AresSearchContainerView @JvmOverloads constructor(
         )
     }
 
+    // ---- Ledger row 103: the pane's search pill is dim and inactive while a WP folder is open ----
+    //
+    // Owner, 2026-09-06: "search should also be disabled when a folder is expanded", extending row
+    // 100 (the pane itself is washed and gated) to the one piece of the pane that does NOT live in
+    // the pane: this container is re-parented into the DragLayer, so the pane's own touch gate and
+    // layer wash never reach it. Same rule as the pane's gate: a stationary tap collapses the folder
+    // (and does not open search), anything else is swallowed. Only touches that would have reached
+    // the pill are gated -- the root spans the whole pane, and a touch elsewhere in it must still
+    // fall through to the pane's own gate, which owns that log line. The wash is pushed by
+    // AresHomeListView (pillForWash) and synced on attach, exactly as the pane's is.
+
+    private var folderGateActive = false
+    private var folderGateDownX = 0f
+    private var folderGateDownY = 0f
+
+    private fun paneWithFolderOpen(): AresPanelAllAppsContainerView? =
+        (appsView as? AresPanelAllAppsContainerView)?.takeIf { it.expandedWpFolderOpen() }
+
+    /** The collapsed fob's effective hit rect, in this container's coordinates (see [refreshCollapsedTouchTarget]). */
+    private fun pillHitRect(): Rect {
+        val hit = Rect()
+        pill.getHitRect(hit)
+        val extra = resources.getDimensionPixelSize(R.dimen.ares_search_touch_expand)
+        hit.left = (hit.left - extra).coerceAtLeast(0)
+        hit.top = (hit.top - extra).coerceAtLeast(0)
+        hit.right = width
+        hit.bottom = height
+        return hit
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            val pane = paneWithFolderOpen()
+            folderGateActive = pane != null &&
+                (expanded || pillHitRect().contains(ev.x.toInt(), ev.y.toInt()))
+            if (folderGateActive) {
+                folderGateDownX = ev.x
+                folderGateDownY = ev.y
+            }
+        }
+        if (!folderGateActive) return super.dispatchTouchEvent(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_UP -> {
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                val tap = kotlin.math.hypot(ev.x - folderGateDownX, ev.y - folderGateDownY) <= slop
+                android.util.Log.i(
+                    "AresPaneFolderGate",
+                    "touch on the search pill with a folder open: ${if (tap) "tap -> collapsing" else "not a tap -> swallowed"}",
+                )
+                if (tap) {
+                    if (expanded) collapse()
+                    paneWithFolderOpen()?.collapseExpandedWpFolder()
+                }
+                folderGateActive = false
+            }
+            MotionEvent.ACTION_CANCEL -> folderGateActive = false
+        }
+        return true
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         val launcher = Launcher.getLauncher(context)
+        // Row 103: whatever wash the pane carries, its pill carries too -- pushed here because this
+        // container is re-attached with the pane on every fold cycle (same reasoning as the pane's own
+        // sync, nightly review 2026-09-06 F1).
+        if (appsView is AresPanelAllAppsContainerView) launcher.workspace?.aresHomeList?.syncFolderWashTo(this)
         val listener = object : StateManager.StateListener<LauncherState> {
             override fun onStateTransitionStart(toState: LauncherState) {
                 // Drive the slide as the transition BEGINS, so it overlaps the pane settling in rather
@@ -506,6 +570,11 @@ class AresSearchContainerView @JvmOverloads constructor(
 
     override fun initializeSearch(containerView: ActivityAllAppsContainerView<*>) {
         appsView = containerView
+        // Row 103: same ordering trap as the gate below -- attach can precede this, and the wash sync
+        // on attach then saw appsView null. Sync again now that ownership is known.
+        if (containerView is AresPanelAllAppsContainerView && isAttachedToWindow) {
+            Launcher.getLauncher(context).workspace?.aresHomeList?.syncFolderWashTo(this)
+        }
 
         // Ownership (folded sheet vs persistent pane) is only known once appsView is set, and this
         // can run AFTER onAttachedToWindow's first applyState (which then gated on ALL_APPS with

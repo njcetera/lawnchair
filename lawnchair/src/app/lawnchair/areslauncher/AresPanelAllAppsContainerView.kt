@@ -62,8 +62,13 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
     private var folderGateDownX = 0f
     private var folderGateDownY = 0f
 
-    private fun expandedWpFolderOpen(): Boolean =
+    /** Internal so the pane's floating search pill ([AresSearchContainerView]) shares the gate (row 103). */
+    internal fun expandedWpFolderOpen(): Boolean =
         (mActivityContext.workspace?.aresHomeList?.aresAdapter?.expandedWpFolder() ?: -1) != -1
+
+    internal fun collapseExpandedWpFolder() {
+        mActivityContext.workspace?.aresHomeList?.aresAdapter?.collapseWpFolder()
+    }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) folderGateActive = expandedWpFolderOpen()

@@ -542,6 +542,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             }
         }
         paneForWash()?.let { applyTileWash(it, strength) }
+        pillForWash()?.let { applyTileWash(it, strength) }
     }
 
     /**
@@ -551,6 +552,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * in [AresPanelAllAppsContainerView]'s touch gate. Null folded, where the pane is detached.
      */
     private fun paneForWash(): View? = launcher.workspace?.aresAppListPaneForModelFeed
+
+    /**
+     * The pane's floating search pill (ledger row 103; owner 2026-09-06: "search should also be
+     * disabled when a folder is expanded"). It is re-parented into the DragLayer, so the pane's own
+     * layer wash never reaches it and it needs its own. Null folded, with the pane.
+     */
+    private fun pillForWash(): View? =
+        (paneForWash() as? com.android.launcher3.allapps.ActivityAllAppsContainerView<*>)?.searchUiManager as? View
 
     /**
      * Pushes the CURRENT wash state onto [pane] once. Called from the pane's own attach (nightly
@@ -568,6 +577,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         washStrength = 0f
         washPaint = null
         paneForWash()?.let { applyTileWash(it, 0f) }
+        pillForWash()?.let { applyTileWash(it, 0f) }
         for (i in 0 until childCount) {
             val child = getChildAt(i) ?: continue
             if (child.layerType == LAYER_TYPE_HARDWARE) child.setLayerType(LAYER_TYPE_NONE, null)
