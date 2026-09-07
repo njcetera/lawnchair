@@ -304,9 +304,12 @@ class AresMasonryLayoutManager(
         // layout pass and re-inflated it on scroll-back -- the widget FLICKER (owner 2026-08-31;
         // measured 5 host re-creations + 5 applyContent in a single scroll). Backwards, because
         // detachAndScrapView shifts every later child index down.
+        //
+        // A REMOVED holder is scrapped whatever its recyclability -- see isRemoved(). Kept, it
+        // claims a live neighbour's position in fill() (row 145).
         for (i in childCount - 1 downTo 0) {
             val child = getChildAt(i) ?: continue
-            if (mayRecycle(child)) detachAndScrapView(child, recycler)
+            if (mayRecycle(child) || isRemoved(child)) detachAndScrapView(child, recycler)
         }
         fill(recycler, l)
 
@@ -579,6 +582,32 @@ class AresMasonryLayoutManager(
         host?.getChildViewHolder(child)?.isRecyclable ?: true
 
     /**
+     * True when [child]'s item has been removed from the adapter but its holder is still attached.
+     *
+     * Ledger row 145 (owner 2026-09-07: "some app icons on the homepage will disappear on release"
+     * when an app is dropped from the app list; the §27 verifier's F1/F2 the same morning).
+     * RecyclerView flags a removed holder and moves its position to the index BEFORE the removal
+     * (`ViewHolder.flagRemovedAndOffsetPosition`), so until the pass that animates it out,
+     * `getPosition(child)` answers a live neighbour's index. The drop slot's holder is exactly that
+     * at the moment of a drop: ItemTouchHelper holds it non-recyclable for its recover animation, so
+     * [mayRecycle] said "keep", [fill] indexed it under position k-1, the real item at k-1 was
+     * scrapped and never re-requested (pooled), and the empty slot container was laid out in its
+     * cell -- bare wallpaper where Photos had been. Removed at index 1 it shadowed the Chrome widget
+     * at 0 and [fill]'s two-claimants rule destroyed the widget's host view instead (F1). Measured
+     * 2026-09-07 12:08 on emulator-5554: `ares-tile-metrics` positions `-1 0 1 2 3 5 …` with the
+     * `-1` entry at 508,696, Photos' cell; `ares-child-census 32|32|32`, blind to it.
+     *
+     * The adapter's own removals sidestep this by making a widget holder recyclable first
+     * ([AresHomeAdapter.releaseForRemoval]); the slot's removal cannot, because the count it would
+     * have to undo is ItemTouchHelper's. So the rule lives here, where it holds for every removal: a
+     * removed holder claims nothing. It is scrapped like any recyclable child regardless of
+     * [mayRecycle] and never kept by [fill]; RecyclerView then does what it does for every removal
+     * -- unscraps it into a hidden animating child, fades it, recycles it.
+     */
+    private fun isRemoved(child: View): Boolean =
+        (child.layoutParams as? RecyclerView.LayoutParams)?.isItemRemoved == true
+
+    /**
      * True when the cell at [position] should be laid out at the current [scrollOffset].
      *
      * This is deliberately NOT a tight viewport test. An [overscanPx] band above and below the
@@ -646,7 +675,8 @@ class AresMasonryLayoutManager(
         for (i in childCount - 1 downTo 0) {
             val child = getChildAt(i) ?: continue
             val position = getPosition(child)
-            val keep = position in l.cells.indices &&
+            // A removed holder's position is a neighbour's, not its own (isRemoved); it never keeps.
+            val keep = !isRemoved(child) && position in l.cells.indices &&
                 (isVisible(l, position, ch, over) || !mayRecycle(child)) &&
                 // Two children claiming one position is the corrupt state this whole function
                 // exists to prevent. If it is ever reached anyway, keep one and drop the rest --
