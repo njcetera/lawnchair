@@ -137,13 +137,8 @@ object AresInfoBadge {
      * transform** — `AresHomeListView.toChildLocal` produces them. Subtracting `container.left`
      * alone does not, because edit mode scales the container.
      */
-    fun isPointOnBadge(container: View, x: Float, y: Float): Boolean {
-        val badge = container.findViewWithTag<View>(BADGE_TAG) ?: return false
-        if (badge.visibility != View.VISIBLE) return false
-        val bounds = Rect()
-        badge.getHitRect(bounds)
-        return bounds.contains(x.toInt(), y.toInt())
-    }
+    fun isPointOnBadge(container: View, x: Float, y: Float): Boolean =
+        isPointOnTaggedChild(container, BADGE_TAG, x, y)
 
     /**
      * Whether [info] has a menu worth offering.

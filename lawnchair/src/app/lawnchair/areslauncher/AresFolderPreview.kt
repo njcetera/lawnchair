@@ -107,10 +107,6 @@ object AresFolderPreview {
     @JvmStatic
     fun isOpen(): Boolean = folder != null
 
-    /** The [FolderInfo] currently previewing, or null. */
-    @JvmStatic
-    fun openFolderInfo(): FolderInfo? = folder?.info
-
     /**
      * Opens the folder behind [icon] as a preview target.
      *

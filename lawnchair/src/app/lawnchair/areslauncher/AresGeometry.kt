@@ -97,13 +97,6 @@ object AresGeometry {
     // ---------------------------------------------------------------- app-list row
 
     /**
-     * Android 14+ non-linear font scaling reaches 2.0x, and Display Size (largest) multiplies
-     * density by a further ~1.3x. Both are ordinary Settings toggles, neither needs special
-     * hardware, and a fixed-height row holding `sp` text has no way to absorb either.
-     */
-    const val MAX_FONT_SCALE = 2.0f
-
-    /**
      * Minimum height a row needs to hold its label at [fontScale], in dp.
      *
      * 1.3 is the line-box multiplier over the type size (ascender + descender + leading); the

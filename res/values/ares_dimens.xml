@@ -32,8 +32,6 @@
          padding so letters and icons share one left edge. -->
     <!-- Trimmed alongside the row height: with ~26 letter groups in a real app list, header
          chrome is a meaningful share of total scroll length. -->
-    <dimen name="ares_section_header_height">32dp</dimen>
-    <dimen name="ares_section_header_text_size">13sp</dimen>
     <!-- Extra breathing room above a header so each letter group reads as a distinct block.
          None below: the header should sit close to the apps it introduces. -->
     <dimen name="ares_section_header_padding_top">10dp</dimen>
@@ -220,7 +218,6 @@
          occupy. Kept small and faint on purpose - they sit under and over the icons respectively,
          and anything heavier competes with the content rather than describing it. -->
     <dimen name="ares_edit_grid_dot_radius">2dp</dimen>
-    <dimen name="ares_edit_cell_outline_width">1dp</dimen>
     <!-- Matches the corner softness of the icon and widget shapes it traces, so the outline reads
          as the cell's edge rather than as a box drawn on top of one. -->
     <dimen name="ares_edit_cell_outline_radius">16dp</dimen>

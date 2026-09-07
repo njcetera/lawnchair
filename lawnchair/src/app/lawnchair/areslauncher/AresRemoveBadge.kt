@@ -36,6 +36,20 @@ import com.android.launcher3.model.data.LauncherAppWidgetInfo
  *
  * Everything a later pass is likely to want to adjust — placement, size, glyph — is in this file.
  */
+/**
+ * True when [x],[y] (container-local, mapped through the container's transform -- see
+ * [AresRemoveBadge.isPointOnBadge]) fall on the VISIBLE child of [container] tagged [tag]. One body
+ * for the three edit-mode affordances that used to carry byte-identical copies (redundancy review
+ * 2026-09-07).
+ */
+internal fun isPointOnTaggedChild(container: View, tag: String, x: Float, y: Float): Boolean {
+    val child = container.findViewWithTag<View>(tag) ?: return false
+    if (child.visibility != View.VISIBLE) return false
+    val bounds = Rect()
+    child.getHitRect(bounds)
+    return bounds.contains(x.toInt(), y.toInt())
+}
+
 object AresRemoveBadge {
 
     /** Tag on the badge view, so the host can hit-test it without a resource id. */
@@ -197,13 +211,8 @@ object AresRemoveBadge {
      * far [cornerPullFor] moves the glyph — the padding shifts what is painted and never the view's
      * own bounds. Reachability is therefore independent of the visual nudge.
      */
-    fun isPointOnBadge(container: View, x: Float, y: Float): Boolean {
-        val badge = container.findViewWithTag<View>(BADGE_TAG) ?: return false
-        if (badge.visibility != View.VISIBLE) return false
-        val bounds = Rect()
-        badge.getHitRect(bounds)
-        return bounds.contains(x.toInt(), y.toInt())
-    }
+    fun isPointOnBadge(container: View, x: Float, y: Float): Boolean =
+        isPointOnTaggedChild(container, BADGE_TAG, x, y)
 
     /**
      * Removes [info] from the home screen, releasing a widget's host id where applicable.

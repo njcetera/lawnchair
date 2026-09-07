@@ -106,20 +106,6 @@ object AresWidgetResize {
         return if (sizes.size <= 1) emptyList() else sizes
     }
 
-    /**
-     * The footprint after this tap: the next larger allowed size, wrapping to the smallest.
-     *
-     * Wrapping is what makes a single affordance sufficient — growing past the maximum returns to
-     * the minimum, so every size stays reachable without a second control or a long-press variant.
-     * A current size outside the allowed set (a provider whose declarations changed under a
-     * persisted widget) starts the cycle from the smallest rather than getting stuck.
-     */
-    fun nextSize(current: AresPacker.Span, allowed: List<AresPacker.Span>): AresPacker.Span {
-        if (allowed.isEmpty()) return current
-        val index = allowed.indexOfFirst { it.w == current.w && it.h == current.h }
-        return if (index < 0) allowed.first() else allowed[(index + 1) % allowed.size]
-    }
-
     /** Where a resize drag is in its lifecycle. */
     enum class Phase { BEGIN, MOVE, END, CANCEL }
 
@@ -254,13 +240,8 @@ object AresWidgetResize {
      * answers a question about a chevron that is not where the finger went. See that function for
      * what that cost.
      */
-    fun isPointOnChevron(container: View, x: Float, y: Float): Boolean {
-        val chevron = container.findViewWithTag<View>(CHEVRON_TAG) ?: return false
-        if (chevron.visibility != View.VISIBLE) return false
-        val bounds = Rect()
-        chevron.getHitRect(bounds)
-        return bounds.contains(x.toInt(), y.toInt())
-    }
+    fun isPointOnChevron(container: View, x: Float, y: Float): Boolean =
+        isPointOnTaggedChild(container, CHEVRON_TAG, x, y)
 
     /**
      * Applies and persists a widget's new footprint, or reports that it cannot be placed.

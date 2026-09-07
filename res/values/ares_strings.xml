@@ -43,7 +43,6 @@
 
     <!-- WP folders (design/wp-folder-design.md). Label on the edit-mode FAB that creates a new,
          empty Windows-Phone-style folder. -->
-    <string name="ares_wp_fab_label">New folder</string>
 
     <!-- Default title a freshly-created empty WP folder carries until the owner renames it. -->
     <string name="ares_wp_folder_default_title">Folder</string>

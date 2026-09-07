@@ -440,17 +440,6 @@ class AresHomeAdapter(private val launcher: Launcher) :
      * is the rename gesture, mirroring an icon's long-press-for-menu. Dialog feel is the owner's
      * Pixel gate.
      */
-    /**
-     * Open the rename dialog for the currently inline-expanded folder -- raised by TAPPING its title
-     * on the card while it is open (owner 2026-08-24). Complements the edit-mode long-press rename.
-     */
-    fun promptRenameExpandedFolder() {
-        val id = expandedWpFolderId
-        if (id == -1) return
-        val folder = items.firstOrNull { it.id == id } as? FolderInfo ?: return
-        promptRenameWpFolder(folder)
-    }
-
     private fun promptRenameWpFolder(folder: FolderInfo) {
         val input = android.widget.EditText(launcher).apply {
             setText(folder.title ?: "")

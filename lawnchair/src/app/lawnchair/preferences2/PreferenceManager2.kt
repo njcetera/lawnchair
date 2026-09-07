@@ -410,12 +410,6 @@ class PreferenceManager2 @Inject constructor(
         defaultValue = false,
     )
 
-    val aresIconTintStrength = preference(
-        key = intPreferencesKey(name = "ares_icon_tint_strength"),
-        defaultValue = 100,
-        onSet = { reloadHelper.reloadIcons() },
-    )
-
     val legacyPopupOptionsMigrated = preference(
         key = booleanPreferencesKey(name = "legacy_popup_options_migrated"),
         defaultValue = false,

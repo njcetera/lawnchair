@@ -679,7 +679,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // Every tile is now seated exactly over its preview icon: snap the previews off in the SAME
             // frame -- a seamless preview->tile swap (owner 2026-08-24, "there's still like a
             // transition"). Done here, not in expandWpFolder, so there is never an empty teardrop.
-            wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
+            folderIconForId(folderInfo.id)?.setAresPreviewItemsHidden(true)
             nudgeExpandedIntoView(folderInfo, childIds)
             // Falls are armed for every attached child; stop pre-hiding late-attaching rows.
             wpFallPendingFolderId = -1
@@ -715,15 +715,15 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 seed = id,
             )
             // Match the open: snap this member's preview off once its tile is seated over it.
-            wpFolderIcon(folderInfo.id)?.setAresPreviewItemsHidden(true)
+            folderIconForId(folderInfo.id)?.setAresPreviewItemsHidden(true)
         }
     }
 
     private val tmpPreview = FloatArray(3)
 
     /** The FolderIcon of folder [id] if its tile is bound on screen. */
-    private fun wpFolderIcon(id: Int): FolderIcon? =
-        ((findViewHolderForItemId(id.toLong())?.itemView as? ViewGroup)?.getChildAt(0) as? FolderIcon)
+    private fun folderIconForId(id: Int): FolderIcon? =
+        folderIconOf(findViewHolderForItemId(id.toLong())?.itemView)
 
     /**
      * Resolve child [index]'s fall START in this list's coordinate space, filling

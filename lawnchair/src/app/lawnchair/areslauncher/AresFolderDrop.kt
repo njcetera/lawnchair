@@ -413,10 +413,6 @@ object AresFolderDrop {
     fun isFrozen(): Boolean = AresFolderPreview.isOpen() ||
         (candidateInfo != null && (candidateKind == Kind.ADD || armed))
 
-    /** True once the dwell has elapsed: the target is highlighted and a release drops into it. */
-    @JvmStatic
-    fun isArmed(): Boolean = armed
-
     /**
      * True while ANY dwell candidate is held — armed or still counting. The edge auto-scroll
      * consults this: a grid that scrolls under a finger deliberately holding still over a tile
@@ -681,16 +677,6 @@ object AresFolderDrop {
         }
         return if (Folder.willAccept(target)) Kind.CREATE else Kind.NONE
     }
-
-    /**
-     * Whether a dwell over [target] while holding [source] could ever arm — the eligibility half
-     * of [kindOf], for callers that must not displace a tile the user may be aiming at (row 32:
-     * the external drop-slot mover). Deliberately NOT the freeze: candidacy alone must keep the
-     * slot from shoving the aim aside, but only an actual arm may stop the slot moving elsewhere.
-     */
-    @JvmStatic
-    fun couldAcceptDwell(target: ItemInfo, source: ItemInfo): Boolean =
-        kindOf(target, source) != Kind.NONE
 
     /**
      * Completes a drop that the dwell armed, moving [item] into the folder it locked onto.

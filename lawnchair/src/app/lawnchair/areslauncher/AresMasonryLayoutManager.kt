@@ -821,9 +821,6 @@ class AresMasonryLayoutManager(
     /** Total grid rows in the current packing; 0 before the first layout. Exposed for diagnostics. */
     fun rowCount(): Int = layout?.rows ?: 0
 
-    /** Content height in px for the current packing; 0 before the first layout. */
-    fun contentHeightPx(): Int = layout?.let { contentHeight(it) } ?: 0
-
     /** Current vertical scroll offset in px. */
     fun scrollOffsetPx(): Int = scrollOffset
 
