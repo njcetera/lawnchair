@@ -70,6 +70,7 @@ import com.android.launcher3.LauncherState
 import com.android.launcher3.R
 import com.android.launcher3.Utilities
 import com.android.launcher3.folder.FolderIcon
+import com.android.launcher3.model.data.AppInfo
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.model.data.PredictedContainerInfo
 import com.android.launcher3.popup.SystemShortcut
@@ -80,6 +81,7 @@ import com.android.launcher3.uioverrides.QuickstepLauncher
 import com.android.launcher3.uioverrides.states.AllAppsState
 import com.android.launcher3.uioverrides.states.BackgroundAppState
 import com.android.launcher3.uioverrides.states.OverviewState
+import com.android.launcher3.util.PackageUserKey
 import com.android.launcher3.util.ActivityOptionsWrapper
 import com.android.launcher3.util.Executors
 import com.android.launcher3.util.RunnableList
@@ -505,6 +507,21 @@ class LawnchairLauncher : QuickstepLauncher() {
             )
         }.toList()
         bindInflatedItems(inflatedItems, if (forceAnimateIcons) AnimatorSet() else null)
+    }
+
+    /**
+     * Ledger row 104: all apps have (re)bound, so the app-list pane's rows now carry the icons a
+     * theme / shape / pack change regenerated. This is the pane's bind-complete -- it comes AFTER
+     * finishBindingItems (the loader binds the workspace first, then loads all apps), which is why
+     * the pane's sparkle covers resolve on this signal and not the home's.
+     */
+    override fun bindAllApplications(
+        apps: Array<AppInfo>,
+        flags: Int,
+        packageUserKeytoUidMap: Map<PackageUserKey, Int>,
+    ) {
+        super.bindAllApplications(apps, flags, packageUserKeytoUidMap)
+        AresIconTransition.playFrozenPane(this)
     }
 
     override fun finishBindingItems(pagesBoundFirst: com.android.launcher3.util.IntSet?) {

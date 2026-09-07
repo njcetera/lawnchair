@@ -750,7 +750,7 @@ object AresTestInfo {
                     "no-home-list"
                 } else {
                     AresIconTransition.freeze(launcher, list)
-                    "showing=${AresIconTransition.isShowing}"
+                    AresIconTransition.summary()
                 }
             },
         )
@@ -763,7 +763,7 @@ object AresTestInfo {
         )
         null, "", "status" -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
-            { _ -> "showing=${AresIconTransition.isShowing}" },
+            { _ -> AresIconTransition.summary() },
         )
         else -> respond("unknown-subcommand:$arg")
     }
