@@ -62,6 +62,7 @@ import androidx.dynamicanimation.animation.SpringForce;
 import com.android.app.animation.Interpolators;
 import com.android.launcher3.Flags;
 import com.android.launcher3.R;
+import com.android.launcher3.DropTarget;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.graphics.ThemeManager;
 import com.android.launcher3.icons.FastBitmapDrawable;
@@ -87,8 +88,9 @@ public abstract class DragView<T extends Context & ActivityContext> extends Fram
     private final int mHeight;
 
     private final int mBlurSizeOutline;
-    protected final int mRegistrationX;
-    protected final int mRegistrationY;
+    // AresLauncher (ledger row 102): no longer final -- aresRecentreUnderFinger re-registers.
+    protected int mRegistrationX;
+    protected int mRegistrationY;
     private final float mInitialScale;
     private final float mEndScale;
     protected final float mScaleOnDrop;
@@ -467,6 +469,45 @@ public abstract class DragView<T extends Context & ActivityContext> extends Fram
      */
     public abstract void animateTo(int toTouchX, int toTouchY, Runnable onCompleteRunnable,
             int duration);
+
+    /**
+     * AresLauncher (ledger row 102). Re-registers this view so its CENTRE rides under the finger,
+     * gliding there from where it sits now ({@link #animateShift}), unless the finger already lies
+     * on the picture -- then stock registration (the exact press point stays fixed on the picture)
+     * is the more precise feel and is kept. Stock registers the picture at the finger-to-icon
+     * offset of the press and keeps that offset for the whole drag, which is right for a grid cell
+     * whose icon is under the finger and wrong for the app-list pane's rows, where a press on the
+     * LABEL leaves the picture riding hundreds of px to the left of the finger (owner, 2026-09-05:
+     * "the drag from app list to home still doesn't track my finger correctly", after row 98 had
+     * fixed the ICON press). Keeps {@code d.xOffset/yOffset} consistent with the new registration,
+     * since drop targets derive the picture's visual centre from them.
+     *
+     * @return a one-line verdict for the caller's log.
+     */
+    public String aresRecentreUnderFinger(int fingerX, int fingerY, DropTarget.DragObject d) {
+        float cx = getTranslationX() + mWidth / 2f;
+        float cy = getTranslationY() + mHeight / 2f;
+        float halfW = mWidth * mInitialScale / 2f;
+        float halfH = mHeight * mInitialScale / 2f;
+        String at = "finger=(" + fingerX + "," + fingerY + ") picture centre=(" + (int) cx + ","
+                + (int) cy + ") half=" + (int) halfW + "x" + (int) halfH;
+        if (Math.abs(fingerX - cx) <= halfW && Math.abs(fingerY - cy) <= halfH) {
+            return at + " -> finger on the picture, stock registration kept";
+        }
+        int newRegX = mWidth / 2;
+        int newRegY = mHeight / 2;
+        // translation = touch - registration + shift; keep the first frame where it is.
+        int shiftX = newRegX - mRegistrationX;
+        int shiftY = newRegY - mRegistrationY;
+        mRegistrationX = newRegX;
+        mRegistrationY = newRegY;
+        if (d != null) {
+            d.xOffset += shiftX;
+            d.yOffset += shiftY;
+        }
+        animateShift(shiftX, shiftY);
+        return at + " -> recentred, gliding by (" + (-shiftX) + "," + (-shiftY) + ")";
+    }
 
     public void animateShift(final int shiftX, final int shiftY) {
         if (mShiftAnim.isStarted()) return;

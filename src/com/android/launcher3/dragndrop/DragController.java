@@ -31,6 +31,8 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.app.animation.Interpolators;
+import app.lawnchair.areslauncher.AresDragRecentre;
+
 import com.android.launcher3.DeleteDropTarget;
 import com.android.launcher3.DragSource;
 import com.android.launcher3.DropTarget;
@@ -235,6 +237,10 @@ public abstract class DragController<T extends ActivityContext>
                     .setDuration(DRAG_VIEW_SCALE_DURATION_MS)
                     .start();
         }
+        // AresLauncher (ledger row 102): an app-list row dragged by its label glides under the finger.
+        // Here, not in startDrag: with a pre-drag (the long-press popup) the picture must stay on
+        // the icon until the drag is real, or it would leap to the finger while the popup is up.
+        AresDragRecentre.onDragStart(mActivity, mOptions, mDragObject, mLastTouch);
         mDragObject.dragView.onDragStart();
         for (DragListener listener : new ArrayList<>(mListeners)) {
             listener.onDragStart(mDragObject, mOptions);

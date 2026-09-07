@@ -882,6 +882,10 @@ object AresTestInfo {
                 .joinToString(",")
             return "dragLayerChildren=${layer.childCount}|$names"
         }
+        // Ledger row 102: the finger (DragObject.x/y, DragLayer px) and each picture's visual centre,
+        // so an offset between them is a NUMBER read mid-drag rather than a judgement of a screenshot.
+        val d = launcher.dragController?.mDragObject
+        val finger = if (d != null && dragging) "|finger=${d.x},${d.y}" else ""
         val found = StringBuilder()
         var n = 0
         for (i in 0 until layer.childCount) {
@@ -890,10 +894,12 @@ object AresTestInfo {
             n++
             found.append(
                 "|alpha=${child.alpha} vis=${child.visibility} " +
-                    "at=${child.left},${child.top} ${child.width}x${child.height}",
+                    "at=${child.left},${child.top} ${child.width}x${child.height} " +
+                    "centre=${(child.left + child.translationX + child.width / 2f).toInt()}," +
+                    "${(child.top + child.translationY + child.height / 2f).toInt()}",
             )
         }
-        return "dragging=$dragging|dragViews=$n$found"
+        return "dragging=$dragging$finger|dragViews=$n$found"
     }
 
     /**
