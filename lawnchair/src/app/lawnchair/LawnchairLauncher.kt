@@ -319,6 +319,11 @@ class LawnchairLauncher : QuickstepLauncher() {
         // Done BEFORE super, which starts a rebind for ACTION_MAIN: exiting first means the rows
         // are rebound already out of edit mode instead of carrying badges into the new binding.
         if (intent?.action == Intent.ACTION_MAIN) {
+            // Row 157 (owner 2026-09-08): HOME closes an open inline folder too, alongside leaving
+            // edit mode -- "put everything back to a known state". Immediate (no animation): the
+            // home reveal that follows animates the grid itself, and a folder left open would
+            // otherwise ride that reveal open.
+            workspace?.aresHomeList?.aresAdapter?.collapseWpFolderImmediate()
             workspace?.aresHomeList?.exitEditMode()
         }
 
@@ -383,6 +388,17 @@ class LawnchairLauncher : QuickstepLauncher() {
         workspace?.aresHomeList?.isEditMode() == true
 
     override fun onStateBack() {
+        // AresLauncher row 157 (owner 2026-09-08, "either [BACK or HOME] should close a folder"):
+        // an inline-expanded WP folder is the most specific thing back can dismiss, so it goes
+        // first -- ahead of edit mode. It is not an AbstractFloatingView, so the #1-#4 back handlers
+        // never catch it and it reaches this #5 fallback. Consume the back; a second back then
+        // leaves edit mode.
+        workspace?.aresHomeList?.let { list ->
+            if (list.aresAdapter.expandedWpFolder() != -1) {
+                list.aresAdapter.collapseWpFolder()
+                return
+            }
+        }
         // AresLauncher §4: back leaves the home grid's edit mode before anything else. This is the
         // #5 fallback handler in Launcher.getOnBackAnimationCallback(), so an open popup or an
         // in-flight drag has already had its turn -- by the time we get here, edit mode really is
