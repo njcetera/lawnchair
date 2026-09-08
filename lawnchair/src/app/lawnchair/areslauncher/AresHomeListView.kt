@@ -448,6 +448,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private var washStrength = 0f
     private var washPaint: Paint? = null
     private var washAnimator: ValueAnimator? = null
+    // Whether the current wash extends to the app-list pane and its search pill. True for the folder
+    // focus wash (owner 2026-09-05: the pane dims with the rest of the home when a folder is open),
+    // FALSE for the search dim (owner 2026-09-07: "the app list and search should not be tinted or
+    // disabled" while searching -- only the home grid dims). The two never coexist (§28).
+    private var washIncludesPane = true
 
     // Tiles frozen (wiggle stopped, badges hidden) while washed in edit mode -- the differential
     // that reads as "only the folder is editable" (owner 2026-08-25). Tracked by view identity so
@@ -541,8 +546,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 if (strength > 0.001f) freezeTile(child) // no-op outside edit mode
             }
         }
-        paneForWash()?.let { applyTileWash(it, strength) }
-        pillForWash()?.let { applyTileWash(it, strength) }
+        // The pane and its search pill take the wash only for the FOLDER focus wash, never for the
+        // search dim (owner 2026-09-07): search dims the home grid alone. Cleared unconditionally.
+        if (washIncludesPane || strength <= 0.001f) {
+            paneForWash()?.let { applyTileWash(it, strength) }
+            pillForWash()?.let { applyTileWash(it, strength) }
+        }
     }
 
     /**
@@ -608,12 +617,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * the pane missed while away, it gets on arrival -- a full wash if a folder is open, none if not.
      */
     fun syncFolderWashTo(pane: View) {
-        applyTileWash(pane, washStrength)
+        // Never carry the search dim onto the pane (washIncludesPane == false): the search wash is
+        // home-only, so a pane re-attaching mid-search must arrive clean.
+        applyTileWash(pane, if (washIncludesPane) washStrength else 0f)
     }
 
     private fun clearAllTileWash() {
         washStrength = 0f
         washPaint = null
+        // Back to the default (folder) scope once nothing is washed, so the next folder open dims
+        // the pane again even if the previous wash was a home-only search dim.
+        washIncludesPane = true
         paneForWash()?.let { applyTileWash(it, 0f) }
         pillForWash()?.let { applyTileWash(it, 0f) }
         for (i in 0 until childCount) {
@@ -660,6 +674,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      */
     fun setSearchDim(on: Boolean) {
         if (!on && aresAdapter.expandedWpFolder() != -1) return
+        // Search dims the home grid ONLY -- not the pane, not the search pill (owner 2026-09-07).
+        if (on) washIncludesPane = false
         updateFolderWash(on)
     }
 
@@ -689,6 +705,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     private fun onWpFolderExpanded(folderInfo: FolderInfo, expanded: Boolean) {
+        // The folder focus wash DOES extend to the pane and pill (unlike the search dim above).
+        if (expanded) washIncludesPane = true
         updateFolderWash(expanded)
         if (!expanded) return
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
