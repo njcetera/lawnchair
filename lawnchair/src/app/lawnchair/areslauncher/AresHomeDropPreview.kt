@@ -98,6 +98,16 @@ object AresHomeDropPreview : DragController.DragListener {
     /** True from the moment `ItemTouchHelper` took the slot until the matching UP/CANCEL. */
     private var driving = false
 
+    /**
+     * The grid this drag put into edit mode, or null. Row 149 (owner 2026-09-08): an app dragged
+     * from the app list onto the UNFOLDED home enters edit mode so the grid shows its placement
+     * affordances; it is left again when the drag ends. Held in its own field (not [list]) so
+     * [onDragEnd] can exit the exact grid even after [take]/[detach] have nulled [list], and set
+     * ONLY when this drag turned edit mode on -- never when it was already on -- so a session the
+     * user opened themselves is never force-exited on a drop.
+     */
+    private var editModeGrid: AresHomeListView? = null
+
     private var downTime = 0L
     private var lastX = 0f
     private var lastY = 0f
@@ -160,6 +170,21 @@ object AresHomeDropPreview : DragController.DragListener {
         val index = grid.dropIndexAt(anchor[0], anchor[1])
         val widget = item.itemType == Favorites.ITEM_TYPE_APPWIDGET ||
             item.itemType == Favorites.ITEM_TYPE_CUSTOM_APPWIDGET
+        // Row 149 (owner 2026-09-08): an app-list drag onto the UNFOLDED home enters edit mode so
+        // the grid shows its placement affordances -- the same environment an in-grid move has.
+        // Guards: the dual-pane panel exists (unfolded); the dragged thing is not a widget (the
+        // picker is a separate surface); no folder is open (a folder-out drag is the folder surface
+        // and must NOT be touched); and edit mode is not already on (an existing session is left as
+        // is and never force-exited on the drop). Done before showDropSlot so the slot opens and
+        // lifts in the edit-mode layout, like an in-grid drag. Left again in onDragEnd (posted).
+        if (!widget &&
+            launcher.workspace?.aresAppListPane != null &&
+            grid.aresAdapter.expandedWpFolder() == -1 &&
+            !grid.isEditMode()
+        ) {
+            grid.enterEditMode()
+            editModeGrid = grid
+        }
         grid.aresAdapter.showDropSlot(
             index,
             item.spanX.coerceAtLeast(1),
@@ -253,7 +278,12 @@ object AresHomeDropPreview : DragController.DragListener {
      */
     @JvmStatic
     fun onLauncherDestroyed(launcher: Launcher) {
-        if (host === launcher) clear()
+        if (host === launcher) {
+            // The grid is being destroyed with the activity; drop the edit-mode ref without exiting
+            // (there is nothing live to exit, and a recreate rebuilds the grid out of edit mode).
+            editModeGrid = null
+            clear()
+        }
     }
 
     /**
@@ -270,7 +300,25 @@ object AresHomeDropPreview : DragController.DragListener {
         endDrive(MotionEvent.ACTION_UP)
         val at = list?.aresAdapter?.clearDropSlot() ?: -1
         detach()
+        // A grid drop ends HERE for this listener: detach() just removed it from the DragController,
+        // so onDragEnd will not reach it. Measured 2026-09-08 (row 149): edit mode stayed on after
+        // a drop when the exit lived only in onDragEnd. Posted, so it runs after handleExternalDrop
+        // has persisted the item.
+        leaveEditModeIfEntered()
         return at
+    }
+
+    /**
+     * Leaves edit mode if THIS drag turned it on, once. Posted so it runs after the drop -- and any
+     * folder-add -- has fully committed: exitEditMode calls AresFolderDrop.cancel(), which would
+     * otherwise be able to abort a live commit. Idempotent (the ref is cleared on first use), so
+     * being reached from both [take] and [onDragEnd] cannot exit twice; a no-op if edit mode was
+     * already left by BACK/HOME.
+     */
+    private fun leaveEditModeIfEntered() {
+        val g = editModeGrid ?: return
+        editModeGrid = null
+        g.post { g.exitEditMode() }
     }
 
     /** Closes the gap without reading it. Safe at any time, and idempotent. */
@@ -306,5 +354,10 @@ object AresHomeDropPreview : DragController.DragListener {
      * `DragController` calls this for every one of them, so there is no outcome that can leave a
      * hole in the grid or a lifted slot in `ItemTouchHelper`.
      */
-    override fun onDragEnd() = clear()
+    override fun onDragEnd() {
+        clear()
+        // The non-drop endings (cancelled, refused over the pane, committed into a folder by a
+        // dwell) reach this listener here; a grid drop already left through take().
+        leaveEditModeIfEntered()
+    }
 }
