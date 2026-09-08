@@ -57,6 +57,7 @@
         android:protectionLevel="signature|privileged" />
 
     <application android:backupAgent="com.android.launcher3.LauncherBackupAgent"
+         android:allowBackup="false"
          android:enableOnBackInvokedCallback="true"
          android:fullBackupOnly="true"
          android:fullBackupContent="@xml/backupscheme"
