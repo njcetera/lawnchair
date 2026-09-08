@@ -54,6 +54,19 @@ class AresHomeAdapter(private val launcher: Launcher) :
      */
     private var expandedWpFolderId: Int = -1
 
+    /**
+     * §29 (row 140, folder-spec B1/B4): the ONE foldable desktop row -- a home tile being dragged,
+     * or the §C4 drop slot -- that ItemTouchHelper may move INTO the inline-expanded run mid-drag,
+     * and whether it currently sits inside it. [expandedRunRange] counts the visitor as part of the
+     * run only while [visitorInRun], so the packer, the card and the wash treat it as an arriving
+     * member, and a visitor sitting just BELOW the run is never swallowed into it. As transient as
+     * the expansion itself: nothing is written until the release commits (B3). Set by
+     * [noteRunVisitor] from the reorder callback's onMove and by [showDropSlot]; cleared by
+     * [clearRunVisitor].
+     */
+    private var runVisitor: ItemInfo? = null
+    private var visitorInRun = false
+
     /** Invoked when a WP folder is inline-expanded or collapsed, so the host can anchor scroll. */
     var wpExpandHost: ((folderInfo: FolderInfo, expanded: Boolean) -> Unit)? = null
 
@@ -842,6 +855,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         // later scan for a run that no longer exists). Reset unconditionally, before the early
         // return, so an empty-list rebind clears it too.
         expandedWpFolderId = -1
+        clearRunVisitor()
         if (size == 0) return
         for (i in 0 until size) releaseForRemoval(i)
         items.clear()
@@ -955,7 +969,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         if (folderPos < 0) return null
         var end = folderPos
         var k = folderPos + 1
-        while (k < items.size && items[k].container == fid) {
+        while (k < items.size && (items[k].container == fid || isVisitingRun(items[k]))) {
             end = k
             k++
         }
@@ -964,6 +978,50 @@ class AresHomeAdapter(private val launcher: Launcher) :
 
     /** True when [folderInfo] is the one WP folder currently inline-expanded. */
     fun isWpExpanded(folderInfo: FolderInfo): Boolean = expandedWpFolderId == folderInfo.id
+
+    /** §29: true when [info] is the run visitor and it currently sits inside the run. */
+    private fun isVisitingRun(info: ItemInfo): Boolean = visitorInRun && info === runVisitor
+
+    /**
+     * §29: whether [info] may visit the expanded run at all -- a foldable DESKTOP row (or the drop
+     * slot, whose kind mirrors the held item's), never a widget, never a folder, never a child.
+     */
+    fun canVisitRun(info: ItemInfo?): Boolean {
+        info ?: return false
+        if (expandedWpFolderId == -1) return false
+        if (info.container != Favorites.CONTAINER_DESKTOP) return false
+        if (info is FolderInfo) return false
+        return FolderInfo.willAcceptItemType(info.itemType)
+    }
+
+    /** §29: record that [info] is the run visitor and whether its last move put it inside the run. */
+    fun noteRunVisitor(info: ItemInfo, inRun: Boolean) {
+        if (runVisitor !== info || visitorInRun != inRun) {
+            android.util.Log.i(
+                "AresFolderFlow",
+                "run visitor ${info.id} inRun=$inRun folder=$expandedWpFolderId",
+            )
+        }
+        runVisitor = info
+        visitorInRun = inRun
+    }
+
+    /** §29: the visitor's rank inside the run (0-based among the children), or -1 when not inside. */
+    fun runVisitorRank(): Int {
+        val v = runVisitor ?: return -1
+        if (!visitorInRun) return -1
+        val run = expandedRunRange() ?: return -1
+        val pos = items.indexOfFirst { it === v }
+        if (pos <= run.first || pos > run.last) return -1
+        return pos - run.first - 1
+    }
+
+    /** §29: forget the visitor (drag ended, slot cleared, folder collapsed, or a rebind). */
+    fun clearRunVisitor() {
+        if (runVisitor != null) android.util.Log.i("AresFolderFlow", "run visitor cleared")
+        runVisitor = null
+        visitorInRun = false
+    }
 
     /**
      * Toggle a WP folder's inline expansion. Expanding collapses any other first ("one at a time").
@@ -1082,6 +1140,26 @@ class AresHomeAdapter(private val launcher: Launcher) :
         launcher.workspace?.aresHomeList?.animateNextRelayout()
         launcher.workspace?.aresHomeList?.animateWpChildEnter(folderInfo, item.id)
     }
+
+    /**
+     * §29 (row 140): splice [item] -- already re-parented into [folderInfo] by `addFolderContent` --
+     * into the OPEN folder's run at [rank] (0-based among the children): where the visiting drop
+     * slot was. Same contract as [addChildToExpandedRun], which appends.
+     */
+    fun addChildToExpandedRunAt(folderInfo: FolderInfo, item: ItemInfo, rank: Int) {
+        if (expandedWpFolderId != folderInfo.id) return
+        val folderRow = items.indexOfFirst { it.id == folderInfo.id }
+        if (folderRow < 0) return
+        if (items.any { it.id == item.id && it.container == folderInfo.id }) return // already spliced
+        var runEnd = folderRow + 1
+        while (runEnd < items.size && items[runEnd].container == folderInfo.id) runEnd++
+        val insertAt = (folderRow + 1 + rank).coerceIn(folderRow + 1, runEnd)
+        items.add(insertAt, item)
+        notifyItemInserted(insertAt)
+        launcher.workspace?.aresHomeList?.animateNextRelayout()
+        launcher.workspace?.aresHomeList?.animateWpChildEnter(folderInfo, item.id)
+    }
+
 
     /**
      * WP folders reorder-inside (design/wp-phase2-spike.md): persist the new intra-folder order of
@@ -1212,6 +1290,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
         val folderRow = items.indexOfFirst { it.id == id }
         val folderInfo = items.getOrNull(folderRow) as? FolderInfo
         expandedWpFolderId = -1
+        clearRunVisitor()
         // Re-enable the edit-mode column stepper now the folder is closing (no-op outside edit mode).
         AresEditCarousel.refreshEnabled()
         if (folderRow < 0) {
@@ -1291,6 +1370,12 @@ class AresHomeAdapter(private val launcher: Launcher) :
         }
         dropSlot = slot
         val at = index.coerceIn(0, items.size)
+        // §29 (row 140): a slot opening ON a child of the expanded folder is a visitor arriving
+        // inside the run with no onMove to say so -- record it, or the run walk stops at the slot
+        // and the block splits under the packer and the card.
+        if (!widget && expandedWpFolderId != -1) {
+            noteRunVisitor(slot, items.getOrNull(at)?.container == expandedWpFolderId)
+        }
         items.add(at, slot)
         notifyItemInserted(at)
         return slot
@@ -1319,6 +1404,7 @@ class AresHomeAdapter(private val launcher: Launcher) :
     fun clearDropSlot(): Int {
         val slot = dropSlot ?: return -1
         dropSlot = null
+        if (runVisitor === slot) clearRunVisitor()
         val at = items.indexOfFirst { it === slot }
         if (at < 0) return -1
         items.removeAt(at)

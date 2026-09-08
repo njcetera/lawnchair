@@ -170,6 +170,15 @@ object AresFolderDrop {
     /** True while the drag is outside an open folder and the close countdown is running. */
     private var previewExiting = false
 
+    /** §29 (row 140): the WP folder THIS drag inline-expanded by dwelling, or -1. See [arm], [clear]. */
+    private var dwellExpandedId = -1
+
+    /** §29: true while the drag is off the dwell-expanded folder (header + card) and its close countdown runs. */
+    private var inlineExiting = false
+    private val inlineExitElapsed = Runnable {
+        collapseDwellExpanded("off the folder for ${AresFolderPreview.EXIT_CLOSE_MS} ms")
+    }
+
     /**
      * How many times the S4 decline branch has actually run since process start. Exists for the
      * test channel only: the S4 journey's margin between "exercised" and "vacuously green" is a
@@ -295,6 +304,8 @@ object AresFolderDrop {
             }
             return
         }
+
+        trackDwellExpandedExit(list, x, y)
 
         val view = list.dropCandidateUnder(x, y, item.id)
         val info = view?.let { list.aresAdapter.itemAt(list.getChildAdapterPosition(it)) }
@@ -518,6 +529,24 @@ object AresFolderDrop {
         }
 
         armed = true
+        // §29 (row 140, folder-spec B1): a dwell on a COLLAPSED WP folder inline-expands it
+        // mid-drag, so the place inside can be chosen; the ring below still marks the header
+        // (release there = append, as before). An already-expanded folder is left alone. The quick
+        // pass is excluded by the dwell itself. Both sources (row 99 made the app list a dwell
+        // source, and §17 says the folder behaves the same whichever surface the icon came from).
+        // Remembered as the folder THIS drag opened, so ending the drag without a commit (and, in
+        // the full build, leaving it -- B2) collapses it again.
+        val wpInfo = candidateInfo as? FolderInfo
+        if (candidateKind == Kind.ADD && wpInfo != null && wpInfo.isAresWpFolder &&
+            !list.aresAdapter.isWpExpanded(wpInfo)
+        ) {
+            if (list.aresAdapter.toggleWpFolder(wpInfo)) {
+                dwellExpandedId = wpInfo.id
+                Log.i(TAG, "dwell elapsed on ${wpInfo.id}; WP folder inline-expanded mid-drag (§29)")
+            } else {
+                Log.i(TAG, "dwell elapsed on ${wpInfo.id}; WP folder did NOT expand (§29)")
+            }
+        }
         if (candidateKind == Kind.ADD && fromGrid) {
             val icon = folderIconOf(view)
             // AresFolderFlow: the zombie's state at the moment the user dwells to put an app back.
@@ -608,6 +637,27 @@ object AresFolderDrop {
 
     private fun clear() {
         cancelPreviewExit()
+        // §29: the run visitor is per-drag state kept by the adapter; the drag is over (or a new
+        // one is starting).
+        grid?.aresAdapter?.clearRunVisitor()
+        // §29: a drag that opened a WP folder by dwelling and ended WITHOUT committing into it
+        // leaves the folder as it found it (B2/B3); a commit into it has already forgotten the id
+        // ([keepExpandedAfterCommit]) so the result stays on screen. POSTED, and re-checked when it
+        // runs: the caller's own drop bookkeeping (slot index, persist) must not have the row
+        // removal happen underneath it.
+        cancelInlineExit()
+        val opened = dwellExpandedId
+        dwellExpandedId = -1
+        if (opened != -1) {
+            val g = grid
+            g?.post {
+                val fi = g.aresAdapter.expandedWpFolderInfo()
+                if (fi != null && fi.id == opened) {
+                    Log.i(TAG, "drag ended without a commit; collapsing dwell-expanded folder $opened (§29)")
+                    g.aresAdapter.collapseWpFolder()
+                }
+            }
+        }
         // Abandons an open preview without committing, which is the correct reading of every path
         // that reaches here: a CANCEL, a new drag, or the end of one. The user's rule is that only
         // a manual release adds an item to a folder.
@@ -615,6 +665,103 @@ object AresFolderDrop {
         clearTarget() // also resets the live-create latch (see clearTarget, N1)
         grid = null
         dragged = null
+    }
+
+    // ------------------------------------------------------------------ §29 dwell-expand ---
+
+    /**
+     * §29 (folder-spec B2): while THIS drag's dwell-expanded folder is open, every drag point is
+     * checked against the folder -- its header tile or the card drawn around its run
+     * ([AresHomeListView.isOnExpandedFolder]) -- or the visitor sitting inside the run. Off it for
+     * [AresFolderPreview.EXIT_CLOSE_MS] (the overlay preview's own constant) the folder collapses
+     * again, and dwelling on the tile re-expands it. Any other closer (a tap, a rebind) just makes
+     * this forget the id.
+     */
+    private fun trackDwellExpandedExit(list: AresHomeListView, x: Float, y: Float) {
+        val id = dwellExpandedId
+        if (id == -1) return
+        val fi = list.aresAdapter.expandedWpFolderInfo()
+        if (fi == null || fi.id != id) {
+            dwellExpandedId = -1
+            cancelInlineExit()
+            return
+        }
+        val on = list.aresAdapter.runVisitorRank() >= 0 || list.isOnExpandedFolder(x, y)
+        if (on) {
+            cancelInlineExit()
+        } else if (!inlineExiting) {
+            inlineExiting = true
+            list.postDelayed(inlineExitElapsed, AresFolderPreview.EXIT_CLOSE_MS)
+        }
+    }
+
+    private fun cancelInlineExit() {
+        if (!inlineExiting) return
+        inlineExiting = false
+        grid?.removeCallbacks(inlineExitElapsed)
+    }
+
+    private fun collapseDwellExpanded(why: String) {
+        inlineExiting = false
+        val id = dwellExpandedId
+        dwellExpandedId = -1
+        val g = grid ?: return
+        if (id == -1) return
+        val fi = g.aresAdapter.expandedWpFolderInfo() ?: return
+        if (fi.id != id) return
+        Log.i(TAG, "$why; collapsing dwell-expanded folder $id (§29)")
+        g.aresAdapter.collapseWpFolder()
+    }
+
+    /** §29: a commit INTO the dwell-expanded folder leaves it open, showing the result. */
+    private fun keepExpandedAfterCommit(folderId: Int) {
+        if (dwellExpandedId != folderId) return
+        cancelInlineExit()
+        dwellExpandedId = -1
+        Log.i(TAG, "committed into dwell-expanded folder $folderId; leaving it open (§29)")
+    }
+
+    /**
+     * §29 (B3/B4): files [item] into [folderInfo] at [rank] -- the place the visitor occupied in
+     * the run. `Folder.addFolderContent(item, rank, ...)` inserts at that rank and
+     * `aresPersistContentRanks` renumbers every member: the same write [addToFolder] makes at the
+     * end. In-grid the visiting adapter row IS the item -- its container now names
+     * the folder, so the run walk already counts it as a child; it is removed and re-spliced and the
+     * desktop is renumbered around it (no remove + re-add, no ghost window). For an external drop
+     * the slot is already gone, so the real item is spliced into the run where the slot was.
+     */
+    private fun addToFolderAtRank(
+        launcher: Launcher,
+        list: AresHomeListView,
+        folderInfo: FolderInfo,
+        item: ItemInfo,
+        rank: Int,
+    ): Boolean {
+        if (!FolderInfo.willAcceptItemType(item.itemType)) return false
+        val folder = folderIconForId(list, folderInfo.id)?.folder ?: run {
+            Log.e(TAG, "folder ${folderInfo.id} has no Folder view; ranked drop declined (§29)")
+            return false
+        }
+        if (folder.isDestroyed) {
+            Log.w(TAG, "ranked drop declined: folder ${folderInfo.id} is destroyed; item ${item.id} stays (§29)")
+            return false
+        }
+        folder.addFolderContent(item, rank, true)
+        folder.aresPersistContentRanks()
+        Log.i(TAG, "moved item ${item.id} into folder ${folderInfo.id} at rank $rank (§29 visitor)")
+        list.post {
+            // In-grid the visiting row is the item itself and the run walk already counts it as a
+            // child (its container names the folder). It is still removed and re-spliced rather than
+            // rebound in place: measured 2026-09-08, an in-place notifyItemChanged left the tile
+            // washed and unbadged inside the card, while the fresh child bind (badges, frost, the
+            // attach-time wash decision) is the path every other dwell-add already takes. For an
+            // external drop the slot is already gone and the remove is a no-op.
+            list.aresAdapter.removeItems { it.id == item.id }
+            list.aresAdapter.addChildToExpandedRunAt(folderInfo, item, rank)
+            list.animateNextRelayout()
+            AresHomeReorder.persistOrder(launcher, list.aresAdapter.snapshot())
+        }
+        return true
     }
 
     /** What dwelling on [target] with [source] in hand would do. */
@@ -699,7 +846,7 @@ object AresFolderDrop {
      *   on the grid.
      */
     @JvmStatic
-    fun commitDrop(launcher: Launcher, item: ItemInfo): Boolean {
+    fun commitDrop(launcher: Launcher, item: ItemInfo, externalVisitorRank: Int = -1): Boolean {
         // §25 live-create takes priority over every ordinary drop resolution below: the synthetic UP
         // that ended the in-grid drag lands here, and [item] is the app that was being dragged. Form
         // the real folder from the ended drag ([createLiveFolder] opens it + attaches the edit
@@ -779,6 +926,20 @@ object AresFolderDrop {
         // rather than one bug.
         //
         // Everyone decelerates before releasing, so a move within the last DWELL_MS is the norm.
+        // §29 (row 140, folder-spec B3/B4): a visitor INSIDE the expanded run resolves FIRST -- the
+        // slot the user has been looking at is where the item lands, whatever the header ring says.
+        // In-grid the rank is read here; an external drop reads it BEFORE take() closes the slot
+        // (closing it forgets the visitor) and hands it in as [externalVisitorRank].
+        run {
+            val list = grid ?: return@run
+            val rank = if (externalVisitorRank >= 0) externalVisitorRank else list.aresAdapter.runVisitorRank()
+            if (rank < 0) return@run
+            val folderInfo = list.aresAdapter.expandedWpFolderInfo() ?: return@run
+            val done = addToFolderAtRank(launcher, list, folderInfo, item, rank)
+            if (done) keepExpandedAfterCommit(folderInfo.id)
+            clear()
+            return done
+        }
         if (!armed) {
             clear()
             return false
@@ -799,6 +960,7 @@ object AresFolderDrop {
 
         val done = when (kindOf(info, item)) {
             Kind.ADD -> addToFolder(launcher, list, view, info as FolderInfo, item)
+                .also { if (it) keepExpandedAfterCommit(info.id) }
             Kind.CREATE -> createFolder(launcher, list, info, item)
             Kind.NONE -> false
         }

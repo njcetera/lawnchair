@@ -118,6 +118,9 @@ object AresHomeDrop {
         // before `commitDrop` or `addDraggedItem` renumbers anything -- and its index is a better
         // answer than re-deriving one from the release point, because it is the position the user
         // has been watching open up for the whole drag.
+        // §29 (row 140): the visiting slot's rank inside an expanded folder's run is read BEFORE
+        // take() closes the slot -- closing it forgets the visitor.
+        val visitorRank = launcher.workspace?.aresHomeList?.aresAdapter?.runVisitorRank() ?: -1
         val slotIndex = AresHomeDropPreview.take()
 
         // Converted up front because both destinations need the same object: an All Apps drag
@@ -129,7 +132,7 @@ object AresHomeDrop {
         // A dwell that armed over a folder takes precedence over the grid (§17: the folder behaves
         // the same whichever surface the icon came from). A picker selection can never get here:
         // Folder.willAccept refuses widgets, so the dwell never arms with one in hand.
-        if (convertedInfo != null && AresFolderDrop.commitDrop(launcher, convertedInfo)) {
+        if (convertedInfo != null && AresFolderDrop.commitDrop(launcher, convertedInfo, visitorRank)) {
             finishDrop(launcher, d)
             return true
         }

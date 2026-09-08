@@ -750,7 +750,17 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             // frame -- a seamless preview->tile swap (owner 2026-08-24, "there's still like a
             // transition"). Done here, not in expandWpFolder, so there is never an empty teardrop.
             folderIconForId(folderInfo.id)?.setAresPreviewItemsHidden(true)
-            nudgeExpandedIntoView(folderInfo, childIds)
+            // §29 (row 140): NOT while a drag is in progress. Measured 2026-09-08 on the spike: a
+            // dwell-expanded folder near the bottom was nudged ~790 px up, the grid slid under the
+            // still finger, the dwell re-targeted the tiles that arrived (728, then 732) and
+            // live-create formed a folder half a second later. A finger that is holding still must
+            // keep what it is holding over; the drag's own edge auto-scroll brings the run into
+            // view as soon as the user moves toward it.
+            if (isReorderInProgress() || launcher.dragController.isDragging) {
+                Log.i("AresFolderFlow", "expand nudge declined: drag in progress (folder=${folderInfo.id})")
+            } else {
+                nudgeExpandedIntoView(folderInfo, childIds)
+            }
             // Falls are armed for every attached child; stop pre-hiding late-attaching rows.
             wpFallPendingFolderId = -1
         }
@@ -2793,6 +2803,22 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     }
 
     fun isReorderInProgress(): Boolean = reorderInProgress
+
+    private val s29Rect = RectF()
+
+    /**
+     * §29 (row 140): true when the list-space point is on the expanded WP folder -- its header tile
+     * or the card drawn around its run ([AresFolderBounds.cardContentRect]). The dwell's
+     * exit-collapse (folder-spec B2) is decided against this.
+     */
+    fun isOnExpandedFolder(x: Float, y: Float): Boolean {
+        val fi = aresAdapter.expandedWpFolderInfo() ?: return false
+        val header = findViewHolderForItemId(fi.id.toLong())?.itemView
+        if (header != null && x >= header.left && x < header.right && y >= header.top && y < header.bottom) {
+            return true
+        }
+        return folderBounds.cardContentRect(s29Rect) && s29Rect.contains(x, y)
+    }
 
     /**
      * True when the current gesture began on empty space rather than on a row.

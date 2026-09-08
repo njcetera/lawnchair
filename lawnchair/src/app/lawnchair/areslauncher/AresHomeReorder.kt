@@ -658,9 +658,28 @@ object AresHomeReorder {
             if (expanded != -1) {
                 val draggedIsChild = draggedInfo?.container == expanded
                 val targetIsChild = targetInfo?.container == expanded
-                if (draggedIsChild != targetIsChild) return false
+                if (draggedIsChild != targetIsChild) {
+                    // §29 (row 140, folder-spec B1/B4): a foldable DESKTOP row -- a home tile or the
+                    // §C4 drop slot -- may cross INTO the run to take a place among the children,
+                    // and back OUT again (B2). A child still never leaves its run. Nothing is
+                    // written here: membership is decided by where the visitor is on the UP (B3,
+                    // AresFolderDrop.commitDrop).
+                    val dragged = draggedInfo
+                    if (draggedIsChild || dragged == null || !list.aresAdapter.canVisitRun(dragged)) {
+                        return false
+                    }
+                }
             }
             val moved = list.aresAdapter.moveItem(from, to)
+            // §29: the visitor's side is re-derived on EVERY move, not only on a crossing. Measured
+            // 2026-09-08 (spike): leaving the run by swapping with a desktop tile is desktop->desktop,
+            // so a crossing-only update left `visitorInRun` true after the tile had left.
+            if (moved && expanded != -1) {
+                val dragged = draggedInfo
+                if (dragged != null && dragged.container != expanded && list.aresAdapter.canVisitRun(dragged)) {
+                    list.aresAdapter.noteRunVisitor(dragged, targetInfo?.container == expanded)
+                }
+            }
             // Arm the hysteresis from where the drag actually was when this swap committed, so the
             // next one needs real travel rather than another lap of the feedback loop.
             if (moved && draggedInfo?.itemType == Favorites.ITEM_TYPE_APPWIDGET) {
@@ -730,6 +749,12 @@ object AresHomeReorder {
             msSinceStartScroll: Long,
         ): Int {
             if (AresFolderDrop.hasCandidate()) return 0
+            // §29 (row 140): nor while the dragged tile / drop slot is VISITING an expanded folder's
+            // run -- the user is choosing a slot inside it, and a grid scrolling under the finger
+            // carries the run (and the choice) away. Measured 2026-09-08 on the spike: the child
+            // row sat in the bottom scroll zone, the list scrolled under the still finger, and a
+            // desktop tile arriving under it became a live-create half a second later.
+            if (list.aresAdapter.runVisitorRank() >= 0) return 0
             return super.interpolateOutOfBoundsScroll(
                 recyclerView, viewSize, viewSizeOutOfBounds, totalSize, msSinceStartScroll,
             )
