@@ -18,7 +18,6 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
 import android.util.Log
-import com.android.launcher3.Utilities
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
@@ -28,6 +27,7 @@ import app.lawnchair.theme.color.tokens.DayNightColorToken
 import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
 import com.android.launcher3.R
+import com.android.launcher3.Utilities
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.views.BaseDragLayer
