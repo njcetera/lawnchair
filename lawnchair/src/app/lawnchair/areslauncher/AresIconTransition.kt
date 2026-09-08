@@ -19,6 +19,7 @@ import android.graphics.Shader
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
 import androidx.recyclerview.widget.RecyclerView
@@ -328,6 +329,32 @@ object AresIconTransition {
                 isFocusable = false
                 alpha = 0f
             }
+            // Row 143 (measured on the Pixel 2026-09-08, falsified on the emulator): a SOFTWARE
+            // layer this size is refused outright by the framework when it exceeds
+            // ViewConfiguration.getScaledMaximumDrawingCacheSize() -- "not displayed because it is
+            // too large to fit into a software layer" every frame, onDraw never runs, 0 covers,
+            // 0 frames, no exception. That cap is computed ONCE, at process start, from the display
+            // the process started on: a launcher that started FOLDED carries the folded panel's cap
+            // (1080x2364x4 = 10.2 MB) and the unfolded overlay (2076x2152x4 = 17.9 MB) can never
+            // draw -- "works the first time, then not", by the posture the process began in. So the
+            // software layer (with the edge blur) only when it fits; otherwise a hardware layer with
+            // the blur off. A sparkle with hard cover edges beats no sparkle. Logged on BOTH
+            // branches so a log can tell which one a run took.
+            val cap = ViewConfiguration.get(launcher).scaledMaximumDrawingCacheSize.toLong()
+            val bytes = w.toLong() * h.toLong() * 4L
+            if (bytes <= cap) {
+                overlay.softwareLayer = true
+                overlay.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            } else {
+                overlay.softwareLayer = false
+                overlay.blurPx = 0f
+                overlay.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                Log.w(
+                    TAG,
+                    "software layer declined: overlay ${w}x${h} needs $bytes B, cap is $cap B " +
+                        "(process started on a smaller display?); hardware layer, edge blur off (row 143)",
+                )
+            }
             val lp = BaseDragLayer.LayoutParams(w, h).apply {
                 customPosition = true
                 x = 0
@@ -345,7 +372,8 @@ object AresIconTransition {
                 "show: dragLayer ${w}x${h} attached=${dragLayer.isAttachedToWindow} " +
                     "list attached=${list.isAttachedToWindow} children=${list.childCount} " +
                     "size=${list.width}x${list.height} underDragLayer=${p === dragLayer} hops=$hops " +
-                    "pane=${overlay.pane.list != null}",
+                    "pane=${overlay.pane.list != null} " +
+                    "layer=${if (overlay.softwareLayer) "software" else "hardware"} cap=$cap",
             )
             overlay.animate().alpha(1f).setDuration(FADE_IN_MS).start()
             overlay.startTwinkle()
@@ -511,10 +539,17 @@ object AresIconTransition {
         /** Reused by [rebuildSnapshot] so the per-frame origin re-read allocates nothing. */
         private val originScratch = IntArray(2)
 
+        /**
+         * True when this overlay draws through a SOFTWARE layer (the BlurMaskFilter edge blur needs
+         * one); false when [show] fell back to a hardware layer because a software layer this size
+         * would exceed the framework's drawing-cache cap and never be drawn at all (row 143).
+         */
+        var softwareLayer = false
+
         init {
             setWillNotDraw(false)
-            // BlurMaskFilter (the per-tile edge blur) is ignored on the hardware canvas.
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
+            // The layer type is chosen in show(): SOFTWARE when the overlay fits under
+            // ViewConfiguration.getScaledMaximumDrawingCacheSize(), HARDWARE otherwise (row 143).
         }
 
         fun startTwinkle() {
@@ -766,7 +801,7 @@ object AresIconTransition {
                 flowPeriod = maxOf(w, h) * FLOW_PERIOD_FRAC
                 flowShader = RadialGradient(0f, 0f, flowPeriod, veilColors, null, Shader.TileMode.MIRROR)
                 flowPaint.shader = flowShader
-                if (blurPx > 0f) flowPaint.maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
+                if (blurPx > 0f && softwareLayer) flowPaint.maskFilter = BlurMaskFilter(blurPx, BlurMaskFilter.Blur.NORMAL)
             }
             val ft = (SystemClock.uptimeMillis() - shownAt) / 1000f
             flowShader?.let {
