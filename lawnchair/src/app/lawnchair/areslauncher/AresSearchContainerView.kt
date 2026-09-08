@@ -1028,8 +1028,17 @@ class AresSearchContainerView @JvmOverloads constructor(
     /** The pill fills the container, which is already inset by the resting margins. */
     // Content-box width (container width less the start/end padding), so the expanded pill fills to
     // the same start/end margins it always did now that the end margin lives in paddingEnd.
-    private fun expandedWidth(): Int =
-        (width - paddingStart - paddingEnd).coerceAtLeast(collapsedSize)
+    private fun expandedWidth(): Int {
+        val full = (width - paddingStart - paddingEnd).coerceAtLeast(collapsedSize)
+        // Unfolded dual-pane (owner 2026-09-07: "limit the width of the search bar when activated to
+        // only the app list section"): confine the activated bar to the app-list pane on the right.
+        // The pill is end-anchored (end|bottom gravity), so shrinking its width places its left edge
+        // at the pane's left edge with no x change. Folded, the search lives in the full-width sheet
+        // and appsView is not the panel, so it keeps full width.
+        val pane = appsView as? AresPanelAllAppsContainerView ?: return full
+        val paneWidth = pane.width - paddingEnd
+        return if (paneWidth in (collapsedSize + 1) until full) paneWidth else full
+    }
 
     private fun animateWidthTo(
         target: Int,
