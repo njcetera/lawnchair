@@ -1318,6 +1318,35 @@ class AresHomeAdapter(private val launcher: Launcher) :
             // The folder never changes cell on collapse ("open in place"), so pin it.
             launcher.workspace?.aresHomeList?.animateNextRelayout(id.toLong())
         }
+        // §29 / nightly review 2026-09-09 F1: the run is contiguous by construction EXCEPT while a
+        // row-140 visitor sits inside it, and a collapse can land in exactly that state -- a system
+        // CANCEL mid-drag (AresFolderDrop.clear() forgets the visitor and then posts the collapse),
+        // BACK or HOME mid-drag (row 157), a switch to a second folder, a declined ranked commit.
+        // The prefix walk above stops at the visitor, and every child after it stayed in the
+        // adapter as a loose, launchable row with container == id; the next tap-expand spliced the
+        // same ItemInfos in again and the RecyclerView held duplicate stable ids. Measured on
+        // emulator-5554 before this sweep (route: CANCEL with the visitor at rank 1 of 3):
+        // home-order 31 -> 33 with children 901 and 902 left behind, 36 after the re-expand with
+        // both ids twice, and `ares-invariants total=0` throughout -- nothing watched the collapse.
+        // So what leaves the grid on a collapse is MEMBERSHIP, not the contiguous prefix: sweep
+        // whatever the walk missed, wherever it sits. On a healthy (contiguous) collapse this finds
+        // nothing and the path above is untouched.
+        var swept = 0
+        for (i in items.indices.reversed()) {
+            if (items[i].container == id) {
+                items.removeAt(i)
+                notifyItemRemoved(i)
+                swept++
+            }
+        }
+        if (swept > 0) {
+            android.util.Log.w(
+                "AresFolderFlow",
+                "finishCollapse: run of $id was split by a visitor; swept $swept stranded child row(s) " +
+                    "(prefix walk removed $count)",
+            )
+            if (count == 0) launcher.workspace?.aresHomeList?.animateNextRelayout(id.toLong())
+        }
         if (folderInfo != null) wpExpandHost?.invoke(folderInfo, false)
     }
 
