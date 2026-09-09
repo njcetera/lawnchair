@@ -850,12 +850,17 @@ class AresHomeAdapter(private val launcher: Launcher) :
             list?.dismissInlineFolderRename(commit = false)
         }
         val size = items.size
+        val hadExpanded = expandedWpFolderId != -1
         // A full rebind rebuilds every row from the model; any transient WP expansion is gone with
         // it, so the expanded-id must not survive into the fresh list (else collapseWpFolder would
         // later scan for a run that no longer exists). Reset unconditionally, before the early
         // return, so an empty-list rebind clears it too.
         expandedWpFolderId = -1
         clearRunVisitor()
+        // Row 157 / nightly review 2026-09-09 F2: a rebind that discards an expanded folder never
+        // reaches wpExpandHost(false), so the back-gesture exclusion the expansion lifted would stay
+        // lifted until the next state change. Re-derive it here, after the reset it reads.
+        if (hadExpanded) launcher.updateDisallowBack()
         if (size == 0) return
         for (i in 0 until size) releaseForRemoval(i)
         items.clear()

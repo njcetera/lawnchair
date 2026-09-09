@@ -708,6 +708,11 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // The folder focus wash DOES extend to the pane and pill (unlike the search dim above).
         if (expanded) washIncludesPane = true
         updateFolderWash(expanded)
+        // Row 157 / nightly review 2026-09-09 F2: the edge back GESTURE is excluded at NORMAL unless
+        // the launcher says there is something to dismiss (LawnchairLauncher.aresWantsBackGesture),
+        // and an open inline folder now counts. Re-derive it on both edges of the toggle, exactly as
+        // enterEditMode / exitEditMode do -- the adapter has already moved expandedWpFolderId.
+        launcher.updateDisallowBack()
         if (!expanded) return
         val childIds = folderInfo.getContents().sortedBy { it.rank }.map { it.id }
         if (childIds.isEmpty()) return

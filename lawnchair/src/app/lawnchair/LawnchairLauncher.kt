@@ -372,7 +372,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     /**
-     * Keeps the edge back GESTURE alive while the home grid is editing.
+     * Keeps the edge back GESTURE alive while the home grid is editing or an inline folder is open.
      *
      * Stock excludes the back gesture whenever the launcher sits at NORMAL with nothing floating,
      * on the reasoning that the home screen has nowhere to go back to — `updateDisallowBack` hands
@@ -383,9 +383,20 @@ class LawnchairLauncher : QuickstepLauncher() {
      *
      * [onStateBack] already does the right thing once a back actually arrives, so this is the whole
      * fix: stop suppressing it while there is something to dismiss.
+     *
+     * An inline-expanded WP folder is the other thing on this screen that back dismisses (row 157),
+     * and it is not an `AbstractFloatingView`, so `updateDisallowBack`'s "nothing floating" test
+     * does not see it either. Nightly review 2026-09-09 (F2), measured on emulator-5554 in gestural
+     * nav: with a folder open at NORMAL, a left-edge swipe reached the launcher as a plain touch
+     * (it opened the Discover feed) and the folder stayed open; the KEY back that row 157 was
+     * measured with bypasses the exclusion, which is why that A/B could not see this. The adapter's
+     * expand/collapse host (`AresHomeListView.onWpFolderExpanded`) and its rebind path
+     * (`AresHomeAdapter.hardClear`) refresh the exclusion, the way enter/exitEditMode do.
      */
-    override fun aresWantsBackGesture(): Boolean =
-        workspace?.aresHomeList?.isEditMode() == true
+    override fun aresWantsBackGesture(): Boolean {
+        val list = workspace?.aresHomeList ?: return false
+        return list.isEditMode() || list.aresAdapter.expandedWpFolder() != -1
+    }
 
     override fun onStateBack() {
         // AresLauncher row 157 (owner 2026-09-08, "either [BACK or HOME] should close a folder"):
