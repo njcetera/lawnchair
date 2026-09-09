@@ -462,23 +462,32 @@ object AresFolderDrop {
      * The dwell has elapsed. What that *means* depends on what is underneath, and this is the only
      * place the two resolutions diverge before the drop.
      *
-     *  - Over a **folder**, the folder OPENS ([AresFolderPreview]) so the position inside it can be
-     *    chosen. The open folder is the feedback, so no ring is raised — a highlight around a tile
-     *    that has just expanded to fill the screen would be describing something that is no longer
-     *    there.
-     *  - Over an **icon**, the ring is raised and a release builds a folder of the two.
+     *  - Over a **collapsed WP folder** (the home grid's folders — every desktop folder is stamped
+     *    WP on load, row 71), the folder INLINE-EXPANDS in place (§29, row 140: `toggleWpFolder`) so
+     *    the position inside it can be chosen — the dragged tile or the drop slot then visits the
+     *    run and a release inside commits at the visited rank ([addToFolderAtRank]). The ring still
+     *    marks the header, and a release there appends ([addToFolder]). Both drag sources, in-grid
+     *    and app list (§17). An already-expanded folder is left alone, and the folder THIS drag
+     *    opened collapses again when the drag leaves it or ends without a commit
+     *    ([trackDwellExpandedExit], [clear]) — folder-spec B2.
+     *  - Over a **non-WP folder** reached by an in-grid drag, the overlay preview OPENS
+     *    ([AresFolderPreview]) so the position inside it can be chosen; no ring is raised, the open
+     *    folder is the feedback. This is the pre-§29 path; no home-grid folder takes it any more.
+     *  - Over an **icon**, the ring is raised and a release builds a folder of the two (live-create,
+     *    §25, in-grid only).
      *
      * The ring is the fallback when a folder declines to open — an app-drawer folder, or one whose
      * contents have gone. Declining silently would leave the drag with an armed target the user
      * cannot see, and a release would then do something they were never shown.
      *
-     * ## Why only an IN-GRID drag opens the folder
+     * ## Why only an IN-GRID drag opens the OVERLAY preview
      *
      * (Historical note, 2026-09-06: the `SPRING_LOADED` mechanism below stopped applying when row 93
      * removed that state for app-list and picker drags — but the exception itself still stands, on
      * MJ-2 grounds: WP folders never raise the overlay for an external drag; see the `fromGrid`
      * gates in [arm] and the live-create path. The measurement is kept as the record of why the
-     * exception was first made.)
+     * exception was first made. Since §29 (2026-09-08) the question is moot for WP folders, which
+     * inline-expand for EITHER source; the exception now governs only the overlay preview.)
      *
      * §17's rule is that one interaction has one implementation, and this is a deliberate,
      * measured exception rather than drift. A `DragController` drag runs the launcher in
@@ -558,11 +567,13 @@ object AresFolderDrop {
                     "destroyed=${f?.isDestroyed} open=${f?.isOpen} animating=${f?.aresIsAnimating()}",
             )
             // WP folders (design/wp-folder-design.md, MJ-2) NEVER open the AresFolderPreview overlay.
-            // A dwell-add over a collapsed WP folder tile falls through to the highlight-ring path
-            // below (the same path an app-list drag already uses), so a release files the app into
-            // the folder via addToFolder -- inline, no overlay. The add MECHANISM (addToFolder ->
-            // Folder.addFolderContent) is identical to the verified overlay-folder add; only the
-            // placement-choice overlay is skipped. Overlay folders keep the preview.
+            // Since §29 (row 140) a dwell over a collapsed WP folder has already inline-expanded it
+            // in the block above; what happens HERE for a WP folder is only the highlight ring on
+            // its header (the same path an app-list drag uses), so a release on the header still
+            // files the app into the folder via addToFolder -- append, no overlay -- while a release
+            // inside the expanded run commits at the visited rank (commitDrop -> addToFolderAtRank).
+            // The add MECHANISM (Folder.addFolderContent) is identical on every path; only the
+            // overlay's placement choice is skipped. Overlay folders keep the preview.
             val isWpFolder = (candidateInfo as? FolderInfo)?.isAresWpFolder == true
             if (icon != null && !isWpFolder && AresFolderPreview.open(list.launcher, list, icon)) {
                 list.setFolderDropTarget(null)
@@ -971,11 +982,13 @@ object AresFolderDrop {
     /**
      * Files [item] into the existing folder [folderInfo], at the end.
      *
-     * **This is now the fallback, not the normal path.** A dwell over a folder opens it
-     * ([AresFolderPreview]) and the release lands at the position the user chose inside it. This
-     * runs only when the folder *declined* to open — an app-drawer folder, or one whose contents
-     * have gone — where appending is the best answer available and is still better than refusing
-     * a drop the ring told the user would work.
+     * **This is the header path, not the placement path.** A dwell over a folder opens it — a WP
+     * folder inline-expands (§29) and a release INSIDE its run commits at the visited rank through
+     * [addToFolderAtRank]; a non-WP folder opens the overlay ([AresFolderPreview]) and the release
+     * lands where the user chose. This runs for a release on the folder's header ring (append, as
+     * it always did) and when the folder *declined* to open — an app-drawer folder, or one whose
+     * contents have gone — where appending is the best answer available and is still better than
+     * refusing a drop the ring told the user would work.
      *
      * [Folder.addFolderContent] is the whole write: it inserts into the `FolderInfo`, has
      * `FolderGridOrganizer` assign a legal rank and in-folder cell, persists with
