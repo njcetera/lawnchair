@@ -831,6 +831,33 @@ object AresIconTransition {
             }
         }
 
+        /**
+         * Row 155 instrument: the pane layer's per-frame state, logged only when it CHANGES, with the
+         * overlay frame number so a raw-frame recording can be aligned to it (frame N of the recording
+         * = the first-cover frame + f - 1). What a blank pane frame would look like from here: the
+         * pane list detached or its host accessor null (a reparent that spans a frame), `live` 0 or
+         * `covers` 0 (a drain the bridge did not hold), a `padTop` / `listTop` / `origin` jump (the
+         * overscan re-measure moving the rows), or `row0` with alpha 0 / width 0 (rows bound but not
+         * yet laid out). Cheap: a string compare per frame, one log line per change.
+         */
+        private var paneTraceLast = ""
+        private fun tracePane(layer: Layer, list: ViewGroup, live: Int, holding: Boolean) {
+            var row0: View? = null
+            for (i in 0 until list.childCount) {
+                val c = list.getChildAt(i)
+                if (c is BubbleTextView) { row0 = c; break }
+            }
+            val state = "attached=${list.isAttachedToWindow} live=$live covers=${layer.snapCount} holding=$holding " +
+                "origin=${layer.originX.toInt()},${layer.originY.toInt()} listTop=${list.top} padTop=${list.paddingTop} " +
+                "size=${list.width}x${list.height} listAlpha=${list.alpha} vis=${list.visibility} " +
+                "row0=${row0?.let { "y=${it.y.toInt()} a=${it.alpha} w=${it.width}" } ?: "none"} " +
+                "paneHost=${(context as? Launcher)?.workspace?.aresAppListPane != null}"
+            if (state != paneTraceLast) {
+                paneTraceLast = state
+                Log.i(TAG, "pane trace f=$framesDrawn t=${SystemClock.uptimeMillis() - shownAt}ms $state")
+            }
+        }
+
         private fun drawLayer(canvas: Canvas, layer: Layer, list: ViewGroup) {
             val star = star4
             val dust = softDot
@@ -862,6 +889,7 @@ object AresIconTransition {
             // one by time and then adopt it.
             val holding = wantHold && (live == 0 || (now - layer.holdStartMs) < HOLD_BRIDGE_MAX_MS)
             if (!holding) rebuildSnapshot(layer, list, rv)
+            if (layer.isPane) tracePane(layer, list, live, holding)
             // Never DRAW zero covers once we have ever had them: an empty rebuild during a drain past
             // the bound would otherwise blank the layer for a frame. Keep the last snapshot painted
             // and wait for the refill.

@@ -975,6 +975,9 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             mAresAppListTempDetached = true;
             ((ShortcutAndWidgetContainer) mAresAppList.getParent())
                     .aresDetachChildTemporarily(mAresAppList);
+            Log.i("AresAttach", "rebuild: pane lifted (temporary detach), order=" + aresOrderString());
+        } else if (mAresAppList != null) {
+            Log.i("AresAttach", "rebuild: pane NOT lifted, parent=" + mAresAppList.getParent());
         }
 
         ShortcutAndWidgetContainer aresListParent = null;
@@ -1695,6 +1698,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             lp.y = 0;
             lp.width = target.getMeasuredWidth();
             lp.height = target.getMeasuredHeight();
+            // AresLauncher row 155 diagnostic: where the pane is coming from and which path re-homes it.
+            Object oldHost = mAresAppList.getParent();
+            int oldPage = oldHost instanceof View && ((View) oldHost).getParent() instanceof View
+                    ? indexOfChild((View) ((View) oldHost).getParent()) : -1;
+            Log.i("AresAttach", "sync: pane parent=" + (oldHost == null ? "null" : "page index " + oldPage)
+                    + " -> child 1 via " + (mAresAppListTempDetached && oldHost == null
+                            ? "temporary attach" : "REAL removeView/addView")
+                    + " children=" + getChildCount() + " order=" + aresOrderString()
+                    + " targetMeasured=" + lp.width + "x" + lp.height);
             if (mAresAppListTempDetached && mAresAppList.getParent() == null) {
                 // Completes the temporary detach opened by removeAllWorkspaceScreens: re-attach
                 // WITHOUT the window lifecycle, so the pane keeps its inflated content and its
@@ -4341,7 +4353,38 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         mLauncher.getModelWriter().persistWorkspaceScreenOrderSync(getPersistableScreenOrder());
     }
 
+    /** The persisted screen order as "0,4,18,...", for the AresAttach diagnostics. */
+    private String aresOrderString() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < mScreenOrder.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(mScreenOrder.get(i));
+        }
+        return sb.toString();
+    }
+
     private void applyScreenOrderToChildViews() {
+        // AresLauncher row 155 (measured on the owner's Pixel 2026-09-10 with a per-frame trace):
+        // the pane rides along with whatever page hosts it. bindAddScreens inserts the pair screens
+        // in SORTED order, so during a rebind the pane is temp-attached to screen 1's page at child
+        // index 1; the persisted order then puts the pair screens LAST (0,4,18,...,1,5,19,24) and
+        // this re-sort carried screen 1 -- pane and all -- to child index 8. One to four frames were
+        // composed with the pane eight pages off-screen (the overlay read its drag-layer origin at
+        // x=8433; the whole app list vanished, sparkle covers included) before the POSTED sync below
+        // re-homed it with a real removeView/addView. That was "the app list flickers mid-sparkle"
+        // on every theme change on the phone. The emulator never showed it because its persisted
+        // order still listed screen 1, so screen 1's page never moved.
+        //
+        // So: lift the pane out with the same temporary detach the rebuild uses, re-sort the pages,
+        // and re-anchor it INLINE -- syncAresAppListPane takes the lifecycle-free path for a lifted
+        // pane -- so no frame is ever composed with the pane on a page that is moving. The posted
+        // full sync stays for the prune.
+        if (mAresAppList != null && mAresAppList.getParent() instanceof ShortcutAndWidgetContainer) {
+            mAresAppListTempDetached = true;
+            ((ShortcutAndWidgetContainer) mAresAppList.getParent())
+                    .aresDetachChildTemporarily(mAresAppList);
+        }
+        int moved = 0;
         for (int i = 0; i < mScreenOrder.size(); i++) {
             CellLayout layout = mWorkspaceScreens.get(mScreenOrder.get(i));
             if (layout == null) {
@@ -4351,14 +4394,23 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             if (currentIndex != i) {
                 removeView(layout);
                 addView(layout, i);
+                moved++;
             }
         }
         updatePageScrollValues();
+        if (moved > 0) {
+            Log.i("AresAttach", "reorder: " + moved + " page(s) moved, order=" + aresOrderString()
+                    + (mAresAppListTempDetached ? " (pane lifted, re-anchoring inline)" : ""));
+        }
         // AresLauncher §22: this re-sorts the child views into the persisted screen order, which
         // slides the home list and the app-list pane onto whatever page ends up under them. That is
         // exactly how the pane came to sit three screens off-screen: it was correctly attached to
         // child 1 during the bind, and this reordering moved it to child 3 with nothing to put it
-        // back. Re-assert the invariant afterwards.
+        // back. Re-assert the invariant afterwards -- the pane part of it NOW (row 155, above), the
+        // rest posted.
+        if (mAresAppListTempDetached && mAresAppList != null && mAresAppList.getParent() == null) {
+            syncAresAppListPane();
+        }
         postSyncAresDualPane();
     }
 
