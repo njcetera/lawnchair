@@ -212,7 +212,31 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
         // Same for predictions: this pane has its own FloatingHeaderView and prediction row, and
         // predictions usually arrive before it is attached, so pull the current set now.
         (context as? QuickstepLauncher)?.applyAresPanePredictions()
-        unclipHostChain()
+        aresUnclipHostChain()
+    }
+
+    /**
+     * Ledger rows 134/168 probe: with the pane attached, NO ancestor below the Workspace may clip.
+     * Returns the offending flags ("" when clean) and counts [AresInvariants.PANE_HOST_CLIPPED] so
+     * `ares-smoke` and the nightly fail on it instead of the owner finding it while scrolling.
+     */
+    fun aresCheckHostChainUnclipped(checkpoint: String): String {
+        if (parent == null) return ""
+        val bad = StringBuilder()
+        var v: android.view.ViewParent? = parent
+        while (v is ViewGroup && v !is com.android.launcher3.Workspace<*>) {
+            if (v.clipChildren || v.clipToPadding || v.clipToOutline) {
+                bad.append(v.javaClass.simpleName)
+                    .append("(children=").append(v.clipChildren)
+                    .append(",padding=").append(v.clipToPadding)
+                    .append(",outline=").append(v.clipToOutline).append(") ")
+            }
+            v = v.parent
+        }
+        if (bad.isNotEmpty()) {
+            AresInvariants.violation(AresInvariants.PANE_HOST_CLIPPED, checkpoint, "hostChain=$bad")
+        }
+        return bad.toString().trim()
     }
 
     /**
@@ -228,9 +252,17 @@ class AresPanelAllAppsContainerView @JvmOverloads constructor(
      * Workspace: the Workspace must keep clipping so horizontal paging still clips adjacent pages,
      * and its full-screen bounds don't cut the behind-bar content anyway. Scoped to the pane's own
      * host chain (this panel hosts nothing but the pane), so panel 0 / the home grid are untouched.
-     * Re-applied on every attach because the parent re-clips itself on each of its own attaches.
+     * Re-applied on every attach because the parent re-clips itself on each of its own attaches --
+     * and, since row 168 (2026-09-10), also by the Workspace after a TEMPORARY re-attach, which
+     * dispatches no attach callback, and by the container itself whenever it re-attaches holding
+     * this pane (`ShortcutAndWidgetContainer.aresKeepAppListPaneUnclipped`).
      */
-    private fun unclipHostChain() {
+    fun aresUnclipHostChain() {
+        // Same one-build control as ShortcutAndWidgetContainer.aresKeepAppListPaneUnclipped.
+        if ("1" == android.os.SystemProperties.get("debug.ares.noUnclip", "0")) {
+            android.util.Log.w("AresAttach", "un-clip DECLINED (debug.ares.noUnclip=1): pane host chain left as is")
+            return
+        }
         var v: android.view.ViewParent? = parent
         while (v is ViewGroup && v !is com.android.launcher3.Workspace<*>) {
             v.clipChildren = false

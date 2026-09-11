@@ -1713,9 +1713,21 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 // AllApps state instead of tearing down and rebuilding (the flicker).
                 mAresAppListTempDetached = false;
                 target.aresAttachChildTemporarily(mAresAppList, lp);
+                // Ledger row 168 (2026-09-10): a temporary attach dispatches no onAttachedToWindow,
+                // so the pane's own un-clip of its host chain never ran here -- while the page it
+                // hangs from had just been re-added by applyScreenOrderToChildViews, whose
+                // ShortcutAndWidgetContainer re-clips itself on every attach (row 134). The unfolded
+                // app list came back scissored to its cell: rows cut flat at the top padding instead
+                // of sliding under the status bar. Un-clip explicitly; the container does the same
+                // on its side, and the check below counts any survivor as an invariant violation.
+                mAresAppList.aresUnclipHostChain();
             } else {
                 target.addView(mAresAppList, lp);
             }
+        }
+        String clipped = mAresAppList.aresCheckHostChainUnclipped("syncAresAppListPane");
+        if (!clipped.isEmpty()) {
+            Log.e("AresAttach", "sync: pane host chain still clips after re-anchor: " + clipped);
         }
         updateAresSearchOwnership(true);
     }

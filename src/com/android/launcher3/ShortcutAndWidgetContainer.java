@@ -86,6 +86,9 @@ public class ShortcutAndWidgetContainer extends ViewGroup implements FolderIcon.
         // caller owns these (platform javadoc).
         child.requestLayout();
         child.invalidate();
+        // No onAttachedToWindow is dispatched by this path, so the pane's own un-clip never runs;
+        // restore the invariant here (rows 134/168, see aresKeepAppListPaneUnclipped).
+        aresKeepAppListPaneUnclipped();
     }
 
     // These are temporary variables to prevent having to allocate a new object just
@@ -129,6 +132,38 @@ public class ShortcutAndWidgetContainer extends ViewGroup implements FolderIcon.
         setClipChildren(!mAllowWidgetOverlap);
         setClipToPadding(!mAllowWidgetOverlap);
         setClipToOutline(!mAllowWidgetOverlap);
+        aresKeepAppListPaneUnclipped();
+    }
+
+    /**
+     * AresLauncher, ledger rows 134 and 168. The unfolded app-list pane is hosted by one of these
+     * containers and is extended past its cell so scrolled rows flow behind the status and gesture
+     * bars; that only shows while this container does NOT clip. The re-clip above runs on EVERY
+     * attach of this container, and the pane's own un-clip ({@code AresPanelAllAppsContainerView
+     * .aresUnclipHostChain}) runs only on a REAL attach of the pane -- so whenever this container
+     * re-attaches with the pane already inside it (a page moved by {@code
+     * Workspace.applyScreenOrderToChildViews}), or the pane is put back by a TEMPORARY attach that
+     * dispatches no callbacks, the list came back scissored to its cell: rows cut flat at the top
+     * padding instead of sliding under the status bar (owner 2026-09-10, "app list padding on top
+     * and bottom is back during scroll"). Keep the invariant here, at the one place that breaks it.
+     */
+    public void aresKeepAppListPaneUnclipped() {
+        for (int i = 0; i < getChildCount(); i++) {
+            if (getChildAt(i) instanceof app.lawnchair.areslauncher.AresPanelAllAppsContainerView) {
+                // One-build control for the detector (`ares-smoke` pane-host-unclipped and
+                // INV-PANE-HOST-CLIPPED): `setprop debug.ares.noUnclip 1` BEFORE a force-stop
+                // re-creates the row-168 state from identical bytes. Logged on the decline branch so
+                // a silently-armed control can never pass as a healthy run.
+                if ("1".equals(android.os.SystemProperties.get("debug.ares.noUnclip", "0"))) {
+                    android.util.Log.w("AresAttach", "un-clip DECLINED (debug.ares.noUnclip=1): pane host stays clipped");
+                    return;
+                }
+                setClipChildren(false);
+                setClipToPadding(false);
+                setClipToOutline(false);
+                return;
+            }
+        }
     }
 
     public void setCellDimensions(int cellWidth, int cellHeight, int countX, int countY,

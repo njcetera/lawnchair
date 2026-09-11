@@ -146,4 +146,21 @@ object AresInvariants {
      * than asserting the run is non-empty.
      */
     const val WP_EXPAND_RUN_MISMATCH = "INV-WP-EXPAND-RUN"
+
+    /**
+     * The unfolded app-list pane is attached but an ancestor below the Workspace clips it, so the
+     * list is scissored to its cell: scrolled rows are cut flat at the pane's top/bottom padding
+     * instead of sliding under the status and gesture bars.
+     *
+     * Ledger row 134 predicted it on 2026-09-02 ("the un-clip is re-applied only on a real pane
+     * attach, while `ShortcutAndWidgetContainer.onAttachedToWindow` re-clips itself on EVERY one of
+     * its own attaches") and row 168 is the sighting: the row-155 fix re-anchors the pane with a
+     * TEMPORARY attach after the page re-sort, the moved page's container re-clipped itself on its
+     * real re-add, and nobody un-clipped it. Owner 2026-09-10: "app list padding on top and bottom
+     * is back during scroll. there's been a regression. this has happened multiple times." Checked at
+     * the end of every `Workspace.syncAresAppListPane` (`AresPanelAllAppsContainerView
+     * .aresCheckHostChainUnclipped`) and readable as `hostClip=` in `ares-pane-align`; `ares-smoke`
+     * asserts it directly (`pane-host-unclipped`).
+     */
+    const val PANE_HOST_CLIPPED = "INV-PANE-HOST-CLIPPED"
 }

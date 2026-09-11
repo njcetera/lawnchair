@@ -1108,7 +1108,24 @@ object AresTestInfo {
         }
         val homeTree = describe(topmostIconBearer(home), 0).joinToString(">")
         val appTree = describe(topmostIconBearer(rv), 0).joinToString(">")
-        return "src=$src state=$state wsScale=$wsScale | " +
+        // Rows 134/168: the pane's host chain must not clip (else scrolled rows are cut at the padding).
+        // Read-only here -- the counting probe runs at the end of Workspace.syncAresAppListPane.
+        val hostClip = (launcher.workspace?.aresAppListPane as? AresPanelAllAppsContainerView)?.let { p ->
+            if (p.parent == null) "detached" else {
+                val bad = StringBuilder()
+                var v: android.view.ViewParent? = p.parent
+                while (v is ViewGroup && v !is com.android.launcher3.Workspace<*>) {
+                    if (v.clipChildren || v.clipToPadding || v.clipToOutline) {
+                        bad.append(v.javaClass.simpleName).append('(')
+                            .append(v.clipChildren).append(',').append(v.clipToPadding).append(',')
+                            .append(v.clipToOutline).append(") ")
+                    }
+                    v = v.parent
+                }
+                if (bad.isEmpty()) "clean" else bad.toString().trim()
+            }
+        } ?: "no-pane"
+        return "src=$src state=$state wsScale=$wsScale hostClip=$hostClip | " +
             "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
             "paneTop=$paneTop rvPad=$rvPad paneChild=$paneChild | " +
             "insetsTop=${dp.insets.top} wsPadTop=${dp.workspacePadding.top} homeListPad=$homeListPad recon=$recon | " +
