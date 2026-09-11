@@ -1176,6 +1176,10 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
 
         if (moved) {
             // Scroll if the user moved far enough along the X axis
+            // AresLauncher: the decision that steals a touch from every child (row 171). One line, so a
+            // CANCEL seen by a child can be attributed here rather than guessed at.
+            android.util.Log.d("PagedView", "paging intercept by " + getClass().getSimpleName()
+                    + " diff=" + diff + " slop=" + touchSlop);
             mIsBeingDragged = true;
             mTotalMotion += Math.abs(mLastMotion - primaryDirection);
             mLastMotion = (int) primaryDirection;

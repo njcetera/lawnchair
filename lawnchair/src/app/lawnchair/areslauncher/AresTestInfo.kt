@@ -459,6 +459,14 @@ object AresTestInfo {
     const val REQUEST_FASTSCROLL = "ares-fastscroll"
 
     /**
+     * The workspace's paging position: `page=` (current), `next=` (the page a scroll is heading to,
+     * -1 when settled), `scrollX=`, `pages=` and `panels=`. Unfolded the home grid and the app list
+     * are panels 0 and 1 of page 0, so a horizontal page swipe is visible here as `page` changing
+     * (row 171: a fast-scroll grab was fighting that swipe for the same touch).
+     */
+    const val REQUEST_WORKSPACE_PAGE = "ares-workspace-page"
+
+    /**
      * Walks the whole window from the DecorView down and reports every `ViewGroup` holding a NULL
      * child slot — `getChildAt(i) == null` while `i < getChildCount()`.
      *
@@ -742,6 +750,14 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> fastScrollState(launcher) },
         )
+        REQUEST_WORKSPACE_PAGE -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher ->
+                val ws = launcher.workspace
+                if (ws == null) "no-workspace" else
+                    "page=${ws.currentPage} next=${ws.nextPage} scrollX=${ws.scrollX} pages=${ws.pageCount} panels=${ws.panelCount}"
+            },
+        )
         REQUEST_HOTSEAT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> hotseatState(launcher) },
@@ -1007,8 +1023,14 @@ object AresTestInfo {
         val trackTop = loc[1] + rv.scrollBarTop
         val thumbTop = trackTop + bar.thumbOffsetY
         val stockGate = android.os.SystemProperties.get("debug.ares.stockFastScrollGrab", "0")
+        // The scroller's own back-gesture exclusion, in SCREEN px (row 170). At NORMAL the root's
+        // whole-window exclusion hides it from SysUI; this is the rect that matters once that is
+        // lifted (edit mode, an expanded folder). `none` when the scroller has not drawn yet.
+        val excl = bar.systemGestureExclusionRects.firstOrNull()?.let { r ->
+            "${loc[0] + r.left},${loc[1] + r.top},${loc[0] + r.right},${loc[1] + r.bottom}"
+        } ?: "none"
         return "src=$src thumb=${loc[0]},$thumbTop,${loc[0] + bar.width},${thumbTop + bar.thumbHeight} " +
-            "track=$trackTop,${trackTop + rv.scrollbarTrackHeight} barW=${bar.width} " +
+            "track=$trackTop,${trackTop + rv.scrollbarTrackHeight} barW=${bar.width} excl=$excl " +
             "offset=${rv.computeVerticalScrollOffset()} range=${rv.computeVerticalScrollRange()} " +
             "extent=${rv.computeVerticalScrollExtent()} dragging=${bar.isDraggingThumb} " +
             "grabs=${com.android.launcher3.views.RecyclerViewFastScroller.getAresGrabCount()} stockGate=$stockGate"

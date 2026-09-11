@@ -2783,6 +2783,14 @@ public class Launcher extends StatefulActivity<LauncherState>
                     && !isSplitSelectionEnabled
                     && !aresWantsBackGesture();
             rv.setDisallowBackGesture(disableBack);
+            // AresLauncher: the exclusion can only be read back from SysUI, and by then the reason is
+            // gone. One line per re-evaluation says which term lifted it (owner 2026-09-10: "the back
+            // gesture hasn't been an issue with the scroll until something recent changed").
+            Log.d("Launcher", "updateDisallowBack: disableBack=" + disableBack
+                    + " state=" + getStateManager().getState()
+                    + " topOpen=" + AbstractFloatingView.getTopOpenView(this)
+                    + " split=" + isSplitSelectionEnabled
+                    + " aresWantsBack=" + aresWantsBackGesture());
         }
     }
 

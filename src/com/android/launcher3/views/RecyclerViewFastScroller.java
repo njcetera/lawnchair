@@ -128,6 +128,8 @@ public class RecyclerViewFastScroller extends View {
     private static final float ARES_TRACK_MIN_WIDTH_DP = 10f;
     private static final float ARES_TRACK_MAX_WIDTH_DP = 14f;
     private static final float ARES_THUMB_INSET_DP = 8f;
+    /** Extra grab zone above and below the drawn thumb on the app list (see isNearThumb). */
+    private static final float ARES_THUMB_GRAB_TOLERANCE_DP = 24f;
 
     /**
      * How far the section-letter bubble is kept clear of the scrollbar it points at.
@@ -379,6 +381,13 @@ public class RecyclerViewFastScroller extends View {
                     mTouchOffsetY = mDownY - mThumbOffsetY;
                     mAresDownOnThumb = !aresStockGrabGate();
                 }
+                // AresLauncher: the DECLINE side needs a log as much as the grab does (owner
+                // 2026-09-10, "I'm having issues grabbing the quick bar": three grabs were logged
+                // and nothing said what the other attempts did). One line per down that reached
+                // this scroller, with where it landed relative to the thumb.
+                Log.d(TAG, "fastscroll down: (" + x + "," + y + ") thumbY=" + mThumbOffsetY + ".."
+                        + (mThumbOffsetY + mThumbHeight) + " w=" + getWidth()
+                        + " onThumb=" + isNearThumb(x, y) + " stockGate=" + aresStockGrabGate());
                 break;
             case MotionEvent.ACTION_MOVE:
                 boolean isScrollingDown = y > mLastY;
@@ -395,15 +404,31 @@ public class RecyclerViewFastScroller extends View {
 
                 if (!mIsDragging && !mIgnoreDragGesture && mRv.supportsFastScrolling()) {
                     if (mAresDownOnThumb) {
-                        // Anchor at the DOWN, not at this MOVE: with lastY == downY the touch offset
-                        // stays the grab point inside the thumb, and the update below moves the
-                        // thumb to the finger. Anchoring at the MOVE (stock) would freeze the thumb
-                        // where it was and leave it trailing the finger by the distance already
-                        // travelled, for the rest of the drag.
-                        calcTouchOffsetAndPrepToFastScroll(mDownY, mDownY);
-                        sAresGrabCount++;
-                        Log.d(TAG, "fastscroll grab: down-on-thumb, dy=" + (y - mDownY) + " after "
-                                + (ev.getEventTime() - mDownTimeStampMillis) + "ms");
+                        // Direction decides, not the clock (owner 2026-09-10 20:28, Pixel: "the app
+                        // list scroll is now breaking the horizontal page scroll" -- six downs on
+                        // the thumb, each grabbed on a first MOVE with dy=0, each then CANCELled by
+                        // the workspace's paging once the finger had travelled sideways). A
+                        // sideways gesture from the thumb belongs to whoever pages: give it up for
+                        // good. A vertical one is a grab: engage, and tell every ancestor to keep
+                        // its hands off (see calcTouchOffsetAndPrepToFastScroll) -- PagedView
+                        // intercepts on sideways travel past a slop with no notion of dominance,
+                        // so a thumb drag with a little drift was being torn away mid-scrub.
+                        if (absDeltaX > absDeltaY && absDeltaX > mConfig.getScaledTouchSlop()) {
+                            mIgnoreDragGesture = true;
+                            Log.d(TAG, "fastscroll yield: sideways from thumb dx=" + (x - mDownX)
+                                    + " dy=" + (y - mDownY));
+                        } else if (absDeltaY > 0 && absDeltaY >= absDeltaX) {
+                            // Anchor at the DOWN, not at this MOVE: with lastY == downY the touch
+                            // offset stays the grab point inside the thumb, and the update below
+                            // moves the thumb to the finger. Anchoring at the MOVE (stock) would
+                            // freeze the thumb where it was and leave it trailing the finger by
+                            // the distance already travelled, for the rest of the drag.
+                            calcTouchOffsetAndPrepToFastScroll(mDownY, mDownY);
+                            sAresGrabCount++;
+                            Log.d(TAG, "fastscroll grab: down-on-thumb, dy=" + (y - mDownY)
+                                    + " dx=" + (x - mDownX) + " after "
+                                    + (ev.getEventTime() - mDownTimeStampMillis) + "ms");
+                        }
                     } else if ((isNearThumb(mDownX, mLastY)
                             && ev.getEventTime() - mDownTimeStampMillis
                                     > FASTSCROLL_THRESHOLD_MILLIS)) {
@@ -425,6 +450,14 @@ public class RecyclerViewFastScroller extends View {
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                // AresLauncher: a CANCEL while dragging is someone taking the pointer away -- the
+                // pane swipe controller, or SysUI's back gesture pilfering it -- and an UP with no
+                // drag is a down that never engaged. Both read as "can't grab it" to a finger.
+                Log.d(TAG, "fastscroll " + MotionEvent.actionToString(ev.getAction())
+                        + ": dragging=" + mIsDragging + " downOnThumb=" + mAresDownOnThumb
+                        + " ignore=" + mIgnoreDragGesture + " dy=" + (y - mDownY)
+                        + " dx=" + (x - mDownX) + " after "
+                        + (ev.getEventTime() - mDownTimeStampMillis) + "ms");
                 endFastScrolling();
                 break;
         }
@@ -446,6 +479,15 @@ public class RecyclerViewFastScroller extends View {
         mTouchOffsetY += (lastY - downY);
         animatePopupVisibility(true);
         showActiveScrollbar(true);
+        // AresLauncher: an engaged scrub owns the pointer until it lifts. Stock never needed this
+        // because all-apps is a sheet with nothing paging underneath; here the unfolded list is a
+        // workspace panel, and PagedView.determineScrollingStart intercepts on sideways travel past
+        // a slop with no notion of axis dominance -- a thumb drag with 26-41 px of drift was being
+        // CANCELled mid-scrub (Pixel, 2026-09-10 20:28). The flag is cleared by the framework at
+        // the next DOWN. Gated on the same sysprop as the grab rule so the control arm is stock.
+        if (!aresStockGrabGate() && getParent() != null) {
+            getParent().requestDisallowInterceptTouchEvent(true);
+        }
     }
 
     private void updateFastScrollSectionNameAndThumbOffset(int y) {
@@ -562,8 +604,28 @@ public class RecyclerViewFastScroller extends View {
         // swiping very close to the thumb area (not just within it's bound)
         // will also prevent back gesture
         SYSTEM_GESTURE_EXCLUSION_RECT.get(0).offset(mThumbDrawOffset.x, mThumbDrawOffset.y);
+        // AresLauncher (ledger row 170): on the app-list pane the exclusion is the WHOLE TRACK, the
+        // scroller's full width by the track's height, not the drawn thumb. The root's own exclusion
+        // covers everything at NORMAL, but it is lifted whenever back has something to dismiss --
+        // edit mode (604d90ed12) and, since 2a95ac643d (on the owner's Pixel 2026-09-10 17:16), an
+        // inline-expanded folder -- and then this rect is all that stands between the thumb and
+        // SysUI's back gesture. Measured on the Pixel: with a folder open the effective exclusion
+        // was exactly the 28 px drawn thumb, (2015,543)-(2043,670), inside a 73 px gesture zone
+        // that starts at x=2003; a finger a few px off it was a BACK (owner: "I'm having issues
+        // grabbing the quick bar", "the back gesture hasn't been an issue with the scroll until
+        // something recent changed"). mSystemGestureInsets is null here (the pane's scroller never
+        // receives them), so stock's widening never ran either. The home app's exclusion is
+        // unrestricted on both devices (SysUI's mUnrestrictedExcludeRegion equals the request), so
+        // the 200 dp cap does not trim it. `debug.ares.stockThumbExclusion=1` restores the thumb
+        // rect in the same build (control arm).
+        if (mIsAresAppList && !"1".equals(
+                android.os.SystemProperties.get("debug.ares.stockThumbExclusion", "0"))) {
+            int trackTop = mRv.getScrollBarTop();
+            SYSTEM_GESTURE_EXCLUSION_RECT.get(0).set(
+                    0, trackTop, getWidth(), trackTop + mRv.getScrollbarTrackHeight());
+        }
         if (Utilities.ATLEAST_Q) {
-            if (mSystemGestureInsets != null) {
+            if (mSystemGestureInsets != null && !mIsAresAppList) {
                 SYSTEM_GESTURE_EXCLUSION_RECT.get(0).left =
                     SYSTEM_GESTURE_EXCLUSION_RECT.get(0).right - mSystemGestureInsets.right;
             }
@@ -610,8 +672,14 @@ public class RecyclerViewFastScroller extends View {
      */
     private boolean isNearThumb(int x, int y) {
         int offset = y - mThumbOffsetY;
-
-        return x >= 0 && x < getWidth() && offset >= 0 && offset <= mThumbHeight;
+        // AresLauncher: on the app list the thumb's grab zone extends ARES_THUMB_GRAB_TOLERANCE_DP
+        // above and below the drawn 52 dp pill. The owner's Pixel log for 2026-09-10 21:08 shows
+        // three downs at 22-47 dp BELOW the thumb (`onThumb=false`, nothing happened) while trying
+        // to grab it; a fingertip is wider than the pill. Same sysprop gate as the grab rule.
+        int tol = (mIsAresAppList && !aresStockGrabGate())
+                ? Math.round(ARES_THUMB_GRAB_TOLERANCE_DP * getResources().getDisplayMetrics().density)
+                : 0;
+        return x >= 0 && x < getWidth() && offset >= -tol && offset <= mThumbHeight + tol;
     }
 
     /**

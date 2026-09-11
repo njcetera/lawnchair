@@ -462,19 +462,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         val hitY = overY != 0f
         if (!hitX && !hitY) {
             if (limitStretched) relaxLimitStretch(spring = false)
-            limitHitX = false
-            limitHitY = false
             return
         }
-        if ((hitX && !limitHitX) || (hitY && !limitHitY)) {
+        // The tick fires ONCE per axis per drag, and only once the finger is a real push past the
+        // limit (LIMIT_TICK_DEAD_ZONE_DP), never on the first pixel over. The first cut re-armed the
+        // tick whenever the finger came back inside and ticked again on every re-crossing, so a
+        // finger resting at a limit -- where a drag naturally ends up, and where every 120 Hz jitter
+        // crosses the boundary -- buzzed repeatedly; and a widget already AT its floor ticked on the
+        // first pixel of a shrink (owner 2026-09-10: "the vibrate was happening more than you
+        // intended. it's also happened when shrinking the widget"). limitHitX/Y now reset only at
+        // BEGIN/END, so the most a drag can tick is twice: once per axis.
+        val dead = LIMIT_TICK_DEAD_ZONE_DP * resources.displayMetrics.density
+        val tickX = hitX && !limitHitX && kotlin.math.abs(overX) >= dead
+        val tickY = hitY && !limitHitY && kotlin.math.abs(overY) >= dead
+        if (tickX || tickY) {
             performHapticFeedback(
                 if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.CLOCK_TICK,
                 HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
             )
-            Log.d(TAG, "resize limit hit: id=${resizeItem?.id} axis=${if (hitX && !limitHitX) "x" else "y"} over=${overX.toInt()},${overY.toInt()}")
+            Log.d(TAG, "resize limit hit: id=${resizeItem?.id} axis=${if (tickX) "x" else "y"} over=${overX.toInt()},${overY.toInt()}")
         }
-        limitHitX = hitX
-        limitHitY = hitY
+        if (tickX) limitHitX = true
+        if (tickY) limitHitY = true
         val cap = LIMIT_STRETCH_CAP_DP * resources.displayMetrics.density
         fun rubber(over: Float): Float = kotlin.math.sign(over) * kotlin.math.min(cap, kotlin.math.abs(over) * LIMIT_STRETCH_RATE)
         val sx = if (v.width > 0) rubber(overX) / v.width else 0f
@@ -3847,6 +3856,8 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         // tile, its cap, the spring back on release and the relax when the finger comes back inside.
         const val LIMIT_STRETCH_RATE = 0.28f
         const val LIMIT_STRETCH_CAP_DP = 14f
+        /** Overshoot past a limit before the haptic tick fires; a graze is not a push. */
+        const val LIMIT_TICK_DEAD_ZONE_DP = 24f
         const val LIMIT_SPRING_MS = 300L
         const val LIMIT_RELAX_MS = 120L
 
