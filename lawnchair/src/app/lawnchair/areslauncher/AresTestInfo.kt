@@ -444,6 +444,21 @@ object AresTestInfo {
     const val REQUEST_PANE_ALIGN = "ares-pane-align"
 
     /**
+     * The app list's fast scroller, in SCREEN coordinates, plus the list's scroll position.
+     *
+     * `thumb=left,top,right,bottom` is the thumb's current hit box (the scroller's width by the
+     * thumb's height, at its offset within the track), `track=top,bottom` the track's extent,
+     * `offset=`/`range=` the RecyclerView's vertical scroll offset and range, `dragging=` whether a
+     * fast scroll is engaged right now and `grabs=` how many have engaged in this process.
+     * `stockGate=1` means `debug.ares.stockFastScrollGrab` has restored the stock engagement rule.
+     *
+     * Exists for `fastscroll-flick` in ares-smoke.ps1, which swipes the thumb at the owner's speed
+     * and asserts the list actually moved -- the coordinates come from here so the check follows
+     * the thumb rather than a hard-coded pixel (ledger row 169).
+     */
+    const val REQUEST_FASTSCROLL = "ares-fastscroll"
+
+    /**
      * Walks the whole window from the DecorView down and reports every `ViewGroup` holding a NULL
      * child slot — `getChildAt(i) == null` while `i < getChildCount()`.
      *
@@ -723,6 +738,10 @@ object AresTestInfo {
             { b, key, value -> b.putString(key, value) },
             { launcher -> paneAlign(launcher) },
         )
+        REQUEST_FASTSCROLL -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { launcher -> fastScrollState(launcher) },
+        )
         REQUEST_HOTSEAT -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> hotseatState(launcher) },
@@ -975,6 +994,24 @@ object AresTestInfo {
         walk(root, root.javaClass.simpleName)
 
         return if (bad.isEmpty()) "clean groups=$groups views=$views" else "CORRUPT $bad"
+    }
+
+    /** See [REQUEST_FASTSCROLL]. */
+    private fun fastScrollState(launcher: Launcher): String {
+        val pane = launcher.workspace?.aresAppListPane ?: launcher.appsView ?: return "no-pane"
+        val src = if (launcher.workspace?.aresAppListPane != null) "panel" else "sheet"
+        val rv = pane.activeRecyclerView ?: return "src=$src no-rv"
+        val bar = rv.scrollbar ?: return "src=$src no-scrollbar"
+        val loc = IntArray(2)
+        bar.getLocationOnScreen(loc)
+        val trackTop = loc[1] + rv.scrollBarTop
+        val thumbTop = trackTop + bar.thumbOffsetY
+        val stockGate = android.os.SystemProperties.get("debug.ares.stockFastScrollGrab", "0")
+        return "src=$src thumb=${loc[0]},$thumbTop,${loc[0] + bar.width},${thumbTop + bar.thumbHeight} " +
+            "track=$trackTop,${trackTop + rv.scrollbarTrackHeight} barW=${bar.width} " +
+            "offset=${rv.computeVerticalScrollOffset()} range=${rv.computeVerticalScrollRange()} " +
+            "extent=${rv.computeVerticalScrollExtent()} dragging=${bar.isDraggingThumb} " +
+            "grabs=${com.android.launcher3.views.RecyclerViewFastScroller.getAresGrabCount()} stockGate=$stockGate"
     }
 
     /** See [REQUEST_PANE_ALIGN]. */

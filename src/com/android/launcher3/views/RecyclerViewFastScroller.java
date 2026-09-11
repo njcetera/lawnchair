@@ -203,6 +203,35 @@ public class RecyclerViewFastScroller extends View {
     private int mLastY;
     private FastScrollerLocation mFastScrollerLocation;
 
+    /**
+     * AresLauncher: the DOWN landed on the thumb, so this gesture is a grab whatever its speed.
+     *
+     * Stock engages a fast scroll only on a MOVE that arrives more than
+     * {@link #FASTSCROLL_THRESHOLD_MILLIS} after the down while the finger is STILL within the
+     * thumb's own height, and gives up for good the moment the finger has travelled a paging slop
+     * from the down point. A quick flick that starts on the thumb fails both: its first MOVE is
+     * already past the thumb (and often past the slop), so the scroller never engages and the
+     * event stream falls through to the list as an ordinary scroll -- a no-op at the top of the
+     * list, which is where the owner grabs it. Measured 2026-09-10 on the Pixel unfolded
+     * (`input swipe 1993 600 1993 1600 300` on the thumb: no scroll at all; the same travel as a
+     * stepped `motionevent` sequence: engaged) and on the emulator (300 ms swipe engaged 1 of 6,
+     * 150 ms engaged 0 of 3). With this flag the first MOVE after a down-on-thumb engages and the
+     * thumb follows the finger from the grab point, whatever the slop or the clock says.
+     * `debug.ares.stockFastScrollGrab=1` restores the stock gate in the same build (the control
+     * arm for `fastscroll-flick` in ares-smoke.ps1).
+     */
+    private boolean mAresDownOnThumb;
+    /** Process-wide count of engaged fast scrolls, for the `ares-fastscroll` test channel. */
+    private static int sAresGrabCount;
+
+    public static int getAresGrabCount() {
+        return sAresGrabCount;
+    }
+
+    private static boolean aresStockGrabGate() {
+        return "1".equals(android.os.SystemProperties.get("debug.ares.stockFastScrollGrab", "0"));
+    }
+
     public RecyclerViewFastScroller(Context context) {
         this(context, null);
     }
@@ -345,8 +374,10 @@ public class RecyclerViewFastScroller extends View {
                     // touch sequence goes over the touch slop.
                     mRv.stopScroll();
                 }
+                mAresDownOnThumb = false;
                 if (isNearThumb(x, y)) {
                     mTouchOffsetY = mDownY - mThumbOffsetY;
+                    mAresDownOnThumb = !aresStockGrabGate();
                 }
                 break;
             case MotionEvent.ACTION_MOVE:
@@ -356,13 +387,28 @@ public class RecyclerViewFastScroller extends View {
                 int absDeltaX = Math.abs(x - mDownX);
 
                 // Check if we should start scrolling, but ignore this fastscroll gesture if we have
-                // exceeded some fixed movement
-                mIgnoreDragGesture |= absDeltaY > mConfig.getScaledPagingTouchSlop();
+                // exceeded some fixed movement. AresLauncher: not when the down was on the thumb --
+                // a grab is a grab at any speed (see mAresDownOnThumb).
+                if (!mAresDownOnThumb) {
+                    mIgnoreDragGesture |= absDeltaY > mConfig.getScaledPagingTouchSlop();
+                }
 
                 if (!mIsDragging && !mIgnoreDragGesture && mRv.supportsFastScrolling()) {
-                    if ((isNearThumb(mDownX, mLastY) && ev.getEventTime() - mDownTimeStampMillis
+                    if (mAresDownOnThumb) {
+                        // Anchor at the DOWN, not at this MOVE: with lastY == downY the touch offset
+                        // stays the grab point inside the thumb, and the update below moves the
+                        // thumb to the finger. Anchoring at the MOVE (stock) would freeze the thumb
+                        // where it was and leave it trailing the finger by the distance already
+                        // travelled, for the rest of the drag.
+                        calcTouchOffsetAndPrepToFastScroll(mDownY, mDownY);
+                        sAresGrabCount++;
+                        Log.d(TAG, "fastscroll grab: down-on-thumb, dy=" + (y - mDownY) + " after "
+                                + (ev.getEventTime() - mDownTimeStampMillis) + "ms");
+                    } else if ((isNearThumb(mDownX, mLastY)
+                            && ev.getEventTime() - mDownTimeStampMillis
                                     > FASTSCROLL_THRESHOLD_MILLIS)) {
                         calcTouchOffsetAndPrepToFastScroll(mDownY, mLastY);
+                        sAresGrabCount++;
                     }
                 }
                 if (mIsDragging) {
@@ -458,6 +504,7 @@ public class RecyclerViewFastScroller extends View {
         mLastTouchY = 0;
         mIgnoreDragGesture = false;
         mIsDragging = false;
+        mAresDownOnThumb = false;
         // AresLauncher: the tear-down runs whether or not this scroller still believes it is
         // dragging. It used to sit inside `if (mIsDragging)`, so any path that cleared that flag
         // without also tidying the affordances left them on screen with nothing left to take them
