@@ -330,15 +330,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
     // Limit feedback for a resize drag (owner 2026-09-10: "when the widget reaches its limits and
     // can't expand anymore, can we add some animation to indicate that it's at its size limits?").
-    // The tile rubber-bands past the provider's largest/smallest footprint in the pushed direction,
-    // ticks once per axis when the limit is first hit, and springs back on release. The base scale
-    // and pivot are captured ONCE at BEGIN (the tile is at its edit rest scale then) and restored on
-    // release, so the stretch composes with the edit scale instead of overwriting it.
+    // The widget's HOST view (not the holder container, which the masonry animates on every size
+    // step) rubber-bands past the provider's largest/smallest footprint in the pushed direction, ticks
+    // once per axis when the limit is first hit, and springs back on release.
     private var limitStretchView: View? = null
+    private var limitContainer: FrameLayout? = null
+    private var limitContainerClip = true
     private var limitStretchBaseX = 1f
     private var limitStretchBaseY = 1f
-    private var limitStretchBasePivotX = 0f
-    private var limitStretchBasePivotY = 0f
     private var limitStretched = false
     private var limitHitX = false
     private var limitHitY = false
@@ -402,25 +401,42 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         return (findViewHolderForAdapterPosition(position) as? AresHomeAdapter.ViewHolder)?.container
     }
 
-    /** Captures the tile's resting scale and pivot at the start of a resize drag. */
+    /**
+     * Arms the limit feedback for a resize drag on the widget's HOST view -- the child inside the
+     * holder container -- never on the container itself. The masonry animates every size step on
+     * the container (translation + a scale that relaxes to `restScale`) and forbids moving its
+     * pivot (see `AresMasonryLayoutManager`'s "never move the scale pivot here"); a first cut that
+     * scaled the container cancelled those step animations and shifted the pivot, and the owner
+     * saw the steps stop being smooth. Nothing else scales the host view, so it is ours for the
+     * drag. A spring still running from the previous drag is settled first so the captured base is
+     * a resting value, not a mid-flight one.
+     */
     private fun beginLimitStretch(info: ItemInfo) {
-        val v = holderContainerOf(info) ?: return
+        val container = holderContainerOf(info) ?: return
+        val v = container.getChildAt(0) ?: return
+        if (limitStretchView === v) {
+            v.animate().cancel()
+            v.scaleX = limitStretchBaseX
+            v.scaleY = limitStretchBaseY
+            v.resetPivot()
+        }
         limitStretchView = v
+        limitContainer = container
+        limitContainerClip = container.clipChildren
         limitStretchBaseX = v.scaleX
         limitStretchBaseY = v.scaleY
-        limitStretchBasePivotX = v.pivotX
-        limitStretchBasePivotY = v.pivotY
         limitStretched = false
         limitHitX = false
         limitHitY = false
     }
 
     /**
-     * Rubber-bands the tile when the drag has gone PAST the provider's largest or smallest
+     * Rubber-bands the widget when the drag has gone PAST the provider's largest or smallest
      * footprint on an axis. The overshoot is the finger's travel beyond that footprint's own edge;
-     * a fraction of it, capped, stretches the tile in the pushed direction with the pivot on the
-     * start edge (the handle sits at the bottom-end corner, so the end edge is what follows the
-     * finger). Inside the limits the tile relaxes back to its rest scale.
+     * a fraction of it, capped, stretches the host view in the pushed direction with the pivot on
+     * the start edge (the handle sits at the bottom-end corner, so the end edge is what follows the
+     * finger). The container stops clipping while stretched so the extra reads as the tile growing
+     * past its cell, not as its content zooming. Inside the limits it relaxes back.
      */
     private fun applyLimitStretch(from: AresPacker.Span, dx: Float, dy: Float) {
         val v = limitStretchView ?: return
@@ -463,7 +479,10 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         fun rubber(over: Float): Float = kotlin.math.sign(over) * kotlin.math.min(cap, kotlin.math.abs(over) * LIMIT_STRETCH_RATE)
         val sx = if (v.width > 0) rubber(overX) / v.width else 0f
         val sy = if (v.height > 0) rubber(overY) / v.height else 0f
-        v.animate().cancel()
+        if (!limitStretched) {
+            v.animate().cancel()
+            limitContainer?.clipChildren = false
+        }
         v.pivotX = 0f
         v.pivotY = 0f
         v.scaleX = limitStretchBaseX * (1f + sx)
@@ -473,31 +492,31 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
     /**
      * Back to the rest scale: a short ease while the drag is still live and has come back inside
-     * the limits, an overshoot spring when the finger lets go past a limit.
+     * the limits, an overshoot spring when the finger lets go past a limit. The pivot is reset and
+     * the container's clipping restored only once the view is back at rest, so nothing jumps.
      */
     private fun relaxLimitStretch(spring: Boolean) {
         val v = limitStretchView ?: return
+        val container = limitContainer
+        val clip = limitContainerClip
         val bx = limitStretchBaseX
         val by = limitStretchBaseY
-        val px = limitStretchBasePivotX
-        val py = limitStretchBasePivotY
         limitStretched = false
         v.animate().cancel()
         if (!ValueAnimator.areAnimatorsEnabled()) {
-            v.scaleX = bx; v.scaleY = by; v.pivotX = px; v.pivotY = py
+            v.scaleX = bx; v.scaleY = by; v.resetPivot(); container?.clipChildren = clip
             return
         }
         v.animate().scaleX(bx).scaleY(by)
             .setDuration(if (spring) LIMIT_SPRING_MS else LIMIT_RELAX_MS)
             .setInterpolator(if (spring) OvershootInterpolator(2.2f) else android.view.animation.DecelerateInterpolator())
-            .withEndAction { v.pivotX = px; v.pivotY = py }
+            .withEndAction { v.resetPivot(); container?.clipChildren = clip }
             .start()
     }
 
-    /** Ends the limit feedback for the drag: springs back if stretched, then forgets the tile. */
+    /** Ends the limit feedback for the drag: springs back if stretched, otherwise leaves the view untouched. */
     private fun endLimitStretch() {
         if (limitStretched) relaxLimitStretch(spring = true)
-        limitStretchView = null
         limitHitX = false
         limitHitY = false
     }
