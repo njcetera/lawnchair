@@ -328,6 +328,21 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
     private var resizeFrom: AresPacker.Span? = null
     private var resizeAllowed: List<AresPacker.Span> = emptyList()
 
+    // Limit feedback for a resize drag (owner 2026-09-10: "when the widget reaches its limits and
+    // can't expand anymore, can we add some animation to indicate that it's at its size limits?").
+    // The tile rubber-bands past the provider's largest/smallest footprint in the pushed direction,
+    // ticks once per axis when the limit is first hit, and springs back on release. The base scale
+    // and pivot are captured ONCE at BEGIN (the tile is at its edit rest scale then) and restored on
+    // release, so the stretch composes with the edit scale instead of overwriting it.
+    private var limitStretchView: View? = null
+    private var limitStretchBaseX = 1f
+    private var limitStretchBaseY = 1f
+    private var limitStretchBasePivotX = 0f
+    private var limitStretchBasePivotY = 0f
+    private var limitStretched = false
+    private var limitHitX = false
+    private var limitHitY = false
+
     /**
      * Drives a widget resize from the handle's drag (§3).
      *
@@ -359,12 +374,14 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 // for it, which is what a resize needs too: a tile that is changing size must not
                 // also be drifting, and a horizontal drag on the handle must not open the app list.
                 setReorderInProgress(true)
+                beginLimitStretch(info)
             }
 
             AresWidgetResize.Phase.MOVE -> {
                 val from = resizeFrom ?: return
                 if (resizeItem !== info) return
                 applyLiveSpan(info, spanFromDrag(from, dx, dy))
+                applyLimitStretch(from, dx, dy)
             }
 
             AresWidgetResize.Phase.END -> {
@@ -377,6 +394,112 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
                 finishResize(info, from, from, commit = false)
             }
         }
+    }
+
+    private fun holderContainerOf(info: ItemInfo): FrameLayout? {
+        val position = aresAdapter.indexOf(info)
+        if (position < 0) return null
+        return (findViewHolderForAdapterPosition(position) as? AresHomeAdapter.ViewHolder)?.container
+    }
+
+    /** Captures the tile's resting scale and pivot at the start of a resize drag. */
+    private fun beginLimitStretch(info: ItemInfo) {
+        val v = holderContainerOf(info) ?: return
+        limitStretchView = v
+        limitStretchBaseX = v.scaleX
+        limitStretchBaseY = v.scaleY
+        limitStretchBasePivotX = v.pivotX
+        limitStretchBasePivotY = v.pivotY
+        limitStretched = false
+        limitHitX = false
+        limitHitY = false
+    }
+
+    /**
+     * Rubber-bands the tile when the drag has gone PAST the provider's largest or smallest
+     * footprint on an axis. The overshoot is the finger's travel beyond that footprint's own edge;
+     * a fraction of it, capped, stretches the tile in the pushed direction with the pivot on the
+     * start edge (the handle sits at the bottom-end corner, so the end edge is what follows the
+     * finger). Inside the limits the tile relaxes back to its rest scale.
+     */
+    private fun applyLimitStretch(from: AresPacker.Span, dx: Float, dy: Float) {
+        val v = limitStretchView ?: return
+        val allowed = resizeAllowed
+        val cellW = masonry.resolvedCellWidthPx()
+        val cellH = masonry.resolvedCellHeightPx()
+        if (allowed.isEmpty() || cellW <= 0 || cellH <= 0) return
+        fun overshoot(delta: Float, fromSpan: Int, minSpan: Int, maxSpan: Int, cell: Int): Float {
+            // A widget that already sits outside its provider's range (a seeded 2x2 whose provider
+            // says min 3, say) is only "at a limit" when pushed FURTHER out; its current size counts
+            // as the floor/ceiling on that side, or the first move of every drag would tick.
+            val maxTravel = kotlin.math.max((maxSpan - fromSpan) * cell.toFloat(), 0f)
+            val minTravel = kotlin.math.min((minSpan - fromSpan) * cell.toFloat(), 0f)
+            return when {
+                delta > maxTravel -> delta - maxTravel
+                delta < minTravel -> delta - minTravel
+                else -> 0f
+            }
+        }
+        val overX = overshoot(dx, from.w, allowed.minOf { it.w }, allowed.maxOf { it.w }, cellW)
+        val overY = overshoot(dy, from.h, allowed.minOf { it.h }, allowed.maxOf { it.h }, cellH)
+        val hitX = overX != 0f
+        val hitY = overY != 0f
+        if (!hitX && !hitY) {
+            if (limitStretched) relaxLimitStretch(spring = false)
+            limitHitX = false
+            limitHitY = false
+            return
+        }
+        if ((hitX && !limitHitX) || (hitY && !limitHitY)) {
+            performHapticFeedback(
+                if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.CLOCK_TICK,
+                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING,
+            )
+            Log.d(TAG, "resize limit hit: id=${resizeItem?.id} axis=${if (hitX && !limitHitX) "x" else "y"} over=${overX.toInt()},${overY.toInt()}")
+        }
+        limitHitX = hitX
+        limitHitY = hitY
+        val cap = LIMIT_STRETCH_CAP_DP * resources.displayMetrics.density
+        fun rubber(over: Float): Float = kotlin.math.sign(over) * kotlin.math.min(cap, kotlin.math.abs(over) * LIMIT_STRETCH_RATE)
+        val sx = if (v.width > 0) rubber(overX) / v.width else 0f
+        val sy = if (v.height > 0) rubber(overY) / v.height else 0f
+        v.animate().cancel()
+        v.pivotX = 0f
+        v.pivotY = 0f
+        v.scaleX = limitStretchBaseX * (1f + sx)
+        v.scaleY = limitStretchBaseY * (1f + sy)
+        limitStretched = true
+    }
+
+    /**
+     * Back to the rest scale: a short ease while the drag is still live and has come back inside
+     * the limits, an overshoot spring when the finger lets go past a limit.
+     */
+    private fun relaxLimitStretch(spring: Boolean) {
+        val v = limitStretchView ?: return
+        val bx = limitStretchBaseX
+        val by = limitStretchBaseY
+        val px = limitStretchBasePivotX
+        val py = limitStretchBasePivotY
+        limitStretched = false
+        v.animate().cancel()
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            v.scaleX = bx; v.scaleY = by; v.pivotX = px; v.pivotY = py
+            return
+        }
+        v.animate().scaleX(bx).scaleY(by)
+            .setDuration(if (spring) LIMIT_SPRING_MS else LIMIT_RELAX_MS)
+            .setInterpolator(if (spring) OvershootInterpolator(2.2f) else android.view.animation.DecelerateInterpolator())
+            .withEndAction { v.pivotX = px; v.pivotY = py }
+            .start()
+    }
+
+    /** Ends the limit feedback for the drag: springs back if stretched, then forgets the tile. */
+    private fun endLimitStretch() {
+        if (limitStretched) relaxLimitStretch(spring = true)
+        limitStretchView = null
+        limitHitX = false
+        limitHitY = false
     }
 
     private fun spanFromDrag(from: AresPacker.Span, dx: Float, dy: Float): AresPacker.Span =
@@ -1545,6 +1668,7 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
         target: AresPacker.Span,
         commit: Boolean,
     ) {
+        endLimitStretch()
         resizeItem = null
         resizeFrom = null
         resizeAllowed = emptyList()
@@ -3700,6 +3824,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
 
         /** Slight shrink signalling edit mode, mirroring the Windows Phone Start cue. */
         const val EDIT_MODE_SCALE = 0.92f
+        // Resize limit feedback (owner 2026-09-10): fraction of the overshoot that stretches the
+        // tile, its cap, the spring back on release and the relax when the finger comes back inside.
+        const val LIMIT_STRETCH_RATE = 0.28f
+        const val LIMIT_STRETCH_CAP_DP = 14f
+        const val LIMIT_SPRING_MS = 300L
+        const val LIMIT_RELAX_MS = 120L
 
         // Open-folder focus wash. Feel is owner-tunable (owner 2026-08-25, "dimmed colour wash").
         const val WASH_MAX = 0.85f      // target strength at full open
