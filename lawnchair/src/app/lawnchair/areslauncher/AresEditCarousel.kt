@@ -30,6 +30,7 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import app.lawnchair.theme.color.tokens.ColorTokens
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -86,6 +87,17 @@ object AresEditCarousel {
     // above; both gaps are kept tight so the whole stack covers as little of the bottom row as it can.
     private const val CAPTION_GAP_DP = 6f
     private const val DOTS_GAP_DP = 6f
+
+    // Chrome colours come from the launcher's Material theming (ColorTokens: the accent preference plus
+    // the launcher's own day/night mode), never from the materialColor* resources. In this build those
+    // compile to their static hex fallbacks -- aapt2 on the APK shows system_on_surface_light with only
+    // "() #ff30323a"; the values-v34 alias to the dynamic system colour is not in the package -- so the
+    // chrome had been ignoring the palette entirely (owner 2026-09-10: "remember to use the material
+    // theming colors"). Roles map to M3: surface-container-high, on-surface, primary, on-primary.
+    private fun surfaceColor(ctx: Context): Int = ColorTokens.SurfaceContainerHighest.resolveColor(ctx)
+    private fun onSurfaceColor(ctx: Context): Int = ColorTokens.TextColorPrimary.resolveColor(ctx)
+    private fun accentColor(ctx: Context): Int = ColorTokens.ColorAccent.resolveColor(ctx)
+    private fun onAccentColor(ctx: Context): Int = ColorTokens.TextColorPrimaryInverse.resolveColor(ctx)
 
     private var view: View? = null
     private var pills: List<Pill> = emptyList()
@@ -465,12 +477,12 @@ object AresEditCarousel {
     }
 
     /**
-     * A pill's text. Owner 2026-09-10: pill TEXT takes the caption's colour (`materialColorOnSurface`)
-     * so the words read as labels, while the ICONS keep the themed accent (`materialColorPrimary`) --
-     * the change is text-only, so this no longer takes a colour.
+     * A pill's text. Owner 2026-09-10: pill TEXT takes the caption's colour (the on-surface token,
+     * [onSurfaceColor]) so the words read as labels, while the ICONS keep the themed accent
+     * ([accentColor]) -- text-only, so this no longer takes a colour.
      */
     private fun pillLabel(ctx: Context): TextView = TextView(ctx).apply {
-        setTextColor(ContextCompat.getColor(ctx, R.color.materialColorOnSurface))
+        setTextColor(onSurfaceColor(ctx))
         textSize = 15f
         gravity = Gravity.CENTER
         minWidth = dpOf(ctx, 104f)
@@ -485,7 +497,7 @@ object AresEditCarousel {
      * `sans-serif-medium` 13sp so it is a label, not a title, and never competes with the pill.
      */
     private fun captionChip(ctx: Context): TextView = TextView(ctx).apply {
-        setTextColor(ContextCompat.getColor(ctx, R.color.materialColorOnSurface))
+        setTextColor(onSurfaceColor(ctx))
         textSize = 13f
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         letterSpacing = 0.02f
@@ -498,7 +510,7 @@ object AresEditCarousel {
         background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dpOf(ctx, 14f).toFloat()
-            setColor(ContextCompat.getColor(ctx, R.color.materialColorSurfaceContainerHigh))
+            setColor(surfaceColor(ctx))
         }
         elevation = dpOf(ctx, 3f).toFloat()
         // Consume a tap like the pill row does, so a tap on the caption never falls through to the
@@ -558,10 +570,9 @@ object AresEditCarousel {
 
     private fun buildColumnPill(launcher: Launcher, list: AresHomeListView): Pill {
         val ctx: Context = launcher
-        fun color(res: Int) = ContextCompat.getColor(ctx, res)
-        val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val tonal = color(R.color.materialColorPrimary)
-        val onTonal = color(R.color.materialColorOnPrimary)
+        val surface = surfaceColor(ctx)
+        val tonal = accentColor(ctx)
+        val onTonal = onAccentColor(ctx)
 
         val label = pillLabel(ctx)
         lateinit var minusBtn: ImageView
@@ -644,9 +655,8 @@ object AresEditCarousel {
         onClick: (View) -> Unit,
     ): Pill {
         val ctx: Context = launcher
-        fun color(res: Int) = ContextCompat.getColor(ctx, res)
-        val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val tonal = color(R.color.materialColorPrimary)
+        val surface = surfaceColor(ctx)
+        val tonal = accentColor(ctx)
 
         val icon = ImageView(ctx).apply {
             setImageResource(iconRes)
@@ -704,10 +714,9 @@ object AresEditCarousel {
      */
     private fun buildTintPage(launcher: Launcher, list: AresHomeListView): List<Pill> {
         val ctx: Context = launcher
-        fun color(res: Int) = ContextCompat.getColor(ctx, res)
-        val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val tonal = color(R.color.materialColorPrimary)
-        val onTonal = color(R.color.materialColorOnPrimary)
+        val surface = surfaceColor(ctx)
+        val tonal = accentColor(ctx)
+        val onTonal = onAccentColor(ctx)
 
         val prefs = PreferenceManager2.getInstance(ctx)
         var enabled = prefs.aresIconTintEnabled.firstBlocking()
@@ -812,10 +821,9 @@ object AresEditCarousel {
      */
     private fun buildShapePage(launcher: Launcher, list: AresHomeListView): List<Pill> {
         val ctx: Context = launcher
-        fun color(res: Int) = ContextCompat.getColor(ctx, res)
-        val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val tonal = color(R.color.materialColorPrimary)
-        val onTonal = color(R.color.materialColorOnPrimary)
+        val surface = surfaceColor(ctx)
+        val tonal = accentColor(ctx)
+        val onTonal = onAccentColor(ctx)
 
         val prefs = PreferenceManager2.getInstance(ctx)
         val baseChoices = shapeChoices()
@@ -904,9 +912,8 @@ object AresEditCarousel {
      */
     private fun buildIconPackPage(launcher: Launcher, list: AresHomeListView): List<Pill> {
         val ctx: Context = launcher
-        fun color(res: Int) = ContextCompat.getColor(ctx, res)
-        val surface = color(R.color.materialColorSurfaceContainerHigh)
-        val tonal = color(R.color.materialColorPrimary)
+        val surface = surfaceColor(ctx)
+        val tonal = accentColor(ctx)
 
         val prefs = PreferenceManager.getInstance(ctx)
         val pm = ctx.packageManager
@@ -1312,7 +1319,7 @@ object AresEditCarousel {
 
     private class DotsIndicator(context: Context, count: Int) : LinearLayout(context) {
         private val dots = mutableListOf<View>()
-        private val activeColor = ContextCompat.getColor(context, R.color.materialColorPrimary)
+        private val activeColor = accentColor(context)
         // Sits on its own surface chip so blue-on-blue-wallpaper dots still read (owner 2026-08-26).
         private val inactiveColor = ColorUtils.setAlphaComponent(activeColor, 0x66)
 
@@ -1325,7 +1332,7 @@ object AresEditCarousel {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dpOf(context, 12f).toFloat()
-                setColor(ContextCompat.getColor(context, R.color.materialColorSurfaceContainerHigh))
+                setColor(surfaceColor(context))
             }
             elevation = dpOf(context, 3f).toFloat()
             val size = dpOf(context, 7f)
