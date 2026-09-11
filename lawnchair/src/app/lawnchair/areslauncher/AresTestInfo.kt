@@ -1125,7 +1125,33 @@ object AresTestInfo {
                 if (bad.isEmpty()) "clean" else bad.toString().trim()
             }
         } ?: "no-pane"
-        return "src=$src state=$state wsScale=$wsScale hostClip=$hostClip | " +
+        // Every ancestor's on-screen top..bottom and clip flags, pane first, up to the root. A view
+        // whose top sits below 0 while it clips is what cuts a "sliver" off the scrolled rows
+        // (owner 2026-09-10 evening, after row 168: a ~9px band at the very top).
+        val hostBounds = (launcher.workspace?.aresAppListPane as? View)?.let { p ->
+            val sb = StringBuilder()
+            var v: View? = p
+            while (v != null) {
+                v.getLocationOnScreen(loc)
+                sb.append(v.javaClass.simpleName).append('[').append(loc[1]).append("..")
+                    .append(loc[1] + v.height).append(" x").append(loc[0]).append("..").append(loc[0] + v.width)
+                if (v is ViewGroup) {
+                    sb.append(" clip=").append(if (v.clipChildren) 'C' else '-')
+                        .append(if (v.clipToPadding) 'P' else '-')
+                        .append(if (v.clipToOutline) 'O' else '-')
+                        .append(" pad=").append(v.paddingTop).append('/').append(v.paddingBottom)
+                }
+                sb.append("] ")
+                v = v.parent as? View
+            }
+            sb.toString().trim()
+        } ?: "no-pane"
+        // Row 168b: the floating header hands the list a clipBounds whose top is its own top padding
+        // (4dp here) on every scroll; the list starts at the screen top, so that is a 9-10px band in
+        // which no row draws. `rvClip=none` or the rect; the smoke asserts top 0 after a scroll.
+        val rvClipRect = rv?.clipBounds
+        val rvClip = if (rvClipRect == null) "none" else "${rvClipRect.left},${rvClipRect.top},${rvClipRect.right},${rvClipRect.bottom}"
+        return "src=$src state=$state wsScale=$wsScale hostClip=$hostClip rvClip=$rvClip hostBounds=$hostBounds | " +
             "homeTop=$homeTop homePad=$homePad homeChild=$homeChild | " +
             "paneTop=$paneTop rvPad=$rvPad paneChild=$paneChild | " +
             "insetsTop=${dp.insets.top} wsPadTop=${dp.workspacePadding.top} homeListPad=$homeListPad recon=$recon | " +

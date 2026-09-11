@@ -359,7 +359,21 @@ public class FloatingHeaderView extends LinearLayout implements
             // Add back spacing that is otherwise covered by the tabs.
             clipTop += mTabsAdditionalPaddingTop;
         }
-        mRVClip.top = mTabsHidden || mFloatingRowsCollapsed ? clipTop : 0;
+        // AresLauncher (ledger row 168b, owner 2026-09-10 "there's still a sliver of padding at the
+        // top"): stock clips the list to below the header's top padding whenever the tabs are hidden
+        // or the floating rows are collapsed, so rows never draw in that band at the top of the
+        // sheet. Here that band is 4dp (lawnchair all_apps_header_top_padding), and both Ares lists
+        // -- the unfolded pane and the folded full-screen sheet -- start at the physical top edge
+        // and are meant to flow behind the status bar. The clip cut every scrolled row flat 9-10px
+        // below the screen top (measured on the Pixel and emulator-5554 at 2.4375x). Neither surface
+        // shows tabs, so the band protects nothing: do not clip the list. `setprop
+        // debug.ares.rvHeaderClip 1` restores the stock clip from the same bytes (the smoke
+        // assertion `pane-host-unclipped` is falsified with it), logged so a stuck control shows.
+        boolean stockRvClip = "1".equals(android.os.SystemProperties.get("debug.ares.rvHeaderClip", "0"));
+        if (stockRvClip) {
+            android.util.Log.w("AresAttach", "list clipped at the header top padding (debug.ares.rvHeaderClip=1): clipTop=" + clipTop);
+        }
+        mRVClip.top = stockRvClip && (mTabsHidden || mFloatingRowsCollapsed) ? clipTop : 0;
         mHeaderClip.top = clipTop;
         // clipping on a draw might cause additional redraw
         setClipBounds(mHeaderClip);
