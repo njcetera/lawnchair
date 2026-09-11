@@ -141,6 +141,13 @@ object AresTestInfo {
     const val REQUEST_SEARCH_STATE = "ares-search-state"
 
     /**
+     * Resting geometry of the edit-mode carousel chrome — caption chip / pill pager / dots chip —
+     * in screen px, or `attached=false` outside edit mode. Emitter and field list:
+     * [AresEditCarousel.debugGeometry].
+     */
+    const val REQUEST_CAROUSEL_GEOMETRY = "ares-carousel-geometry"
+
+    /**
      * The W1 metric: `viewGroup|layoutManager|adapter` child counts for the home grid.
      *
      * The three disagree in exactly one interesting way. `RecyclerView.getChildCount()` is plain
@@ -603,6 +610,10 @@ object AresTestInfo {
         REQUEST_SEARCH_STATE -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },
             { launcher -> searchState(launcher) },
+        )
+        REQUEST_CAROUSEL_GEOMETRY -> TestInformationHandler.getLauncherUIProperty(
+            { b, key, value -> b.putString(key, value) },
+            { _ -> AresEditCarousel.debugGeometry() },
         )
         REQUEST_CHILD_CENSUS -> TestInformationHandler.getLauncherUIProperty(
             { b, key, value -> b.putString(key, value) },

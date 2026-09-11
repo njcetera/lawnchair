@@ -9,6 +9,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -53,7 +54,10 @@ import kotlinx.coroutines.launch
 
 /**
  * The edit-mode **personalization carousel** (owner 2026-08-26): a looping, swipeable row of
- * Material 3 pills at the bottom of the screen, one visible at a time, with a dots indicator above.
+ * Material 3 pills at the bottom of the screen, one visible at a time. A caption chip naming the
+ * current page sits ABOVE the pill and the dots indicator BELOW it (owner 2026-09-10: five
+ * look-alike pill pages needed a name, and "caption above, dots below" keeps the caption line clean
+ * and reads top-down as name, control, position).
  * Each pill is one personalization control; swipe left/right ON THE PILL to move between them.
  *
  * Registry-driven ([pageBuilders]) so adding a page is one entry. The initial pages are the home
@@ -77,8 +81,18 @@ object AresEditCarousel {
     // feels immediate.
     private const val ICON_PACK_APPLY_DEBOUNCE_MS = 500L
 
+    // Chrome spacing (dp). The chrome is bottom-anchored just above the gesture inset, so the dots row
+    // below the pill LIFTS the pill by DOTS_GAP + the dots chip, and the caption adds its own chip
+    // above; both gaps are kept tight so the whole stack covers as little of the bottom row as it can.
+    private const val CAPTION_GAP_DP = 6f
+    private const val DOTS_GAP_DP = 6f
+
     private var view: View? = null
     private var pills: List<Pill> = emptyList()
+    // The three chrome parts, kept for the `ares-carousel-geometry` channel ([debugGeometry]).
+    private var captionView: TextView? = null
+    private var dotsView: View? = null
+    private var pagerView: PillPager? = null
 
     // Debounced icon-pack apply. Each apply is a full model reload that stopLoader+startLoaders the
     // previous one, so clicking THROUGH packs thrashes the loader and the grid settles long after
@@ -162,18 +176,21 @@ object AresEditCarousel {
     /** One personalization pill: its control view plus a hook to re-evaluate enabled/disabled state. */
     private class Pill(val view: View, val refreshEnabled: () -> Unit)
 
+    /** One carousel page: the caption shown above the pill while it is current, and its pill builder. */
+    private class CarouselPage(val title: String, val build: (Launcher, AresHomeListView) -> List<Pill>)
+
     /**
      * Ordered registry of carousel PAGES. Each builder returns the pills shown together on one page
-     * (laid out side by side). One page == one swipe position == one dot. Columns is a single-pill
-     * page; icon tint is a two-pill page (a toggle pill + an amount pill). Append a builder to add a
-     * page.
+     * (laid out side by side). One page == one swipe position == one dot == one caption. Columns is
+     * a single-pill page; actions is a two-pill page (wallpaper + widget). Append an entry to add a
+     * page. Titles are literal like the "Themed icons" pill label: single-user, English-only fork.
      */
-    private val pageBuilders: List<(Launcher, AresHomeListView) -> List<Pill>> = listOf(
-        ::buildActionsPage,
-        ::buildColumnPage,
-        ::buildTintPage,
-        ::buildShapePage,
-        ::buildIconPackPage,
+    private val pageRegistry: List<CarouselPage> = listOf(
+        CarouselPage("Actions", ::buildActionsPage),
+        CarouselPage("Columns", ::buildColumnPage),
+        CarouselPage("Icon theming", ::buildTintPage),
+        CarouselPage("Icon shape", ::buildShapePage),
+        CarouselPage("Icon pack", ::buildIconPackPage),
     )
 
     /** Re-evaluate every pill's enabled/disabled state (folder open, bounds, etc.). No-op if detached. */
@@ -210,30 +227,36 @@ object AresEditCarousel {
         val density = ctx.resources.displayMetrics.density
         fun dp(v: Float): Int = (v * density).toInt()
 
-        val pages: List<List<Pill>> = pageBuilders.map { it(launcher, list) }
+        val pages: List<List<Pill>> = pageRegistry.map { it.build(launcher, list) }
         pills = pages.flatten()
         val pageViews = pages.map { buildPageContainer(ctx, it) }
+        val titles = pageRegistry.map { it.title }
 
         val pager = PillPager(ctx).apply { setPages(pageViews) }
 
+        val caption = captionChip(ctx).apply { text = titles[0] }
         val dots = DotsIndicator(ctx, pageViews.size)
-        pager.onPageChanged = { dots.setActive(it) }
+        pager.onPageChanged = { idx, dir ->
+            dots.setActive(idx)
+            swapCaption(caption, titles[idx], dir)
+        }
 
+        // Caption ABOVE the pill, dots BELOW it (owner 2026-09-10). Both chips keep the dots' own
+        // surface treatment so they read on a busy wallpaper (owner 2026-08-26). Every part is a
+        // child of this one container, so [tapWithinRestingPill] -- which the grid consults before
+        // reading a tap as "leave edit mode" -- covers the caption and the moved dots for free.
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             clipChildren = false
             clipToPadding = false
-            // Only show the dots when there is more than one page to move between.
-            if (pageViews.size > 1) {
-                addView(
-                    dots,
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { bottomMargin = dp(8f) },
-                )
-            }
+            addView(
+                caption,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(CAPTION_GAP_DP) },
+            )
             addView(
                 pager,
                 LinearLayout.LayoutParams(
@@ -241,7 +264,20 @@ object AresEditCarousel {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
+            // Only show the dots when there is more than one page to move between.
+            if (pageViews.size > 1) {
+                addView(
+                    dots,
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(DOTS_GAP_DP) },
+                )
+            }
         }
+        captionView = caption
+        dotsView = if (pageViews.size > 1) dots else null
+        pagerView = pager
 
         pills.forEach { it.refreshEnabled() }
 
@@ -306,6 +342,9 @@ object AresEditCarousel {
         }
         view = null
         pills = emptyList()
+        captionView = null
+        dotsView = null
+        pagerView = null
     }
 
     /**
@@ -335,6 +374,9 @@ object AresEditCarousel {
         val v = view ?: return
         view = null
         pills = emptyList()
+        captionView = null
+        dotsView = null
+        pagerView = null
         val marginBottom = (v.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0
         val drop = v.height.toFloat() + marginBottom + v.resources.displayMetrics.density * 24f
         v.animate()
@@ -429,6 +471,79 @@ object AresEditCarousel {
         minWidth = dpOf(ctx, 104f)
         setPadding(dpOf(ctx, 12f), 0, dpOf(ctx, 12f), 0)
         letterSpacing = 0.01f
+    }
+
+    // ---- caption chip (above the pill) -------------------------------------------------------
+
+    /**
+     * The page-name chip above the pill. Same surface chip as the dots so it reads on any wallpaper;
+     * `sans-serif-medium` 13sp so it is a label, not a title, and never competes with the pill.
+     */
+    private fun captionChip(ctx: Context): TextView = TextView(ctx).apply {
+        setTextColor(ContextCompat.getColor(ctx, R.color.materialColorOnSurface))
+        textSize = 13f
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        letterSpacing = 0.02f
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        maxLines = 1
+        val padH = dpOf(ctx, 12f)
+        val padV = dpOf(ctx, 5f)
+        setPadding(padH, padV, padH, padV)
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dpOf(ctx, 14f).toFloat()
+            setColor(ContextCompat.getColor(ctx, R.color.materialColorSurfaceContainerHigh))
+        }
+        elevation = dpOf(ctx, 3f).toFloat()
+        // Consume a tap like the pill row does, so a tap on the caption never falls through to the
+        // grid's "stationary non-item tap leaves edit mode" handler.
+        isClickable = true
+    }
+
+    /**
+     * Swap the caption with the page: the old name slides out toward the side the outgoing pill
+     * went ([PillPager.pageBy] sends it to `-dir`) and the new one comes in from the other side.
+     */
+    private fun swapCaption(label: TextView, newText: CharSequence, dir: Int) {
+        if (label.text.toString() == newText.toString()) return
+        val dist = label.resources.displayMetrics.density * 14f
+        label.animate().cancel()
+        label.animate()
+            .translationX(-dir * dist)
+            .alpha(0f)
+            .setDuration(100)
+            .withEndAction {
+                label.text = newText
+                label.translationX = dir * dist
+                label.alpha = 0f
+                label.animate().translationX(0f).alpha(1f).setDuration(180)
+                    .setInterpolator(DecelerateInterpolator()).start()
+            }
+            .start()
+    }
+
+    /**
+     * The chrome's RESTING geometry for the `ares-carousel-geometry` test channel: screen px with the
+     * enter/exit slide removed, so a read mid-animation matches a settled one. `attached=false` when
+     * there is no carousel (not in edit mode). Fields: `page` (index), `caption` (text), then the
+     * `l,t,r,b` boxes of the whole stack, the caption chip, the pager and the dots chip, the stack's
+     * bottom margin (gesture-inset clearance) and the density, for converting to dp.
+     */
+    fun debugGeometry(): String {
+        val c = view ?: return "attached=false"
+        val ty = c.translationY.toInt()
+        fun box(v: View?): String {
+            if (v == null || v.parent == null) return "-"
+            val l = IntArray(2)
+            v.getLocationOnScreen(l)
+            return "${l[0]},${l[1] - ty},${l[0] + v.width},${l[1] - ty + v.height}"
+        }
+        val lp = c.layoutParams as? ViewGroup.MarginLayoutParams
+        return "attached=true|page=${pagerView?.currentIndex ?: -1}|caption=${captionView?.text}" +
+            "|container=${box(c)}|captionBox=${box(captionView)}|pager=${box(pagerView)}" +
+            "|dots=${box(dotsView)}|bottomMargin=${lp?.bottomMargin ?: -1}" +
+            "|density=${c.resources.displayMetrics.density}"
     }
 
     // ---- pill 1: home columns ----------------------------------------------------------------
@@ -1072,7 +1187,9 @@ object AresEditCarousel {
         private var downX = 0f
         private var downY = 0f
         private var dragging = false
-        var onPageChanged: ((Int) -> Unit)? = null
+        /** `(index, dir)`: the page now current and the swipe direction (+1 = the finger went left). */
+        var onPageChanged: ((Int, Int) -> Unit)? = null
+        val currentIndex: Int get() = currentIdx
 
         init {
             clipChildren = false
@@ -1182,7 +1299,7 @@ object AresEditCarousel {
                 }
                 .start()
             currentIdx = toIdx
-            onPageChanged?.invoke(toIdx)
+            onPageChanged?.invoke(toIdx, dir)
         }
     }
 
