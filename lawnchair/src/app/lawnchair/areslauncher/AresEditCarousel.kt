@@ -464,8 +464,13 @@ object AresEditCarousel {
         btn.alpha = if (enabled) 1f else DISABLED_ALPHA
     }
 
-    private fun pillLabel(ctx: Context, color: Int): TextView = TextView(ctx).apply {
-        setTextColor(color)
+    /**
+     * A pill's text. Owner 2026-09-10: pill TEXT takes the caption's colour (`materialColorOnSurface`)
+     * so the words read as labels, while the ICONS keep the themed accent (`materialColorPrimary`) --
+     * the change is text-only, so this no longer takes a colour.
+     */
+    private fun pillLabel(ctx: Context): TextView = TextView(ctx).apply {
+        setTextColor(ContextCompat.getColor(ctx, R.color.materialColorOnSurface))
         textSize = 15f
         gravity = Gravity.CENTER
         minWidth = dpOf(ctx, 104f)
@@ -558,7 +563,7 @@ object AresEditCarousel {
         val tonal = color(R.color.materialColorPrimary)
         val onTonal = color(R.color.materialColorOnPrimary)
 
-        val label = pillLabel(ctx, tonal)
+        val label = pillLabel(ctx)
         lateinit var minusBtn: ImageView
         lateinit var plusBtn: ImageView
 
@@ -649,7 +654,7 @@ object AresEditCarousel {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
         // Hug the text (drop pillLabel's 104dp min-width) so two labelled pills fit on one page.
-        val label = pillLabel(ctx, tonal).apply {
+        val label = pillLabel(ctx).apply {
             text = ctx.getString(labelRes)
             minWidth = 0
         }
@@ -707,7 +712,7 @@ object AresEditCarousel {
         val prefs = PreferenceManager2.getInstance(ctx)
         var enabled = prefs.aresIconTintEnabled.firstBlocking()
 
-        val label = pillLabel(ctx, tonal).apply { text = "Themed icons" }
+        val label = pillLabel(ctx).apply { text = "Themed icons" }
         lateinit var toggleSwitch: Switch
         // Guards programmatic toggle updates so syncing the switch to `enabled` on a page refresh
         // does not re-fire the checked listener.
