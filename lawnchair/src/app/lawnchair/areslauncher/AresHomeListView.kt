@@ -431,7 +431,12 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             limitStretched = false
             limitHitX = false
             limitHitY = false
-            Log.d(TAG, "limit stretch declined: no holder for id=${info.id}")
+            // Nightly 2026-09-13 F8: name WHICH of the two causes it was. "No holder at all" is the
+            // rebind window; "a holder with an empty container" is a laid-out row whose widget view
+            // has not been added yet, which is the more interesting one and was indistinguishable
+            // when both printed the same line.
+            val why = if (container == null) "no holder" else "holder has no child"
+            Log.d(TAG, "limit stretch declined: $why for id=${info.id}")
             return
         }
         if (limitStretchView === v) {
