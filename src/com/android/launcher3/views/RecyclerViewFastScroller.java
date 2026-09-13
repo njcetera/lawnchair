@@ -379,7 +379,9 @@ public class RecyclerViewFastScroller extends View {
                 mAresDownOnThumb = false;
                 if (isNearThumb(x, y)) {
                     mTouchOffsetY = mDownY - mThumbOffsetY;
-                    mAresDownOnThumb = !aresStockGrabGate();
+                    // Nightly 2026-09-11 F4: scoped to the Ares app list (both postures), like the
+                    // tolerance and the exclusion; the widget picker and the Taskbar sheet keep stock.
+                    mAresDownOnThumb = mIsAresAppList && !aresStockGrabGate();
                 }
                 // AresLauncher: the DECLINE side needs a log as much as the grab does (owner
                 // 2026-09-10, "I'm having issues grabbing the quick bar": three grabs were logged
@@ -413,11 +415,21 @@ public class RecyclerViewFastScroller extends View {
                         // its hands off (see calcTouchOffsetAndPrepToFastScroll) -- PagedView
                         // intercepts on sideways travel past a slop with no notion of dominance,
                         // so a thumb drag with a little drift was being torn away mid-scrub.
-                        if (absDeltaX > absDeltaY && absDeltaX > mConfig.getScaledTouchSlop()) {
+                        // Nightly 2026-09-11 F1: decide only once EITHER axis has passed touch slop.
+                        // The first cut grabbed on any first sample with dy >= dx > 0 -- a (1,1)
+                        // jitter -- and the disallow-intercept then made that grab irrevocable, so
+                        // the owner's sideways page swipe could still be locked out by its first
+                        // sub-slop sample. Under slop nothing is decided; the anchor is the DOWN
+                        // either way, so waiting costs nothing visible (a flick's first MOVE is
+                        // dy=78, far past slop).
+                        int slop = mConfig.getScaledTouchSlop();
+                        if (absDeltaX <= slop && absDeltaY <= slop) {
+                            // undecided: wait for the next MOVE
+                        } else if (absDeltaX > absDeltaY) {
                             mIgnoreDragGesture = true;
                             Log.d(TAG, "fastscroll yield: sideways from thumb dx=" + (x - mDownX)
                                     + " dy=" + (y - mDownY));
-                        } else if (absDeltaY > 0 && absDeltaY >= absDeltaX) {
+                        } else {
                             // Anchor at the DOWN, not at this MOVE: with lastY == downY the touch
                             // offset stays the grab point inside the thumb, and the update below
                             // moves the thumb to the finger. Anchoring at the MOVE (stock) would
@@ -485,7 +497,7 @@ public class RecyclerViewFastScroller extends View {
         // a slop with no notion of axis dominance -- a thumb drag with 26-41 px of drift was being
         // CANCELled mid-scrub (Pixel, 2026-09-10 20:28). The flag is cleared by the framework at
         // the next DOWN. Gated on the same sysprop as the grab rule so the control arm is stock.
-        if (!aresStockGrabGate() && getParent() != null) {
+        if (mIsAresAppList && !aresStockGrabGate() && getParent() != null) {
             getParent().requestDisallowInterceptTouchEvent(true);
         }
     }
