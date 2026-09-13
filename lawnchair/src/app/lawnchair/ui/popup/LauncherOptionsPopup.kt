@@ -85,12 +85,19 @@ object LauncherOptionsPopup {
                 LauncherEvent.IGNORE,
                 onStartSystemSettings,
             ),
+            // AresLauncher (owner 2026-09-12): "Customize" enters the ARES edit mode, not the stock
+            // one. `onStartEditMode` goes to LauncherState.EDIT_MODE (Launcher3's home gardening),
+            // which is not the mode this fork actually shows -- that is
+            // AresHomeListView.enterEditMode(), the same call the item long-press raises, and the
+            // one the edit carousel hangs off. Posted so the popup's close animation runs first.
+            // enterEditMode()'s mid-gesture guard is safe from a tap: enteredEditModeDuringGesture
+            // is cleared at the next ACTION_DOWN before anything reads it.
             "edit_mode" to OptionItem(
                 launcher,
-                R.string.edit_home_screen,
+                R.string.ares_customize_home,
                 R.drawable.enter_home_gardening_icon,
                 LauncherEvent.LAUNCHER_SETTINGS_BUTTON_TAP_OR_LONGPRESS,
-                onStartEditMode,
+                ::enterAresEditMode,
             ),
             "all_apps" to OptionItem(
                 launcher,
@@ -137,7 +144,22 @@ object LauncherOptionsPopup {
         )
 
         val options = ArrayList<OptionItem>()
-        optionOrder
+        // AresLauncher (owner 2026-09-12): "Apps list" becomes "Customize", IN PLACE. The owner saw
+        // an "App List" entry in the empty-space long-press menu and called it a problem -- the pane
+        // is one swipe away and is a permanent panel unfolded, so a menu entry that jumps to it is a
+        // wrong turn out of a home-screen menu. The Ares edit mode is what belongs there, and this
+        // menu never offered it (DEFAULT_ORDER ships edit_mode disabled).
+        //
+        // Substituting at the all_apps SLOT rather than filtering one out and enabling the other
+        // does two things at once: the new entry inherits the position the owner already sees it in
+        // (last, under Widgets), and it is force-enabled regardless of what the stored
+        // launcherPopupOrder says -- the owner's device has a persisted order in which edit_mode is
+        // disabled, and restoreMissingPopupOptions only ever ADDS missing identifiers, so editing
+        // DEFAULT_ORDER alone would have changed nothing on their phone.
+        val aresOrder = optionOrder
+            .filter { it.identifier != "edit_mode" }
+            .map { if (it.identifier == "all_apps") LauncherOptionPopupItem("edit_mode", true) else it }
+        aresOrder
             .filter {
                 (it.isEnabled && it.identifier != "carousel")
             }
@@ -147,6 +169,9 @@ object LauncherOptionsPopup {
             // both the carousel and default menu paths funnel through) so it is hidden regardless of
             // what the stored launcherPopupOrder preference says.
             .filter { it.identifier != "home_settings" }
+            // Belt and braces for the substitution above: an "all_apps" identifier must never reach
+            // the menu, whatever a future stored order contains.
+            .filter { it.identifier != "all_apps" }
             .filter {
                 if (lockHomeScreen) {
                     it.identifier != "edit_mode" && it.identifier != "widgets"
@@ -159,6 +184,29 @@ object LauncherOptionsPopup {
             .forEach { options.add(it) }
 
         return options
+    }
+
+    /**
+     * Enters the Ares edit mode from the empty-space long-press menu (owner 2026-09-12).
+     *
+     * Deliberately NOT `OptionsPopupView.enterHomeGardening`, which goes to
+     * `LauncherState.EDIT_MODE` -- Launcher3's own home-gardening state, which this fork does not
+     * render. The mode the owner means is `AresHomeListView.enterEditMode()`: the badges, the
+     * chevrons and the edit carousel, the same state an item long-press raises.
+     *
+     * Posted rather than called inline so the popup's close animation is already under way -- the
+     * click handler returning true is what triggers `close(true)`, and edit mode brings the whole
+     * grid down to EDIT_MODE_SCALE, which reads badly underneath a menu that is still on screen.
+     *
+     * Returns true unconditionally so the popup always closes: a false return leaves the menu up
+     * with no feedback, and the only way this can no-op is a home list that is not bound yet, in
+     * which case leaving the menu open helps nobody.
+     */
+    private fun enterAresEditMode(v: View): Boolean {
+        val launcher = Launcher.getLauncher(v.context)
+        val grid = launcher.workspace?.aresHomeList
+        grid?.post { grid.enterEditMode() }
+        return true
     }
 
     private fun setAsDefaultHomePage(v: View): Boolean {
@@ -187,8 +235,10 @@ object LauncherOptionsPopup {
                 icon = R.drawable.ic_setting,
             )
 
+            // Same label the menu itself uses, so the settings reorder screen names it the way the
+            // owner sees it (owner 2026-09-12).
             "edit_mode" -> LauncherOptionMetadata(
-                label = R.string.edit_home_screen,
+                label = R.string.ares_customize_home,
                 icon = R.drawable.enter_home_gardening_icon,
             )
 

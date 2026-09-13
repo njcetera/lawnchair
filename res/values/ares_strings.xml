@@ -66,4 +66,11 @@
          as the "Widgets" button in the empty-space long-press menu; labelled for the action it does. -->
     <string name="ares_add_widget_pill">Add Widget</string>
 
+    <!-- Empty-space long-press menu entry that enters the Ares edit mode (owner 2026-09-12). It
+         replaces the stock "Apps list" entry, which opened the app-list pane: a surface the owner
+         already reaches by swiping, and which reads as a mis-step from a home-screen menu. Named for
+         what the mode offers (icon packs, columns, icon shape, theming) rather than for "editing".
+         The owner chose "Customize" over "Edit home" and "Edit layout". -->
+    <string name="ares_customize_home">Customize</string>
+
 </resources>
