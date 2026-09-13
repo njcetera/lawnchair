@@ -370,10 +370,15 @@ public class FloatingHeaderView extends LinearLayout implements
         // debug.ares.rvHeaderClip 1` restores the stock clip from the same bytes (the smoke
         // assertion `pane-host-unclipped` is falsified with it), logged so a stuck control shows.
         boolean stockRvClip = "1".equals(android.os.SystemProperties.get("debug.ares.rvHeaderClip", "0"));
+        // Nightly 2026-09-11 F3: this header is shared with the Taskbar's all-apps sheet (a non-Launcher
+        // host whose list starts below a rounded sheet top), so the un-clip is scoped to the two Ares
+        // lists; every other host keeps stock.
+        boolean aresList = app.lawnchair.areslauncher.AresAllApps.isAresAppListPane(
+                ActivityContext.lookupContext(getContext()));
         if (stockRvClip) {
             android.util.Log.w("AresAttach", "list clipped at the header top padding (debug.ares.rvHeaderClip=1): clipTop=" + clipTop);
         }
-        mRVClip.top = stockRvClip && (mTabsHidden || mFloatingRowsCollapsed) ? clipTop : 0;
+        mRVClip.top = (stockRvClip || !aresList) && (mTabsHidden || mFloatingRowsCollapsed) ? clipTop : 0;
         mHeaderClip.top = clipTop;
         // clipping on a draw might cause additional redraw
         setClipBounds(mHeaderClip);
