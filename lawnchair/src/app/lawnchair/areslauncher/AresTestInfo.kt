@@ -459,8 +459,9 @@ object AresTestInfo {
     const val REQUEST_FASTSCROLL = "ares-fastscroll"
 
     /**
-     * The workspace's paging position: `page=` (current), `next=` (the page a scroll is heading to,
-     * -1 when settled), `scrollX=`, `pages=` and `panels=`. Unfolded the home grid and the app list
+     * The workspace's paging position: `page=` (current), `next=` (the page a scroll is heading to;
+     * equals `page=` when settled — `PagedView.getNextPage()` never returns -1), `scrollX=`,
+     * `pages=` and `panels=`. Unfolded the home grid and the app list
      * are panels 0 and 1 of page 0, so a horizontal page swipe is visible here as `page` changing
      * (row 171: a fast-scroll grab was fighting that swipe for the same touch).
      */
