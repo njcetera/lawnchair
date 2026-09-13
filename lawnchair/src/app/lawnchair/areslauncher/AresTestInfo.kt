@@ -452,6 +452,14 @@ object AresTestInfo {
      * fast scroll is engaged right now and `grabs=` how many have engaged in this process.
      * `stockGate=1` means `debug.ares.stockFastScrollGrab` has restored the stock engagement rule.
      *
+     * `ares=1` means this scroller is the Ares app list's, i.e. the Ares fast-scroll behaviours are
+     * in play on it at all. It is a separate question from `stockGate=`, and the two fail in
+     * opposite directions: `stockGate=1 ares=1` is the deliberate control arm, while `ares=0` means
+     * the grab rule, the disallow-intercept, the 24 dp tolerance and the whole-track back exclusion
+     * are ALL off at once (rows 169, 170, 171 returning together) with `stockGate=` still reading 0.
+     * Any assertion whose pass condition includes "no grab" must require `ares=1` first, or it
+     * passes most convincingly exactly when everything is broken (nightly 2026-09-13 F1).
+     *
      * Exists for `fastscroll-flick` in ares-smoke.ps1, which swipes the thumb at the owner's speed
      * and asserts the list actually moved -- the coordinates come from here so the check follows
      * the thumb rather than a hard-coded pixel (ledger row 169).
@@ -1034,7 +1042,13 @@ object AresTestInfo {
             "track=$trackTop,${trackTop + rv.scrollbarTrackHeight} barW=${bar.width} excl=$excl " +
             "offset=${rv.computeVerticalScrollOffset()} range=${rv.computeVerticalScrollRange()} " +
             "extent=${rv.computeVerticalScrollExtent()} dragging=${bar.isDraggingThumb} " +
-            "grabs=${com.android.launcher3.views.RecyclerViewFastScroller.getAresGrabCount()} stockGate=$stockGate"
+            "grabs=${com.android.launcher3.views.RecyclerViewFastScroller.getAresGrabCount()} " +
+            // Nightly 2026-09-13 F1: `ares=` is the host gate itself. Without it a harness cannot
+            // distinguish "the Ares grab rule declined this gesture" from "the Ares rule was never
+            // in play on this scroller" -- and the two yield assertions, which both require
+            // grabs == 0, are satisfied perfectly by the second. `stockGate=` does not cover it:
+            // that is the sysprop control, and it reads 0 in exactly the bad case.
+            "ares=${if (bar.isAresAppList) 1 else 0} stockGate=$stockGate"
     }
 
     /** See [REQUEST_PANE_ALIGN]. */

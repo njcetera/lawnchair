@@ -387,9 +387,18 @@ public class RecyclerViewFastScroller extends View {
                 // 2026-09-10, "I'm having issues grabbing the quick bar": three grabs were logged
                 // and nothing said what the other attempts did). One line per down that reached
                 // this scroller, with where it landed relative to the thumb.
+                // Nightly 2026-09-13 F1: `ares=` is mIsAresAppList, and it has to be on this line.
+                // That field became load-bearing for FOUR behaviours on 2026-09-11 (the grab rule and
+                // the disallow-intercept joined the 24 dp tolerance and the whole-track exclusion),
+                // and nothing reported it. If it is ever false at touch time, rows 169, 170 and 171
+                // all silently return at once -- and the smoke cannot tell: `fastscroll-sideways-yields`
+                // and `fastscroll-jitter-then-sideways` both assert `grabs == 0`, which "the Ares path
+                // is entirely off" satisfies perfectly. `stockGate=` would read 0 and point at the
+                // wrong control. This is the CLAUDE.md decline-branch rule applied to the gate itself.
                 Log.d(TAG, "fastscroll down: (" + x + "," + y + ") thumbY=" + mThumbOffsetY + ".."
                         + (mThumbOffsetY + mThumbHeight) + " w=" + getWidth()
-                        + " onThumb=" + isNearThumb(x, y) + " stockGate=" + aresStockGrabGate());
+                        + " onThumb=" + isNearThumb(x, y) + " ares=" + mIsAresAppList
+                        + " stockGate=" + aresStockGrabGate());
                 break;
             case MotionEvent.ACTION_MOVE:
                 boolean isScrollingDown = y > mLastY;
@@ -720,7 +729,25 @@ public class RecyclerViewFastScroller extends View {
             mAresThumbInset = Math.round(ARES_THUMB_INSET_DP * density);
             mAresPopupClearance = Math.round(ARES_POPUP_THUMB_CLEARANCE_DP * density);
             setTrackWidth(mMinWidth);
+        } else {
+            // Nightly 2026-09-13 F11(a): an explicit else, because this flag now gates FOUR
+            // behaviours (grab rule, disallow-intercept, thumb tolerance, back exclusion) instead of
+            // the two it started with. Not reachable today -- each surface owns its own scroller and
+            // the all-apps container always binds ALL_APPS_SCROLLER -- but a re-bind to a different
+            // location would otherwise leave it latched true, which is the failure that is hardest
+            // to see from outside.
+            mIsAresAppList = false;
         }
+    }
+
+    /**
+     * Whether this scroller is the Ares app list's, i.e. whether the Ares fast-scroll behaviours are
+     * live on it at all. Read by the {@code ares-fastscroll} channel so the harness can tell "the
+     * rule declined" from "the rule was never in play" — see the nightly 2026-09-13 F1 note on the
+     * {@code fastscroll down:} log line.
+     */
+    public boolean isAresAppList() {
+        return mIsAresAppList;
     }
 
     /**
