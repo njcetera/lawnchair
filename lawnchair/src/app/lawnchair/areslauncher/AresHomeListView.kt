@@ -412,8 +412,28 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
      * a resting value, not a mid-flight one.
      */
     private fun beginLimitStretch(info: ItemInfo) {
-        val container = holderContainerOf(info) ?: return
-        val v = container.getChildAt(0) ?: return
+        val container = holderContainerOf(info)
+        val v = container?.getChildAt(0)
+        if (v == null) {
+            // Nightly 2026-09-11 F5: a BEGIN whose holder lookup fails (a resize started between a
+            // rebind and its layout) used to return with the PREVIOUS drag's host view still armed,
+            // so widget A stretched while widget B was resized, with A's stale hit flags muting B's
+            // tick. Settle and drop the old target instead, and say so.
+            limitStretchView?.let { prev ->
+                prev.animate().cancel()
+                prev.scaleX = limitStretchBaseX
+                prev.scaleY = limitStretchBaseY
+                prev.resetPivot()
+            }
+            limitContainer?.clipChildren = limitContainerClip
+            limitStretchView = null
+            limitContainer = null
+            limitStretched = false
+            limitHitX = false
+            limitHitY = false
+            Log.d(TAG, "limit stretch declined: no holder for id=${info.id}")
+            return
+        }
         if (limitStretchView === v) {
             v.animate().cancel()
             v.scaleX = limitStretchBaseX
