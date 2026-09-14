@@ -431,12 +431,24 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             limitStretched = false
             limitHitX = false
             limitHitY = false
-            // Nightly 2026-09-13 F8: name WHICH of the two causes it was. "No holder at all" is the
-            // rebind window; "a holder with an empty container" is a laid-out row whose widget view
-            // has not been added yet, which is the more interesting one and was indistinguishable
-            // when both printed the same line.
-            val why = if (container == null) "no holder" else "holder has no child"
-            Log.d(TAG, "limit stretch declined: $why for id=${info.id}")
+            // Nightly 2026-09-14 F5: print the DISCRIMINATORS, not a prose label. The 09-13 version
+            // claimed two causes and there are at least four, one of them mislabelled in a way that
+            // matters:
+            //   pos=-1            the item is not in the model at all (indexOf missed)
+            //   pos>=0, container=false   in the model, but no attached holder (recycled, mid-layout,
+            //                     mDataSetHasChangedAfterLayout) -- the rebind window
+            //   childCount=0      a real holder whose widget view has not been added yet
+            //   childCount>0      getChildAt(0) was NULL with children present -- the row-76
+            //                     detach-walk corruption signature, the thing `ares-view-integrity`
+            //                     exists to find. The old line called this "holder has no child",
+            //                     i.e. filed a view tree one index-walk from a process kill as a
+            //                     benign timing race.
+            val pos = aresAdapter.indexOf(info)
+            Log.d(
+                TAG,
+                "limit stretch declined: id=${info.id} pos=$pos container=${container != null} " +
+                    "childCount=${container?.childCount ?: -1}",
+            )
             return
         }
         if (limitStretchView === v) {
