@@ -397,8 +397,19 @@ public class RecyclerViewFastScroller extends View {
                 // wrong control. This is the CLAUDE.md decline-branch rule applied to the gate itself.
                 Log.d(TAG, "fastscroll down: (" + x + "," + y + ") thumbY=" + mThumbOffsetY + ".."
                         + (mThumbOffsetY + mThumbHeight) + " w=" + getWidth()
-                        + " onThumb=" + isNearThumb(x, y) + " ares=" + mIsAresAppList
-                        + " stockGate=" + aresStockGrabGate());
+                        // Nightly 2026-09-14 F4: `ares=` and `stockGate=` are 1/0 here, matching how
+                        // the `ares-fastscroll` channel spells them -- one name, one encoding. Both
+                        // exist in BOTH instruments, and `Get-FsField`'s regex is `name=(-?\d+)`, so
+                        // a boolean spelling makes it answer -1 = "field missing" = SKIP. Nothing
+                        // greps them from logcat today; the point is that the obvious next grep
+                        // (`fastscroll down: .*ares=1`, extending the onThumb idiom below) would
+                        // silently never match and read exactly like a gesture that missed the thumb
+                        // -- the `D/LoaderTask` trap, a format mismatch returning a plausible zero.
+                        // `onThumb=` stays true/false deliberately: it has no channel counterpart,
+                        // so there is no mismatch to fix, and the smoke greps `onThumb=true` today.
+                        + " onThumb=" + isNearThumb(x, y)
+                        + " ares=" + (mIsAresAppList ? 1 : 0)
+                        + " stockGate=" + (aresStockGrabGate() ? 1 : 0));
                 break;
             case MotionEvent.ACTION_MOVE:
                 boolean isScrollingDown = y > mLastY;
@@ -721,7 +732,17 @@ public class RecyclerViewFastScroller extends View {
         // bindFastScrollbar. Gated on BOTH the location and the host, so the widget picker (a
         // Launcher too) and the Taskbar's all-apps sheet (ALL_APPS_SCROLLER, but hosted by
         // TaskbarOverlayContext) both keep the stock metrics. See ARES_TRACK_MIN_WIDTH_DP.
-        if (location == ALL_APPS_SCROLLER && AresAllApps.isAresAppListPane(mActivityContext)) {
+        // Nightly 2026-09-14 F1: a control arm for the GATE itself, on the same bytes. Every other
+        // Ares fast-scroll behaviour already has one (`stockFastScrollGrab`, `stockThumbExclusion`),
+        // but the gate that switches all four off at once had none -- so the harness precondition
+        // written for `ares=0` could never be made to fire, and "we proved it works" rested on an
+        // arm that removed the INSTRUMENT (the channel field) rather than the GATE. Two builds
+        // agreeing about a field neither of them reports is not a control (CLAUDE.md: two arms that
+        // both did nothing agree perfectly and mean nothing).
+        boolean stockHostGate = "1".equals(
+                android.os.SystemProperties.get("debug.ares.stockHostGate", "0"));
+        if (location == ALL_APPS_SCROLLER && !stockHostGate
+                && AresAllApps.isAresAppListPane(mActivityContext)) {
             float density = getResources().getDisplayMetrics().density;
             mIsAresAppList = true;
             mMinWidth = Math.round(ARES_TRACK_MIN_WIDTH_DP * density);
@@ -730,13 +751,27 @@ public class RecyclerViewFastScroller extends View {
             mAresPopupClearance = Math.round(ARES_POPUP_THUMB_CLEARANCE_DP * density);
             setTrackWidth(mMinWidth);
         } else {
-            // Nightly 2026-09-13 F11(a): an explicit else, because this flag now gates FOUR
-            // behaviours (grab rule, disallow-intercept, thumb tolerance, back exclusion) instead of
-            // the two it started with. Not reachable today -- each surface owns its own scroller and
-            // the all-apps container always binds ALL_APPS_SCROLLER -- but a re-bind to a different
-            // location would otherwise leave it latched true, which is the failure that is hardest
-            // to see from outside.
+            // Nightly 2026-09-13 F11(a), corrected by 2026-09-14 F3: a FULL reset, not just the
+            // boolean. The Ares branch writes six things; clearing only `mIsAresAppList` would leave
+            // the scroller 10/14 dp wide, drawn 8 dp inboard, with a 48 dp popup clearance -- visibly
+            // the Ares bar -- while all four gated behaviours ran stock and `ares=` reported 0. That
+            // is worse than the latch it replaced: the old failure at least kept geometry and
+            // behaviour agreeing, where this one puts the instrument in direct contradiction with
+            // what is on screen. Restore the stock metrics from resources, the same values the
+            // constructor uses.
+            if (mIsAresAppList) {
+                // Genuinely impossible today (one caller, and no instance is ever bound to two
+                // locations), so if it is ever seen it is a real structural change, not a race --
+                // hence ERROR, and hence logged rather than silently handled.
+                Log.e(TAG, "fastscroll: Ares scroller re-bound to " + location + " -- resetting");
+            }
             mIsAresAppList = false;
+            Resources res = getResources();
+            mMinWidth = res.getDimensionPixelSize(R.dimen.fastscroll_track_min_width);
+            mMaxWidth = res.getDimensionPixelSize(R.dimen.fastscroll_track_max_width);
+            mAresThumbInset = 0;
+            mAresPopupClearance = 0;
+            setTrackWidth(mMinWidth);
         }
     }
 
