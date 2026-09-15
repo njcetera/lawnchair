@@ -444,11 +444,26 @@ class AresHomeListView(context: Context, val launcher: Launcher) : RecyclerView(
             //                     i.e. filed a view tree one index-walk from a process kill as a
             //                     benign timing race.
             val pos = aresAdapter.indexOf(info)
-            Log.d(
-                TAG,
-                "limit stretch declined: id=${info.id} pos=$pos container=${container != null} " +
-                    "childCount=${container?.childCount ?: -1}",
-            )
+            val childCount = container?.childCount ?: -1
+            // Nightly 2026-09-15 F5: `holder=` splits the three ways holderContainerOf returns null.
+            // `pos>=0 container=false` was being attributed wholesale to "the rebind window", but a
+            // non-null holder that is not an AresHomeAdapter.ViewHolder (the `as?` failing), or one
+            // whose container is null, are STRUCTURAL, not timing -- different cause, different fix.
+            val holder = if (pos >= 0) findViewHolderForAdapterPosition(pos) else null
+            val detail = "limit stretch declined: id=${info.id} pos=$pos holder=${holder != null} " +
+                "container=${container != null} childCount=$childCount"
+            // Nightly 2026-09-15 F4: the corruption case is NOT a debug line. childCount > 0 with a
+            // null getChildAt(0) is the row-76 detach-walk signature -- a ViewGroup whose child array
+            // has a hole -- and row 76 killed the launcher on 4-5 of every 6 dark-mode switches. At
+            // Log.d it sits in the launcher's own high-volume tag traffic, and on the Pixel logd
+            // prunes the launcher's burst FIRST, so the one case worth catching is the one most
+            // likely to be gone before anyone looks. ERROR, and it names the channel to run next.
+            if (childCount > 0) {
+                Log.e(TAG, "$detail -- getChildAt(0) NULL with children present: row-76 view-tree " +
+                    "corruption signature, run ares-view-integrity NOW")
+            } else {
+                Log.d(TAG, detail)
+            }
             return
         }
         if (limitStretchView === v) {
