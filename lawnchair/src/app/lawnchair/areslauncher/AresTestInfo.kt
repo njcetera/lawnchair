@@ -1048,7 +1048,14 @@ object AresTestInfo {
             // in play on this scroller" -- and the two yield assertions, which both require
             // grabs == 0, are satisfied perfectly by the second. `stockGate=` does not cover it:
             // that is the sysprop control, and it reads 0 in exactly the bad case.
-            "ares=${if (bar.isAresAppList) 1 else 0} stockGate=$stockGate"
+            // Nightly 2026-09-15 F1: `hostGate=` is the control arm for `ares=` itself, and it has to
+            // be here or a stuck arm is indistinguishable from row 175's real defect. See the pair
+            // table on RecyclerViewFastScroller.aresStockHostGate(): only `hostGate=0 ares=0` is a
+            // regression, `hostGate=1 ares=0` is a falsification run behaving correctly, and
+            // `hostGate=1 ares=1` means the setprop lost its race with the force-stop and the run
+            // measured nothing at all.
+            "ares=${if (bar.isAresAppList) 1 else 0} stockGate=$stockGate " +
+            "hostGate=${if (com.android.launcher3.views.RecyclerViewFastScroller.aresStockHostGate()) 1 else 0}"
     }
 
     /** See [REQUEST_PANE_ALIGN]. */

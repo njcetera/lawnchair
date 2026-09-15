@@ -234,6 +234,33 @@ public class RecyclerViewFastScroller extends View {
         return "1".equals(android.os.SystemProperties.get("debug.ares.stockFastScrollGrab", "0"));
     }
 
+    /**
+     * The host-gate control arm: {@code debug.ares.stockHostGate=1} forces {@link #mIsAresAppList}
+     * false, which is the only way to produce {@code ares=0} deliberately.
+     *
+     * <p>Public and reported by the {@code ares-fastscroll} channel because of nightly 2026-09-15 F1:
+     * an arm that no instrument reports is indistinguishable from the defect it exists to falsify.
+     * A stuck arm makes the smoke report five FAILs naming rows 169/170/171 as regressed, and an arm
+     * that lost the race with {@code am force-stop} (the CLAUDE.md setprop trap) makes a falsification
+     * run report a clean 22/22 while nothing was ever disabled.
+     *
+     * <p>This returns the prop as it reads <em>now</em>; the gate this scroller actually latched at
+     * bind time is {@link #isAresAppList()}. Neither alone is sufficient — it is the PAIR that
+     * discriminates, and that is why the channel reports both:
+     * <ul>
+     *   <li>{@code hostGate=0 ares=1} — normal.
+     *   <li>{@code hostGate=1 ares=0} — the control arm is engaged; a FAIL here is the expected
+     *       result of a falsification run, not a regression.
+     *   <li>{@code hostGate=0 ares=0} — no arm set and the gate is off anyway: a REAL regression
+     *       (row 175), and the only combination that should ever alarm anyone.
+     *   <li>{@code hostGate=1 ares=1} — the setprop lost its race with the force-stop. The arm did
+     *       not engage, so whatever the run reports measured nothing. Report SKIP, never a result.
+     * </ul>
+     */
+    public static boolean aresStockHostGate() {
+        return "1".equals(android.os.SystemProperties.get("debug.ares.stockHostGate", "0"));
+    }
+
     public RecyclerViewFastScroller(Context context) {
         this(context, null);
     }
@@ -409,7 +436,11 @@ public class RecyclerViewFastScroller extends View {
                         // so there is no mismatch to fix, and the smoke greps `onThumb=true` today.
                         + " onThumb=" + isNearThumb(x, y)
                         + " ares=" + (mIsAresAppList ? 1 : 0)
-                        + " stockGate=" + (aresStockGrabGate() ? 1 : 0));
+                        + " stockGate=" + (aresStockGrabGate() ? 1 : 0)
+                        // Nightly 2026-09-15 F1: the host-gate arm, beside the gate it controls.
+                        // `hostGate=1 ares=1` is the setprop-lost-the-race case and means the line
+                        // below it measured nothing.
+                        + " hostGate=" + (aresStockHostGate() ? 1 : 0));
                 break;
             case MotionEvent.ACTION_MOVE:
                 boolean isScrollingDown = y > mLastY;
@@ -739,8 +770,7 @@ public class RecyclerViewFastScroller extends View {
         // arm that removed the INSTRUMENT (the channel field) rather than the GATE. Two builds
         // agreeing about a field neither of them reports is not a control (CLAUDE.md: two arms that
         // both did nothing agree perfectly and mean nothing).
-        boolean stockHostGate = "1".equals(
-                android.os.SystemProperties.get("debug.ares.stockHostGate", "0"));
+        boolean stockHostGate = aresStockHostGate();
         if (location == ALL_APPS_SCROLLER && !stockHostGate
                 && AresAllApps.isAresAppListPane(mActivityContext)) {
             float density = getResources().getDisplayMetrics().density;
@@ -760,10 +790,20 @@ public class RecyclerViewFastScroller extends View {
             // what is on screen. Restore the stock metrics from resources, the same values the
             // constructor uses.
             if (mIsAresAppList) {
-                // Genuinely impossible today (one caller, and no instance is ever bound to two
-                // locations), so if it is ever seen it is a real structural change, not a race --
-                // hence ERROR, and hence logged rather than silently handled.
-                Log.e(TAG, "fastscroll: Ares scroller re-bound to " + location + " -- resetting");
+                // Nightly 2026-09-15 F3: the 09-14 comment said "genuinely impossible today". It was
+                // wrong the moment it was written, and by the same commit:
+                // ActivityAllAppsContainerView.onActivePageChanged re-binds THIS scroller with
+                // ALL_APPS_SCROLLER on every all-apps page change (entering/leaving search, the work
+                // tab), so `debug.ares.stockHostGate 1` set on a RUNNING launcher -- without the
+                // force-stop, an easy slip -- takes this branch on the next search-pill use. So it is
+                // reachable, but only via the control arm; without it the location term still makes
+                // it impossible. Print the discriminators rather than a bare location: the old
+                // message said "re-bound to ALL_APPS_SCROLLER" on a scroller already bound to
+                // ALL_APPS_SCROLLER, which named no cause at all.
+                Log.e(TAG, "fastscroll: Ares scroller reset -- location=" + location
+                        + " stockHostGate=" + (stockHostGate ? 1 : 0)
+                        + " isAresAppListPane="
+                        + (AresAllApps.isAresAppListPane(mActivityContext) ? 1 : 0));
             }
             mIsAresAppList = false;
             Resources res = getResources();
